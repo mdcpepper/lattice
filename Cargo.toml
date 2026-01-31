@@ -1,0 +1,43 @@
+[package]
+name = "dante"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[lints.rust]
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+missing_docs = "warn"
+async_fn_in_trait = "allow"
+
+[lints.rustdoc]
+broken_intra_doc_links = "warn"
+missing_crate_level_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "deny", priority = -1 }
+unwrap_used = "forbid"
+expect_used = "forbid"
+panic = "deny"
+todo = "warn"
+must_use_candidate = "allow"
+allow_attributes_without_reason = "deny"
+allow_attributes = "deny"
+dbg_macro = "warn"
+exit = "deny"
+indexing_slicing = "deny"
+infinite_loop = "warn"
+let_underscore_must_use = "deny"
+map_err_ignore = "deny"
+missing_assert_message = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+redundant_type_annotations = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+return_and_then = "warn"
+string_slice = "warn"
+try_err = "deny"
+undocumented_unsafe_blocks = "deny"
+unimplemented = "deny"
+unneeded_field_pattern = "warn"
