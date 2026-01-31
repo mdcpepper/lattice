@@ -28,6 +28,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn new_price() {
+        let price = Price::new(1000);
+
+        assert_eq!(price.value, 1000);
+    }
+
+    #[test]
     fn price_derefs_to_u64() {
         let price = Price { value: 100 };
 
