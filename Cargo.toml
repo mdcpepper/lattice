@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+percentage = "0.1.0"
+rust_decimal = "1.40.0"
+rusty-money = "0.5.0"
+testresult = "0.4.1"
+thiserror = "2.0.18"
 
 [lints.rust]
 missing_debug_implementations = "warn"
