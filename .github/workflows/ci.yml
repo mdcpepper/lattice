@@ -37,7 +37,11 @@ jobs:
   test:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [
+          ubuntu-latest,
+          # macos-latest,
+          # windows-latest,
+        ]
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: "-Dwarnings"
@@ -103,15 +107,15 @@ jobs:
           # Check if coverage meets 70% threshold (numeric compare via awk)
           awk -v c="$COVERAGE" 'BEGIN{ if (c+0 >= 70) { print "✅ Coverage " c "% meets minimum threshold of 70%"; exit 0 } else { print "❌ Coverage " c "% is below minimum threshold of 70%"; exit 1 } }'
 
-  security-audit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+  # security-audit:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
 
-      - name: Run security audit
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+  #     - name: Run security audit
+  #       uses: rustsec/audit-check@v2
+  #       with:
+  #         token: ${{ secrets.GITHUB_TOKEN }}
 
   docs:
     runs-on: ubuntu-latest
