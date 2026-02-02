@@ -15,6 +15,10 @@ pub enum BasketError {
     /// An item's currency differs from the basket currency (index, item currency, basket currency).
     #[error("Item {0} has currency {1}, but basket has currency {2}")]
     CurrencyMismatch(usize, &'static str, &'static str),
+
+    /// An item was not found in the basket.
+    #[error("Item {0} not found")]
+    ItemNotFound(usize),
 }
 
 /// Basket
@@ -72,6 +76,15 @@ impl<'a, T: TagCollection> Basket<'a, T> {
         }
 
         total_price(&self.items)
+    }
+
+    /// Get an item from the basket.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `BasketError::ItemNotFound` if the item is not found.
+    pub fn get_item(&'a self, item: usize) -> Result<&'a Item<'a, T>, BasketError> {
+        self.items.get(item).ok_or(BasketError::ItemNotFound(item))
     }
 
     /// Get the number of items in the basket.

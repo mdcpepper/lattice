@@ -6,4 +6,6 @@ pub mod basket;
 pub mod discounts;
 pub mod items;
 pub mod pricing;
+pub mod receipt;
+pub mod solvers;
 pub mod tags;
