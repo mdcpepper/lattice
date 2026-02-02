@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-percentage = "0.1.0"
+decimal-percentage = "0.1.4"
 rust_decimal = "1.40.0"
 rusty-money = "0.5.0"
 smallvec = "1.15.1"

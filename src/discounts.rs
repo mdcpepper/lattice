@@ -1,14 +1,11 @@
 //! Discounts
 
-use std::fmt;
-
-use percentage::PercentageDecimal;
+use decimal_percentage::Percentage;
 use rust_decimal::{
     Decimal, RoundingStrategy,
     prelude::{FromPrimitive, ToPrimitive},
 };
 use rusty_money::{Money, MoneyError, iso::Currency};
-
 use thiserror::Error;
 
 use crate::{
@@ -38,43 +35,23 @@ pub enum DiscountError {
 }
 
 /// Represents a single, valid discount scenario.
+#[derive(Debug, Copy, Clone)]
 pub enum Discount<'a> {
     /// Apply a percentage discount to the total price of all items.
     ///
     /// Discount every item by this percentage of the total.
-    PercentageDiscountAllItems(PercentageDecimal),
+    PercentageDiscountAllItems(Percentage),
 
     /// Apply a percentage discount to the price of the cheapest item.
     ///
     /// Discount only the cheapest item by this percentage of its price.
-    PercentageDiscountCheapestItem(PercentageDecimal),
+    PercentageDiscountCheapestItem(Percentage),
 
     /// Override the total price of all items with a fixed price.
     PriceOverrideAllItems(Money<'a, Currency>),
 
     /// Override just the price of the cheapest item with a fixed price.
     PriceOverrideCheapestItem(Money<'a, Currency>),
-}
-
-impl fmt::Debug for Discount<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Discount::PercentageDiscountAllItems(p) => f
-                .debug_tuple("PercentageDiscountAllItems")
-                .field(&p.value())
-                .finish(),
-            Discount::PercentageDiscountCheapestItem(p) => f
-                .debug_tuple("PercentageDiscountCheapestItem")
-                .field(&p.value())
-                .finish(),
-            Discount::PriceOverrideAllItems(m) => {
-                f.debug_tuple("PriceOverrideAllItems").field(m).finish()
-            }
-            Discount::PriceOverrideCheapestItem(m) => {
-                f.debug_tuple("PriceOverrideCheapestItem").field(m).finish()
-            }
-        }
-    }
 }
 
 /// Calculates the discounted price for a set of items.
@@ -147,7 +124,7 @@ fn totals_with_cheapest<'a, T: TagCollection>(
 /// Calculate the discount amount on a price for a percentage.
 fn discount_on<'a>(
     price: &Money<'a, Currency>,
-    percent: &PercentageDecimal,
+    percent: &Percentage,
 ) -> Result<Money<'a, Currency>, DiscountError> {
     let discount_minor = percent_of_minor(percent, price.to_minor_units())?;
 
@@ -155,30 +132,25 @@ fn discount_on<'a>(
 }
 
 /// Calculate the discount amount in minor units based on a percentage and a minor unit amount.
-fn percent_of_minor(percent: &PercentageDecimal, minor: i64) -> Result<i64, DiscountError> {
-    let Some(percent) = Decimal::from_f64_retain(percent.value()) else {
-        return Err(DiscountError::PercentConversion);
-    };
+fn percent_of_minor(percent: &Percentage, minor: i64) -> Result<i64, DiscountError> {
+    let percent: Decimal = (*percent) * Decimal::ONE;
 
-    let Some(minor) = Decimal::from_i64(minor) else {
-        unreachable!("always returns `Some` for every `i64`")
-    };
+    let minor = Decimal::from_i64(minor).ok_or(DiscountError::PercentConversion)?;
 
-    let Some(applied) = percent.checked_mul(minor) else {
-        return Err(DiscountError::PercentConversion);
-    };
+    let applied = percent
+        .checked_mul(minor)
+        .ok_or(DiscountError::PercentConversion)?;
 
     let rounded = applied.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero);
-    let Some(rounded) = rounded.to_i64() else {
-        return Err(DiscountError::PercentConversion);
-    };
 
-    Ok(rounded)
+    rounded.to_i64().ok_or(DiscountError::PercentConversion)
 }
 
 #[cfg(test)]
 mod tests {
-    use percentage::{Percentage, PercentageDecimal};
+    use std::convert::TryFrom;
+
+    use decimal_percentage::Percentage;
     use rusty_money::iso::GBP;
     use testresult::TestResult;
 
@@ -217,7 +189,7 @@ mod tests {
     #[test]
     fn calculate_percentage_all_items() -> TestResult {
         let items = test_items();
-        let discount = Discount::PercentageDiscountAllItems(Percentage::from_decimal(0.25));
+        let discount = Discount::PercentageDiscountAllItems(Percentage::from(0.25));
         let discounted_price = calculate_discount(&discount, &items)?;
 
         assert_eq!(discounted_price, Money::from_minor(575, GBP));
@@ -228,7 +200,7 @@ mod tests {
     #[test]
     fn calculate_percentage_cheapest_item() -> TestResult {
         let items = test_items();
-        let discount = Discount::PercentageDiscountCheapestItem(Percentage::from_decimal(0.5));
+        let discount = Discount::PercentageDiscountCheapestItem(Percentage::from(0.5));
         let discounted_price = calculate_discount(&discount, &items)?;
 
         assert_eq!(discounted_price, Money::from_minor(550, GBP));
@@ -245,10 +217,9 @@ mod tests {
         let price_override_cheapest =
             Discount::PriceOverrideCheapestItem(Money::from_minor(50, GBP));
 
-        let percent_all = Discount::PercentageDiscountAllItems(Percentage::from_decimal(0.25));
+        let percent_all = Discount::PercentageDiscountAllItems(Percentage::from(0.25));
 
-        let percent_cheapest =
-            Discount::PercentageDiscountCheapestItem(Percentage::from_decimal(0.25));
+        let percent_cheapest = Discount::PercentageDiscountCheapestItem(Percentage::from(0.25));
 
         assert!(matches!(
             calculate_discount(&price_override_all, &items),
@@ -274,12 +245,12 @@ mod tests {
 
         let all = format!(
             "{:?}",
-            Discount::PercentageDiscountAllItems(Percentage::from_decimal(0.25))
+            Discount::PercentageDiscountAllItems(Percentage::from(0.25))
         );
 
         let cheapest = format!(
             "{:?}",
-            Discount::PercentageDiscountCheapestItem(Percentage::from_decimal(0.25))
+            Discount::PercentageDiscountCheapestItem(Percentage::from(0.25))
         );
 
         let override_all = format!("{:?}", Discount::PriceOverrideAllItems(price));
@@ -292,44 +263,28 @@ mod tests {
     }
 
     #[test]
-    fn percent_of_minor_nan_returns_error() {
-        let percent = Percentage::from_decimal(f64::NAN);
-        let result = percent_of_minor(&percent, 100);
-
-        assert!(matches!(result, Err(DiscountError::PercentConversion)));
-    }
-
-    #[test]
     fn percent_of_minor_overflow_returns_error() {
-        // SAFETY: PercentageDecimal is a single-field wrapper around f64.
-        //         We construct an out-of-range percentage purely to
-        //         exercise overflow handling in tests.
-        let percent = unsafe { std::mem::transmute::<f64, PercentageDecimal>(2.0) };
-
+        let percent = Percentage::from(2.0);
         let result = percent_of_minor(&percent, i64::MAX);
 
         assert!(matches!(result, Err(DiscountError::PercentConversion)));
     }
 
     #[test]
-    fn percent_of_minor_checked_mul_overflow_returns_error() {
-        // SAFETY: PercentageDecimal is a single-field wrapper around f64.
-        //         1e20 is representable as a Decimal, but multiplying by a
-        //         very large minor value should overflow the Decimal range.
-        let percent = unsafe { std::mem::transmute::<f64, PercentageDecimal>(1e20) };
-
+    fn percent_of_minor_checked_mul_overflow_returns_error() -> TestResult {
+        // 1e20 is representable as a Decimal, but multiplying by a very large minor value should
+        // overflow the Decimal range.
+        let percent = Percentage::try_from("100000000000000000000")?;
         let result = percent_of_minor(&percent, i64::MAX);
 
         assert!(matches!(result, Err(DiscountError::PercentConversion)));
+
+        Ok(())
     }
 
     #[test]
     fn percent_of_minor_underflow_returns_error() {
-        // SAFETY: PercentageDecimal is a single-field wrapper around f64.
-        //         We construct an out-of-range percentage purely to
-        //         exercise underflow handling in tests.
-        let percent = unsafe { std::mem::transmute::<f64, PercentageDecimal>(2.0) };
-
+        let percent = Percentage::from(2.0);
         let result = percent_of_minor(&percent, i64::MIN);
 
         assert!(matches!(result, Err(DiscountError::PercentConversion)));
@@ -338,7 +293,7 @@ mod tests {
     #[test]
     fn discount_on_returns_expected_amount() -> TestResult {
         let price = Money::from_minor(200, GBP);
-        let percent = Percentage::from_decimal(0.25);
+        let percent = Percentage::from(0.25);
 
         let discount = discount_on(&price, &percent)?;
 
