@@ -24,3 +24,35 @@ impl<'a> Promotion<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rusty_money::{Money, iso};
+    use testresult::TestResult;
+
+    use crate::{
+        basket::Basket,
+        discounts::Discount,
+        tags::{collection::TagCollection, string::StringTagCollection},
+    };
+
+    use super::{Promotion, simple_discount::SimpleDisount};
+
+    #[test]
+    fn is_applicable_delegates_to_inner_promotion() -> TestResult {
+        // An empty item set should not be considered applicable; this ensures
+        // `Promotion::is_applicable` doesn't accidentally short-circuit to `true`.
+        let basket = Basket::with_items([], iso::GBP)?;
+
+        let inner = SimpleDisount::new(
+            StringTagCollection::empty(),
+            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+        );
+
+        let promo = Promotion::SimpleDiscount(inner);
+
+        assert!(!promo.is_applicable(&basket, &[]));
+
+        Ok(())
+    }
+}
