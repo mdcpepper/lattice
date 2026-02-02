@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::{
     basket::{Basket, BasketError},
+    discounts::DiscountError,
     promotions::Promotion,
 };
 
@@ -31,6 +32,10 @@ pub enum SolverError {
     /// Wrapped money arithmetic or currency mismatch error.
     #[error(transparent)]
     Money(#[from] MoneyError),
+
+    /// Wrapped discount calculation error.
+    #[error(transparent)]
+    Discount(#[from] DiscountError),
 
     /// Wrapped solver resolution error
     #[error(transparent)]

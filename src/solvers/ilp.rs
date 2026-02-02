@@ -44,14 +44,14 @@ impl Solver for ILPSolver {
         // Create problem variables
         let mut pb = ProblemVariables::new();
 
-        let (z, mut exp_cost) = build_presence_variables_and_objective(basket, items, &mut pb)?;
+        let (z, mut cost) = build_presence_variables_and_objective(basket, items, &mut pb)?;
 
         // Create the promotion instances with their variables
         let promotion_instances =
-            PromotionInstances::from_promotions(promotions, basket, items, &mut pb, &mut exp_cost);
+            PromotionInstances::from_promotions(promotions, basket, items, &mut pb, &mut cost)?;
 
         // Create the solver model
-        let mut model = pb.minimise(exp_cost).using(default_solver);
+        let mut model = pb.minimise(cost).using(default_solver);
 
         ensure_presence_vars_len(z.len(), items.len())?;
 
@@ -147,7 +147,7 @@ fn build_presence_variables_and_objective<'a>(
         .collect();
 
     // Create expression for total cost. This is what we are trying to minimise.
-    let mut exp_cost = Expression::default();
+    let mut cost = Expression::default();
 
     // Add base cost for all items at their undiscounted price.
     z.iter().copied().zip(items.iter().copied()).try_for_each(
@@ -157,7 +157,7 @@ fn build_presence_variables_and_objective<'a>(
             // `good_lp` stores coefficients as `f64`. Only integers with absolute value <= 2^53
             // can be represented exactly in an IEEE-754 `f64` mantissa; enforce that via a
             // round-trip check so we never silently change the objective.
-            exp_cost += var
+            cost += var
                 * i64_to_f64_exact(minor_units)
                     .ok_or(SolverError::MinorUnitsNotRepresentable { minor_units })?;
 
@@ -165,7 +165,7 @@ fn build_presence_variables_and_objective<'a>(
         },
     )?;
 
-    Ok((z, exp_cost))
+    Ok((z, cost))
 }
 
 /// Collect unaffected items and their total price.

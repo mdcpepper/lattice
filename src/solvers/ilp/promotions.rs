@@ -6,7 +6,7 @@ use good_lp::{Expression, ProblemVariables, Solution, SolverModel};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
-use crate::{basket::Basket, promotions::Promotion};
+use crate::{basket::Basket, promotions::Promotion, solvers::SolverError};
 
 mod simple_discount;
 
@@ -18,22 +18,24 @@ pub struct PromotionInstances<'a> {
 
 impl<'a> PromotionInstances<'a> {
     /// Create Promotion Instances from a slice of promotions
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SolverError`] if any applicable promotion fails to add variables.
     pub fn from_promotions(
         promotions: &'a [Promotion<'_>],
         basket: &'a Basket<'a>,
         items: &[usize],
         pb: &mut ProblemVariables,
-        exp_cost: &mut Expression,
-    ) -> Self {
+        cost: &mut Expression,
+    ) -> Result<Self, SolverError> {
         let mut instances = SmallVec::new();
 
         for promotion in promotions {
-            instances.push(PromotionInstance::new(
-                promotion, basket, items, pb, exp_cost,
-            ));
+            instances.push(PromotionInstance::new(promotion, basket, items, pb, cost)?);
         }
 
-        Self { instances }
+        Ok(Self { instances })
     }
 
     /// Iterate over instances
@@ -83,26 +85,31 @@ impl<'a> PromotionInstance<'a> {
     /// If the promotion cannot possibly apply to the provided `basket`/`items`, we avoid adding
     /// any decision variables and instead store a no-op variable adapter. This keeps the global
     /// model smaller and prevents inapplicable promotions from contributing to:
-    /// - the objective expression (`exp_cost`), or
+    /// - the objective expression (`cost`), or
     /// - any per-item usage sums used for exclusivity constraints.
     ///
-    /// `pb` and `exp_cost` are mutated to register variables and their objective coefficients for
+    /// `pb` and `cost` are mutated to register variables and their objective coefficients for
     /// applicable promotions.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SolverError`] if the promotion fails to add variables (for example, due to
+    /// invalid indices, discount errors, or non-representable coefficients).
     pub fn new(
         promotion: &'a Promotion<'a>,
         basket: &'a Basket<'a>,
         items: &[usize],
         pb: &mut ProblemVariables,
-        exp_cost: &mut Expression,
-    ) -> Self {
+        cost: &mut Expression,
+    ) -> Result<Self, SolverError> {
         let vars = match (promotion, promotion.is_applicable(basket, items)) {
             (Promotion::SimpleDiscount(simple_discount), true) => {
-                simple_discount.add_variables(basket, items, pb, exp_cost)
+                simple_discount.add_variables(basket, items, pb, cost)?
             }
             (_promotion, false) => Box::new(NoopPromotionVars),
         };
 
-        Self { promotion, vars }
+        Ok(Self { promotion, vars })
     }
 
     /// Contribute this promotion's per-item usage term for `item_idx`.
@@ -183,7 +190,7 @@ pub trait PromotionVars: fmt::Debug + Send + Sync {
 ///
 /// 1. [`ILPPromotion::is_applicable`] is used as a cheap pre-filter.
 /// 2. [`ILPPromotion::add_variables`] creates the decision variables and contributes
-///    to the objective (`exp_cost`).
+///    to the objective (`cost`).
 /// 3. [`ILPPromotion::add_constraints`] optionally adds constraints that link those
 ///    variables to each other and/or to the basket.
 /// 4. After solving, [`ILPPromotion::calculate_item_discounts`] extracts the final
@@ -212,18 +219,25 @@ pub trait ILPPromotion<'a>: Send + Sync {
     /// Create per-item binary variables and add them to the objective expression.
     ///
     /// Each eligible item gets a decision variable indicating whether this promotion applies.
-    /// The discounted price contribution should be added to `exp_cost` so the solver can trade off
+    /// The discounted price contribution should be added to `cost` so the solver can trade off
     /// selecting discounts against other promotions under global constraints.
     ///
-    /// Items that can't be evaluated safely (missing item, discount calc error, or inexact
-    /// coefficient conversion) should be skipped to avoid introducing incorrect objective coefficients.
+    /// Missing items should be surfaced to callers via [`SolverError::Basket`].
+    /// Discount calculation errors should be surfaced to callers via [`SolverError::Discount`].
+    /// If a discounted minor unit amount cannot be represented exactly as a solver coefficient,
+    /// return [`SolverError::MinorUnitsNotRepresentable`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SolverError`] if variable creation fails (e.g. invalid item index, discount error,
+    /// or non-representable coefficients).
     fn add_variables(
         &self,
         basket: &'a Basket<'a>,
         items: &[usize],
         pb: &mut ProblemVariables,
-        exp_cost: &mut Expression,
-    ) -> Box<dyn PromotionVars>;
+        cost: &mut Expression,
+    ) -> Result<Box<dyn PromotionVars>, SolverError>;
 
     /// Add promotion-specific constraints to the solver model.
     ///

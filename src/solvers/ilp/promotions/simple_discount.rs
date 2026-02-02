@@ -11,7 +11,10 @@ use crate::{
     basket::Basket,
     discounts::calculate_discount,
     promotions::simple_discount::SimpleDisount,
-    solvers::ilp::{BINARY_THRESHOLD, promotions::ILPPromotion},
+    solvers::{
+        SolverError,
+        ilp::{BINARY_THRESHOLD, promotions::ILPPromotion},
+    },
     tags::collection::TagCollection,
 };
 
@@ -67,8 +70,8 @@ impl<'a> ILPPromotion<'a> for SimpleDisount<'a> {
         basket: &'a Basket<'a>,
         items: &[usize],
         pb: &mut ProblemVariables,
-        exp_cost: &mut Expression,
-    ) -> Box<dyn PromotionVars> {
+        cost: &mut Expression,
+    ) -> Result<Box<dyn PromotionVars>, SolverError> {
         // An empty tag set means "this promotion can target any item", so we can skip tag checks
         // if that is the case.
         let match_all = self.tags().is_empty();
@@ -77,10 +80,7 @@ impl<'a> ILPPromotion<'a> for SimpleDisount<'a> {
         let mut item_vars: SmallVec<[(usize, Variable); 10]> = SmallVec::new();
 
         for &item_idx in items {
-            // A missing item shouldn't abort the whole solve; just treat it as ineligible here.
-            let Ok(item) = basket.get_item(item_idx) else {
-                continue;
-            };
+            let item = basket.get_item(item_idx).map_err(SolverError::from)?;
 
             // Enforce the promotion's targeting rules up-front so the solver doesn't need extra constraints.
             if !match_all && !item.tags().intersects(self.tags()) {
@@ -91,24 +91,28 @@ impl<'a> ILPPromotion<'a> for SimpleDisount<'a> {
             let discounted_minor = match calculate_discount(self.discount(), slice::from_ref(item))
             {
                 Ok(price) => price.to_minor_units(),
-                Err(_) => continue,
+                Err(err) => return Err(err.into()),
             };
 
             // `good_lp` uses floating point coefficients; only accept values that are exactly representable
             // to avoid tiny rounding changing the solver's preferred choice.
             let Some(coeff) = i64_to_f64_exact(discounted_minor) else {
-                continue;
+                return Err(SolverError::MinorUnitsNotRepresentable {
+                    minor_units: discounted_minor,
+                });
             };
 
             // A binary decision variable lets the solver choose whether to apply this promotion to the item.
             let var = pb.add(variable().binary());
+
             // Persist the variable so we can later mark items as "selected" from the solved model.
             item_vars.push((item_idx, var));
+
             // Add this item's discounted cost contribution to the objective expression.
-            *exp_cost += var * coeff;
+            *cost += var * coeff;
         }
 
-        Box::new(SimpleDiscountVars { item_vars })
+        Ok(Box::new(SimpleDiscountVars { item_vars }))
     }
 
     fn add_constraints<S: good_lp::SolverModel>(
@@ -165,7 +169,7 @@ fn i64_to_f64_exact(v: i64) -> Option<f64> {
 mod tests {
     use std::collections::HashMap;
 
-    use good_lp::{Expression, ProblemVariables, Solution, SolutionStatus, Variable};
+    use good_lp::{Expression, ProblemVariables, Solution, Variable};
     use rusty_money::{Money, iso};
     use testresult::TestResult;
 
@@ -173,23 +177,11 @@ mod tests {
         basket::Basket,
         discounts::Discount,
         items::Item,
-        solvers::ilp::promotions::ILPPromotion,
+        solvers::{SolverError, ilp::promotions::ILPPromotion},
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
     use super::{PromotionVars, SimpleDisount};
-
-    struct AllOnesSolution;
-
-    impl Solution for AllOnesSolution {
-        fn value(&self, _var: Variable) -> f64 {
-            1.0
-        }
-
-        fn status(&self) -> SolutionStatus {
-            SolutionStatus::Optimal
-        }
-    }
 
     #[derive(Debug)]
     struct AlwaysSelectedVars;
@@ -218,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn add_variables_skips_missing_item_indices() -> TestResult {
+    fn add_variables_errors_on_missing_item_indices() -> TestResult {
         let items = [Item::new(Money::from_minor(100, iso::GBP))];
         let basket = Basket::with_items(items, iso::GBP)?;
 
@@ -228,17 +220,16 @@ mod tests {
         );
 
         let mut pb = ProblemVariables::new();
-        let mut exp_cost = Expression::default();
-        let vars = promo.add_variables(&basket, &[0, 1], &mut pb, &mut exp_cost);
+        let mut cost = Expression::default();
+        let result = promo.add_variables(&basket, &[0, 1], &mut pb, &mut cost);
 
-        assert!(vars.is_item_selected(&AllOnesSolution, 0));
-        assert!(!vars.is_item_selected(&AllOnesSolution, 1));
+        assert!(matches!(result, Err(SolverError::Basket(_))));
 
         Ok(())
     }
 
     #[test]
-    fn add_variables_skips_on_discount_error() -> TestResult {
+    fn add_variables_errors_on_discount_error() -> TestResult {
         let items = [Item::new(Money::from_minor(100, iso::GBP))];
         let basket = Basket::with_items(items, iso::GBP)?;
 
@@ -248,16 +239,16 @@ mod tests {
         );
 
         let mut pb = ProblemVariables::new();
-        let mut exp_cost = Expression::default();
-        let vars = promo.add_variables(&basket, &[0], &mut pb, &mut exp_cost);
+        let mut cost = Expression::default();
+        let result = promo.add_variables(&basket, &[0], &mut pb, &mut cost);
 
-        assert!(!vars.is_item_selected(&AllOnesSolution, 0));
+        assert!(matches!(result, Err(SolverError::Discount(_))));
 
         Ok(())
     }
 
     #[test]
-    fn add_variables_skips_on_nonrepresentable_minor_units() -> TestResult {
+    fn add_variables_errors_on_nonrepresentable_minor_units() -> TestResult {
         let items = [Item::new(Money::from_minor(100, iso::GBP))];
         let basket = Basket::with_items(items, iso::GBP)?;
 
@@ -267,10 +258,13 @@ mod tests {
         );
 
         let mut pb = ProblemVariables::new();
-        let mut exp_cost = Expression::default();
-        let vars = promo.add_variables(&basket, &[0], &mut pb, &mut exp_cost);
+        let mut cost = Expression::default();
+        let result = promo.add_variables(&basket, &[0], &mut pb, &mut cost);
 
-        assert!(!vars.is_item_selected(&AllOnesSolution, 0));
+        assert!(matches!(
+            result,
+            Err(SolverError::MinorUnitsNotRepresentable { .. })
+        ));
 
         Ok(())
     }
