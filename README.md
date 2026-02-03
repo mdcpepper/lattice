@@ -1,6 +1,7 @@
 # Dante
 
 ![Dante](assets/dante.png)
+[![Build & Test](https://github.com/mdcpepper/dante/actions/workflows/ci.yml/badge.svg)](https://github.com/mdcpepper/dante/actions/workflows/ci.yml)
 
 Dante is a high-performance, general-purpose pricing, promotion and basket 
 optimisation engine written in Rust.
