@@ -2,7 +2,7 @@
 
 use std::slice;
 
-use good_lp::{Expression, ProblemVariables, Solution, Variable, variable};
+use good_lp::{Expression, Solution, Variable, variable};
 use num_traits::ToPrimitive;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -17,12 +17,14 @@ use crate::{
     },
     solvers::{
         SolverError,
-        ilp::{BINARY_THRESHOLD, promotions::ILPPromotion},
+        ilp::{
+            BINARY_THRESHOLD,
+            promotions::{ILPPromotion, PromotionVars},
+            state::ILPState,
+        },
     },
     tags::collection::TagCollection,
 };
-
-use super::PromotionVars;
 
 #[derive(Debug)]
 pub struct SimpleDiscountVars {
@@ -30,16 +32,16 @@ pub struct SimpleDiscountVars {
 }
 
 impl PromotionVars for SimpleDiscountVars {
-    fn add_item_usage(&self, usage: Expression, item_idx: usize) -> Expression {
-        let mut new_usage = usage;
+    fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression {
+        let mut updated_expr = expr;
 
         for &(idx, var) in &self.item_vars {
             if idx == item_idx {
-                new_usage += var;
+                updated_expr += var;
             }
         }
 
-        new_usage
+        updated_expr
     }
 
     fn is_item_selected(&self, solution: &dyn Solution, item_idx: usize) -> bool {
@@ -73,8 +75,7 @@ impl<'a> ILPPromotion<'a> for SimpleDiscount<'a> {
         &self,
         basket: &'a Basket<'a>,
         items: &[usize],
-        pb: &mut ProblemVariables,
-        cost: &mut Expression,
+        state: &mut ILPState,
     ) -> Result<Box<dyn PromotionVars>, SolverError> {
         // An empty tag set means this promotion can target any item, so we can skip tag checks
         // if that is the case.
@@ -106,14 +107,16 @@ impl<'a> ILPPromotion<'a> for SimpleDiscount<'a> {
                 });
             };
 
-            // A binary decision variable that lets the solver choose whether to apply this promotion to the item.
-            let var = pb.add(variable().binary());
+            // Create a binary decision variable for this item: should this promotion apply to it?
+            let var = state.problem_variables_mut().add(variable().binary());
 
             // Persist the variable so we can later mark items as "selected" from the solved model.
             item_vars.push((item_idx, var));
 
-            // Add this item's discounted cost contribution to the objective expression.
-            *cost += var * coeff;
+            // Tell the solver "if you set this variable to 1 (apply this promotion to this item),
+            // add the discounted price to the total instead of full price". The solver will weigh
+            // this against other options when minimizing cost.
+            state.add_to_objective(var, coeff);
         }
 
         Ok(Box::new(SimpleDiscountVars { item_vars }))
@@ -230,14 +233,14 @@ mod tests {
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
-    use super::{PromotionVars, SimpleDiscount};
+    use super::{ILPState, PromotionVars, SimpleDiscount};
 
     #[derive(Debug)]
     struct AlwaysSelectedVars;
 
     impl PromotionVars for AlwaysSelectedVars {
-        fn add_item_usage(&self, usage: Expression, _item_idx: usize) -> Expression {
-            usage
+        fn add_item_presence_term(&self, expr: Expression, _item_idx: usize) -> Expression {
+            expr
         }
 
         fn is_item_selected(&self, _solution: &dyn Solution, _item_idx: usize) -> bool {
@@ -249,8 +252,8 @@ mod tests {
     struct NeverSelectedVars;
 
     impl PromotionVars for NeverSelectedVars {
-        fn add_item_usage(&self, usage: Expression, _item_idx: usize) -> Expression {
-            usage
+        fn add_item_presence_term(&self, expr: Expression, _item_idx: usize) -> Expression {
+            expr
         }
 
         fn is_item_selected(&self, _solution: &dyn Solution, _item_idx: usize) -> bool {
@@ -288,9 +291,10 @@ mod tests {
             Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
         );
 
-        let mut pb = ProblemVariables::new();
-        let mut cost = Expression::default();
-        let result = promo.add_variables(&basket, &[0, 1], &mut pb, &mut cost);
+        let pb = ProblemVariables::new();
+        let cost = Expression::default();
+        let mut state = ILPState::new(pb, cost);
+        let result = promo.add_variables(&basket, &[0, 1], &mut state);
 
         assert!(matches!(result, Err(SolverError::Basket(_))));
 
@@ -312,9 +316,10 @@ mod tests {
             Discount::SetCheapestItemPrice(Money::from_minor(50, iso::USD)),
         );
 
-        let mut pb = ProblemVariables::new();
-        let mut cost = Expression::default();
-        let result = promo.add_variables(&basket, &[0], &mut pb, &mut cost);
+        let pb = ProblemVariables::new();
+        let cost = Expression::default();
+        let mut state = ILPState::new(pb, cost);
+        let result = promo.add_variables(&basket, &[0], &mut state);
 
         assert!(matches!(result, Err(SolverError::Discount(_))));
 
@@ -336,9 +341,10 @@ mod tests {
             Discount::SetBundleTotalPrice(Money::from_minor(9_007_199_254_740_993, iso::GBP)),
         );
 
-        let mut pb = ProblemVariables::new();
-        let mut cost = Expression::default();
-        let result = promo.add_variables(&basket, &[0], &mut pb, &mut cost);
+        let pb = ProblemVariables::new();
+        let cost = Expression::default();
+        let mut state = ILPState::new(pb, cost);
+        let result = promo.add_variables(&basket, &[0], &mut state);
 
         assert!(matches!(
             result,

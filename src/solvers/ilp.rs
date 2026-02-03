@@ -13,10 +13,14 @@ use good_lp::solvers::microlp::microlp as default_solver;
 use crate::{
     basket::Basket,
     promotions::{Promotion, applications::PromotionApplication},
-    solvers::{Solver, SolverError, SolverResult, ilp::promotions::PromotionInstances},
+    solvers::{
+        Solver, SolverError, SolverResult,
+        ilp::{promotions::PromotionInstances, state::ILPState},
+    },
 };
 
 pub mod promotions;
+pub mod state;
 
 /// Binary threshold for determining truthiness
 pub const BINARY_THRESHOLD: f64 = 0.5;
@@ -46,30 +50,51 @@ impl Solver for ILPSolver {
             });
         }
 
-        // Create problem variables
-        let mut pb = ProblemVariables::new();
+        // Build the optimization problem using ILPState to manage variables and objective.
+        // The goal is to find the best combination of promotions that minimizes
+        // total basket cost.
+        //
+        // We set up three things:
+        //
+        // 1. Presence variables: each item at full price (baseline option)
+        // 2. Promotion variables: each item with each applicable promotion (discount options)
+        // 3. Constraints: ensure each item is purchased exactly once (baseline full price OR one promotion discount applied)
 
-        let (z, mut cost) = build_presence_variables_and_objective(basket, items, &mut pb)?;
+        // Set up all possible promotion choices for the solver to consider.
+        // For each promotion, we create decision variables that let the solver choose
+        // whether to apply that promotion to each eligible item.
+        let mut state = ILPState::with_presence_variables(basket, items)?;
 
-        // Create the promotion instances with their variables
         let promotion_instances =
-            PromotionInstances::from_promotions(promotions, basket, items, &mut pb, &mut cost)?;
+            PromotionInstances::from_promotions(promotions, basket, items, &mut state)?;
+
+        // Extract state for model creation
+        let (pb, cost, item_presence) = state.into_parts();
 
         // Create the solver model
         let mut model = pb.minimise(cost).using(default_solver);
 
-        ensure_presence_vars_len(z.len(), items.len())?;
+        ensure_presence_vars_len(item_presence.len(), items.len())?;
 
-        // Presence + Exclusivity Constraint: each item is either full price (z_i = 1) or used
-        // by exactly one promotion (promo_usage = 1). This single equality enforces both.
+        // Ensure each item is purchased exactly once (either full price OR via one promotion).
+        //
+        // This prevents items from being:
+        // - Omitted from the checkout entirely
+        // - Selected by multiple promotions simultaneously
+        //
+        // Example: If "20% off" and "Buy-one-get-one" both target the same item,
+        // the solver must choose one or neither, never both.
         for (i, &item_idx) in items.iter().enumerate() {
-            let z_i = z.get(i).ok_or(SolverError::InvariantViolation {
-                message: "presence variable missing for item index",
-            })?;
+            let z_i = item_presence
+                .get(i)
+                .ok_or(SolverError::InvariantViolation {
+                    message: "presence variable missing for item index",
+                })?;
 
-            let usage = promotion_instances.add_item_usage(Expression::from(*z_i), item_idx);
+            let constraint_expr =
+                promotion_instances.add_item_presence_term(Expression::from(*z_i), item_idx);
 
-            model = model.with(usage.eq(1));
+            model = model.with(constraint_expr.eq(1));
         }
 
         // Add constraints for all promotions
@@ -77,22 +102,15 @@ impl Solver for ILPSolver {
 
         let solution = model.solve()?;
 
-        // Mark all items as unused initially
+        // Translate the solver's decisions back into business terms: which items got
+        // discounted, by which promotions, and what their final prices are.
         let mut used_items: ItemUsageFlags = smallvec![false; items.len()];
-
-        // The total cost of this set of items
         let mut total = Money::from_minor(0, basket.currency());
-
-        // Collected promotion applications with bundle IDs and price details
         let mut promotion_applications: SmallVec<[PromotionApplication<'a>; 10]> = SmallVec::new();
-
-        // Counter for unique bundle IDs across all promotions
         let mut next_bundle_id: usize = 0;
-
-        // The indexes of items that are being affected by promotions
         let mut affected_items: ItemIndexList = ItemIndexList::new();
 
-        // Process each promotion's results
+        // Extract which items each promotion selected and their discounted prices
         for instance in promotion_instances.iter() {
             let apps =
                 instance.calculate_item_applications(&solution, basket, items, &mut next_bundle_id);
@@ -108,7 +126,7 @@ impl Solver for ILPSolver {
         }
 
         let (unaffected_items, total) =
-            collect_full_price_items(basket, &solution, &z, items, used_items, total)?;
+            collect_full_price_items(basket, &solution, &item_presence, items, used_items, total)?;
 
         Ok(SolverResult {
             affected_items,
@@ -130,7 +148,7 @@ fn ensure_presence_vars_len(z_len: usize, items_len: usize) -> Result<(), Solver
     Ok(())
 }
 
-/// Build presence variables and objective function for MILP solver.
+/// Build presence variables and objective function for the ILP solver.
 ///
 /// # Errors
 ///
@@ -141,19 +159,24 @@ fn build_presence_variables_and_objective<'a>(
     items: &[usize],
     pb: &mut ProblemVariables,
 ) -> Result<(SmallVec<[Variable; 10]>, Expression), SolverError> {
-    // Add binary variables for item selection. Each item must be present in the
-    // solution, whether a promotion is applied to it or not. This prevents
-    // items from disappearing from the result if they did not match anything.
-    let z: SmallVec<[Variable; 10]> = (0..items.len())
+    // Each item must be present in the solution whether a promotion is applied or not.
+    // Create a presence variable for each item representing the full-price option.
+    let presence: SmallVec<[Variable; 10]> = (0..items.len())
         .map(|_| pb.add(variable().binary()))
         .collect();
 
     // Create expression for total cost. This is what we are trying to minimise.
     let mut cost = Expression::default();
 
-    // Add base cost for all items at their undiscounted price.
-    z.iter().copied().zip(items.iter().copied()).try_for_each(
-        |(var, item_idx)| -> Result<(), SolverError> {
+    // Add the full-price option for each item to the objective.
+    // These are the baseline costs if no promotions are applied. When we add promotion
+    // variables later, they'll offer alternative (discounted) costs. The solver will
+    // compare full-price vs. discounted options and choose what minimizes the total.
+    presence
+        .iter()
+        .copied()
+        .zip(items.iter().copied())
+        .try_for_each(|(var, item_idx)| -> Result<(), SolverError> {
             let minor_units = basket.get_item(item_idx)?.price().to_minor_units();
 
             // `good_lp` stores coefficients as `f64`. Only integers with absolute value <= 2^53
@@ -164,10 +187,9 @@ fn build_presence_variables_and_objective<'a>(
                     .ok_or(SolverError::MinorUnitsNotRepresentable { minor_units })?;
 
             Ok(())
-        },
-    )?;
+        })?;
 
-    Ok((z, cost))
+    Ok((presence, cost))
 }
 
 /// Collect unaffected items and their total price.
@@ -220,7 +242,7 @@ fn collect_full_price_items<'a>(
 ///
 /// Note: `used_items` is indexed by the *position* in `items` (not the item index
 /// itself). This keeps it aligned with other per-variable/per-position arrays used
-/// by the MILP formulation.
+/// by the ILP formulation.
 ///
 /// # Errors
 ///

@@ -2,14 +2,14 @@
 
 use std::fmt;
 
-use good_lp::{Expression, ProblemVariables, Solution, SolverModel};
+use good_lp::{Expression, Solution, SolverModel};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::{
     basket::Basket,
     promotions::{Promotion, PromotionKey, applications::PromotionApplication},
-    solvers::SolverError,
+    solvers::{SolverError, ilp::state::ILPState},
 };
 
 mod simple_discount;
@@ -30,13 +30,13 @@ impl<'a> PromotionInstances<'a> {
         promotions: &'a [Promotion<'_>],
         basket: &'a Basket<'a>,
         items: &[usize],
-        pb: &mut ProblemVariables,
-        cost: &mut Expression,
+        state: &mut ILPState,
     ) -> Result<Self, SolverError> {
         let mut instances = SmallVec::new();
 
         for promotion in promotions {
-            instances.push(PromotionInstance::new(promotion, basket, items, pb, cost)?);
+            let instance = PromotionInstance::new(promotion, basket, items, state)?;
+            instances.push(instance);
         }
 
         Ok(Self { instances })
@@ -47,15 +47,18 @@ impl<'a> PromotionInstances<'a> {
         self.instances.iter()
     }
 
-    /// Add usage constraints for all instances to the model
-    pub fn add_item_usage(&self, usage: Expression, item_idx: usize) -> Expression {
-        let mut total_usage = usage;
+    /// Add presence terms for all promotion instances to the item constraint
+    ///
+    /// Contributes each promotion's decision variables for the given item to the
+    /// presence/exclusivity constraint expression.
+    pub fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression {
+        let mut updated_expr = expr;
 
         for instance in &self.instances {
-            total_usage = instance.add_item_usage(total_usage, item_idx);
+            updated_expr = instance.add_item_presence_term(updated_expr, item_idx);
         }
 
-        total_usage
+        updated_expr
     }
 
     /// Add constraints for all promotion instances
@@ -99,25 +102,24 @@ impl<'a> PromotionInstance<'a> {
         promotion: &'a Promotion<'a>,
         basket: &'a Basket<'a>,
         items: &[usize],
-        pb: &mut ProblemVariables,
-        cost: &mut Expression,
+        state: &mut ILPState,
     ) -> Result<Self, SolverError> {
         let vars = match (promotion, promotion.is_applicable(basket, items)) {
             (Promotion::SimpleDiscount(simple_discount), true) => {
-                simple_discount.add_variables(basket, items, pb, cost)?
+                simple_discount.add_variables(basket, items, state)?
             }
-            (_promotion, false) => Box::new(NoopPromotionVars),
+            (_promotion, false) => Box::new(NoopPromotionVars) as Box<dyn PromotionVars>,
         };
 
         Ok(Self { promotion, vars })
     }
 
-    /// Contribute this promotion's per-item usage term for `item_idx`.
+    /// Contribute this promotion's presence term for `item_idx`.
     ///
-    /// This is called while building the global per-item equality that enforces that
-    /// an item is either full price, or used by exactly one promotion.
-    pub fn add_item_usage(&self, usage: Expression, item_idx: usize) -> Expression {
-        self.vars.add_item_usage(usage, item_idx)
+    /// This is called while building the per-item presence/exclusivity constraint that
+    /// enforces each item is either at full price or used by exactly one promotion.
+    pub fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression {
+        self.vars.add_item_presence_term(expr, item_idx)
     }
 
     /// Add promotion-specific constraints for this instance.
@@ -189,12 +191,12 @@ impl<'a> PromotionInstance<'a> {
 /// A promotion can expose a set of per-item decision variables (typically binary) that indicate
 /// whether the promotion uses a given item.
 pub trait PromotionVars: fmt::Debug + Send + Sync {
-    /// Add this promotion's usage term for `item_idx` to the running `usage` expression.
+    /// Add this promotion's presence term for `item_idx` to the constraint expression.
     ///
-    /// `usage` is the accumulated "how is this item accounted for" expression for a single item.
-    /// Implementations should add their own per-item decision variable(s), if any, and return the
-    /// updated expression.
-    fn add_item_usage(&self, usage: Expression, item_idx: usize) -> Expression;
+    /// Contributes this promotion's per-item decision variable(s) to the presence/exclusivity
+    /// constraint being built for a single item. The constraint ensures each item appears in
+    /// the solution exactly once (either at full price or selected by one promotion).
+    fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression;
 
     /// Return `true` if this promotion selected `item_idx` in the solved model.
     fn is_item_selected(&self, solution: &dyn Solution, item_idx: usize) -> bool;
@@ -258,8 +260,7 @@ pub trait ILPPromotion<'a>: Send + Sync {
         &self,
         basket: &'a Basket<'a>,
         items: &[usize],
-        pb: &mut ProblemVariables,
-        cost: &mut Expression,
+        state: &mut ILPState,
     ) -> Result<Box<dyn PromotionVars>, SolverError>;
 
     /// Add promotion-specific constraints to the solver model.
@@ -331,8 +332,8 @@ pub trait ILPPromotion<'a>: Send + Sync {
 struct NoopPromotionVars;
 
 impl PromotionVars for NoopPromotionVars {
-    fn add_item_usage(&self, usage: Expression, _item_idx: usize) -> Expression {
-        usage
+    fn add_item_presence_term(&self, expr: Expression, _item_idx: usize) -> Expression {
+        expr
     }
 
     fn is_item_selected(&self, _solution: &dyn Solution, _item_idx: usize) -> bool {
@@ -355,7 +356,7 @@ mod tests {
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
-    use super::PromotionInstance;
+    use super::*;
 
     #[derive(Debug)]
     struct SelectAllSolution;
@@ -384,9 +385,10 @@ mod tests {
             Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
         ));
 
-        let mut pb = ProblemVariables::new();
-        let mut cost = Expression::default();
-        let instance = PromotionInstance::new(&promotion, &basket, &[0], &mut pb, &mut cost)?;
+        let pb = ProblemVariables::new();
+        let cost = Expression::default();
+        let mut state = ILPState::new(pb, cost);
+        let instance = PromotionInstance::new(&promotion, &basket, &[0], &mut state)?;
 
         let discounts = instance.calculate_item_discounts(&SelectAllSolution, &basket, &[0])?;
 
