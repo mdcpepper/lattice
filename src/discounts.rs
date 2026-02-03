@@ -154,13 +154,15 @@ mod tests {
     use rusty_money::iso::GBP;
     use testresult::TestResult;
 
+    use crate::products::ProductKey;
+
     use super::*;
 
     fn test_items<'a>() -> [Item<'a>; 3] {
         [
-            Item::new(Money::from_minor(100, GBP)),
-            Item::new(Money::from_minor(200, GBP)),
-            Item::new(Money::from_minor(300, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(300, GBP)),
         ]
     }
 

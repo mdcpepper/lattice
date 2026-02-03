@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::{
     basket::{Basket, BasketError},
     discounts::DiscountError,
-    promotions::Promotion,
+    promotions::{Promotion, applications::PromotionApplication},
 };
 
 pub mod ilp;
@@ -60,6 +60,9 @@ pub struct SolverResult<'a> {
 
     /// Total cost of the items after applying promotions
     pub total: Money<'a, iso::Currency>,
+
+    /// Details of each promotion application (item, bundle, original/final price)
+    pub promotion_applications: SmallVec<[PromotionApplication<'a>; 10]>,
 }
 
 /// Trait for solving promotion problems on a set of items

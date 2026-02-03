@@ -40,15 +40,15 @@ pub fn total_price<'a, T: TagCollection>(
 mod tests {
     use testresult::TestResult;
 
-    use crate::tags::string::StringTagCollection;
+    use crate::{products::ProductKey, tags::string::StringTagCollection};
 
     use super::*;
 
     #[test]
     fn test_total_price() -> TestResult {
         let items: [Item<'_, StringTagCollection>; 2] = [
-            Item::new(Money::from_minor(100, iso::USD)),
-            Item::new(Money::from_minor(200, iso::USD)),
+            Item::new(ProductKey::default(), Money::from_minor(100, iso::USD)),
+            Item::new(ProductKey::default(), Money::from_minor(200, iso::USD)),
         ];
 
         assert_eq!(total_price(&items)?, Money::from_minor(300, iso::USD));

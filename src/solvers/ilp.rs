@@ -2,7 +2,6 @@
 
 use good_lp::{Expression, ProblemVariables, Solution, SolverModel, Variable, variable};
 use num_traits::ToPrimitive;
-use rustc_hash::FxHashMap;
 use rusty_money::{Money, iso};
 use smallvec::{SmallVec, smallvec};
 
@@ -13,7 +12,7 @@ use good_lp::solvers::microlp::microlp as default_solver;
 
 use crate::{
     basket::Basket,
-    promotions::Promotion,
+    promotions::{Promotion, applications::PromotionApplication},
     solvers::{Solver, SolverError, SolverResult, ilp::promotions::PromotionInstances},
 };
 
@@ -38,6 +37,7 @@ impl Solver for ILPSolver {
                 affected_items: SmallVec::with_capacity(0),
                 unaffected_items: SmallVec::with_capacity(0),
                 total: Money::from_minor(0, basket.currency()),
+                promotion_applications: SmallVec::with_capacity(0),
             });
         }
 
@@ -81,18 +81,26 @@ impl Solver for ILPSolver {
         // The indexes of items that are being affected by promotions
         let mut affected_items: SmallVec<[usize; 10]> = SmallVec::new();
 
+        // Collected promotion applications with bundle IDs and price details
+        let mut promotion_applications: SmallVec<[PromotionApplication<'a>; 10]> = SmallVec::new();
+
+        // Counter for unique bundle IDs across all promotions
+        let mut next_bundle_id: usize = 0;
+
         // Process each promotion's results
         for instance in promotion_instances.iter() {
-            let discounts = instance.calculate_item_discounts(&solution, basket, items);
+            let apps =
+                instance.calculate_item_applications(&solution, basket, items, &mut next_bundle_id);
 
-            apply_discounts(
-                basket,
+            apply_applications(
                 items,
                 &mut used_items,
                 &mut affected_items,
                 &mut total,
-                &discounts,
+                &apps,
             )?;
+
+            promotion_applications.extend(apps);
         }
 
         // Convert the MILP solution back into our domain result
@@ -113,6 +121,7 @@ impl Solver for ILPSolver {
             affected_items,
             unaffected_items,
             total,
+            promotion_applications,
         })
     }
 }
@@ -209,12 +218,11 @@ fn collect_unaffected_items<'a>(
     Ok(())
 }
 
-/// Apply pre-computed per-item discounts to a subset of items.
+/// Apply promotion applications to track affected items and accumulate total.
 ///
-/// This function is intentionally "dumb": it doesn't decide *which* discounts apply.
-/// It only picks items that appear in `discounts`, ensures each position in `items`
-/// is used at most once (via `used_items`), records affected item indices, and adds
-/// the discounted amounts to `total`.
+/// This function processes [`PromotionApplication`] instances, ensuring each position
+/// in `items` is used at most once (via `used_items`), records affected item indices,
+/// and adds the final prices to `total`.
 ///
 /// Note: `used_items` is indexed by the *position* in `items` (not the item index
 /// itself). This keeps it aligned with other per-variable/per-position arrays used
@@ -222,18 +230,17 @@ fn collect_unaffected_items<'a>(
 ///
 /// # Errors
 ///
-/// Returns a [`SolverError`] if adding a discounted amount to `total` fails.
-fn apply_discounts<'a>(
-    basket: &'a Basket<'a>,
+/// Returns a [`SolverError`] if adding a final price to `total` fails.
+fn apply_applications<'a>(
     items: &[usize],
     used_items: &mut [bool],
     affected_items: &mut SmallVec<[usize; 10]>,
     total: &mut Money<'a, iso::Currency>,
-    discounts: &FxHashMap<usize, (i64, i64)>,
+    applications: &[PromotionApplication<'a>],
 ) -> Result<(), SolverError> {
-    for (pos, &item_idx) in items.iter().enumerate() {
-        // Only touch items that were assigned a discount by earlier logic.
-        let Some((_, discounted_minor)) = discounts.get(&item_idx) else {
+    for app in applications {
+        // Find the position of this item in the items slice
+        let Some(pos) = items.iter().position(|&idx| idx == app.item_idx) else {
             continue;
         };
 
@@ -250,10 +257,10 @@ fn apply_discounts<'a>(
         }
 
         // Track that this item was included in a promotion.
-        affected_items.push(item_idx);
+        affected_items.push(app.item_idx);
 
-        // Add the discounted amount (minor units) to the running total.
-        *total = total.add(Money::from_minor(*discounted_minor, basket.currency()))?;
+        // Add the final price to the running total.
+        *total = total.add(app.final_price)?;
     }
 
     Ok(())
@@ -277,7 +284,11 @@ mod tests {
     use crate::{
         discounts::Discount,
         items::Item,
-        promotions::{Promotion, simple_discount::SimpleDisount},
+        products::ProductKey,
+        promotions::{
+            Promotion, PromotionKey, applications::PromotionApplication,
+            simple_discount::SimpleDiscount,
+        },
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
@@ -285,23 +296,26 @@ mod tests {
 
     fn test_items<'a>() -> [Item<'a>; 3] {
         [
-            Item::new(Money::from_minor(100, iso::GBP)),
-            Item::new(Money::from_minor(200, iso::GBP)),
-            Item::new(Money::from_minor(300, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(300, iso::GBP)),
         ]
     }
 
     fn test_items_with_tags<'a>() -> [Item<'a>; 3] {
         [
             Item::with_tags(
+                ProductKey::default(),
                 Money::from_minor(100, iso::GBP),
                 StringTagCollection::from_strs(&["a"]),
             ),
             Item::with_tags(
+                ProductKey::default(),
                 Money::from_minor(200, iso::GBP),
                 StringTagCollection::from_strs(&["b"]),
             ),
             Item::with_tags(
+                ProductKey::default(),
                 Money::from_minor(300, iso::GBP),
                 StringTagCollection::from_strs(&["a", "b"]),
             ),
@@ -324,16 +338,14 @@ mod tests {
         assert_eq!(subtotal, result.total.to_minor_units());
         assert_eq!(0, result.affected_items.len());
         assert_eq!(3, result.unaffected_items.len());
+        assert!(result.promotion_applications.is_empty());
 
         Ok(())
     }
 
     #[test]
-    fn apply_discounts_skips_pre_used_positions() -> TestResult {
-        let items = test_items();
-        let basket = Basket::with_items(items, iso::GBP)?;
-
-        // `apply_discounts` uses `used_items` (indexed by position in the `items` slice)
+    fn apply_applications_skips_pre_used_positions() -> TestResult {
+        // `apply_applications` uses `used_items` (indexed by position in the `items` slice)
         // to prevent an item position from being claimed by more than one promotion.
         let mut used_items = vec![false; 3];
 
@@ -345,22 +357,54 @@ mod tests {
         let mut affected_items: SmallVec<[usize; 10]> = SmallVec::new();
 
         // Start from zero so any applied discount would be visible in the result total.
-        let mut total = Money::from_minor(0, basket.currency());
+        let mut total = Money::from_minor(0, iso::GBP);
 
-        // Provide a discount for item index 1, but the corresponding position is pre-used above.
-        let mut discounts = FxHashMap::default();
-        discounts.insert(1_usize, (200_i64, 150_i64));
+        // Provide an application for item index 1, but the corresponding position is pre-used above.
+        let applications = [PromotionApplication {
+            promotion_key: PromotionKey::default(),
+            item_idx: 1,
+            bundle_id: 0,
+            original_price: Money::from_minor(200, iso::GBP),
+            final_price: Money::from_minor(150, iso::GBP),
+        }];
 
-        apply_discounts(
-            &basket,
+        apply_applications(
             &[0, 1, 2],
             &mut used_items,
             &mut affected_items,
             &mut total,
-            &discounts,
+            &applications,
         )?;
 
         // Because the only discounted item was already marked "used", nothing should be applied.
+        assert!(affected_items.is_empty());
+        assert_eq!(total.to_minor_units(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn apply_applications_skips_items_not_in_selection() -> TestResult {
+        let mut used_items = vec![false; 2];
+        let mut affected_items: SmallVec<[usize; 10]> = SmallVec::new();
+        let mut total = Money::from_minor(0, iso::GBP);
+
+        let applications = [PromotionApplication {
+            promotion_key: PromotionKey::default(),
+            item_idx: 99,
+            bundle_id: 0,
+            original_price: Money::from_minor(200, iso::GBP),
+            final_price: Money::from_minor(150, iso::GBP),
+        }];
+
+        apply_applications(
+            &[0, 1],
+            &mut used_items,
+            &mut affected_items,
+            &mut total,
+            &applications,
+        )?;
+
         assert!(affected_items.is_empty());
         assert_eq!(total.to_minor_units(), 0);
 
@@ -372,7 +416,8 @@ mod tests {
         let items = test_items_with_tags();
         let basket = Basket::with_items(items, iso::GBP)?;
 
-        let promotions = [Promotion::SimpleDiscount(SimpleDisount::new(
+        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+            PromotionKey::default(),
             StringTagCollection::from_strs(&["a"]),
             Discount::PercentageOffBundleTotal(Percentage::from(0.25)),
         ))];
@@ -397,7 +442,8 @@ mod tests {
         let items = test_items();
         let basket = Basket::with_items(items, iso::GBP)?;
 
-        let promotions = [Promotion::SimpleDiscount(SimpleDisount::new(
+        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+            PromotionKey::default(),
             StringTagCollection::empty(),
             Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
         ))];
@@ -420,7 +466,8 @@ mod tests {
         let items = test_items();
         let basket = Basket::with_items(items, iso::GBP)?;
 
-        let promotions = [Promotion::SimpleDiscount(SimpleDisount::new(
+        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+            PromotionKey::default(),
             StringTagCollection::from_strs(&["missing"]),
             Discount::PercentageOffBundleTotal(Percentage::from(0.25)),
         ))];
@@ -442,7 +489,8 @@ mod tests {
         let items = test_items();
         let basket = Basket::with_items(items, iso::GBP)?;
 
-        let promotions = [Promotion::SimpleDiscount(SimpleDisount::new(
+        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+            PromotionKey::default(),
             StringTagCollection::empty(),
             Discount::SetBundleTotalPrice(Money::from_minor(400, iso::GBP)),
         ))];
@@ -460,6 +508,48 @@ mod tests {
     }
 
     #[test]
+    fn solver_populates_promotion_applications_with_correct_details() -> TestResult {
+        let items = test_items_with_tags();
+        let basket = Basket::with_items(items, iso::GBP)?;
+
+        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+            PromotionKey::default(),
+            StringTagCollection::from_strs(&["a"]),
+            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+        ))];
+
+        let result = ILPSolver::solve(&promotions, &basket, &[0, 1, 2])?;
+
+        // Items 0 and 2 have tag "a", so should be discounted
+        assert_eq!(result.promotion_applications.len(), 2);
+
+        // Sort by item_idx to get deterministic ordering for assertions
+        let mut sorted_apps: Vec<_> = result.promotion_applications.iter().collect();
+        sorted_apps.sort_by_key(|a| a.item_idx);
+
+        // First application (item 0)
+        let first_app = sorted_apps.first();
+        assert!(first_app.is_some());
+        let first_app = first_app.ok_or("Expected first application")?;
+        assert_eq!(first_app.item_idx, 0);
+        assert_eq!(first_app.original_price, Money::from_minor(100, iso::GBP));
+        assert_eq!(first_app.final_price, Money::from_minor(50, iso::GBP));
+
+        // Second application (item 2)
+        let second_app = sorted_apps.get(1);
+        assert!(second_app.is_some());
+        let second_app = second_app.ok_or("Expected second application")?;
+        assert_eq!(second_app.item_idx, 2);
+        assert_eq!(second_app.original_price, Money::from_minor(300, iso::GBP));
+        assert_eq!(second_app.final_price, Money::from_minor(50, iso::GBP));
+
+        // Each item should have a unique bundle_id (SimpleDiscount doesn't bundle)
+        assert_ne!(first_app.bundle_id, second_app.bundle_id);
+
+        Ok(())
+    }
+
+    #[test]
     fn solver_with_no_items_returns_empty_result() -> TestResult {
         let basket = Basket::with_items([], iso::GBP)?;
 
@@ -468,6 +558,7 @@ mod tests {
         assert_eq!(result.total.to_minor_units(), 0);
         assert!(result.affected_items.is_empty());
         assert!(result.unaffected_items.is_empty());
+        assert!(result.promotion_applications.is_empty());
 
         Ok(())
     }

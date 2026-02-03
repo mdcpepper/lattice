@@ -2,24 +2,37 @@
 
 use rusty_money::{Money, iso};
 
-use crate::tags::{collection::TagCollection, string::StringTagCollection};
+use crate::{
+    products::ProductKey,
+    tags::{collection::TagCollection, string::StringTagCollection},
+};
 
 /// An unprocessed item with a price and tags.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item<'a, T: TagCollection = StringTagCollection> {
+    product: ProductKey,
     price: Money<'a, iso::Currency>,
     tags: T,
 }
 
 impl<'a, T: TagCollection> Item<'a, T> {
     /// Creates a new item with the given price and empty tags.
-    pub fn new(price: Money<'a, iso::Currency>) -> Self {
-        Self::with_tags(price, T::empty())
+    pub fn new(product: ProductKey, price: Money<'a, iso::Currency>) -> Self {
+        Self::with_tags(product, price, T::empty())
     }
 
     /// Creates a new item with the given price and tags.
-    pub fn with_tags(price: Money<'a, iso::Currency>, tags: T) -> Self {
-        Self { price, tags }
+    pub fn with_tags(product: ProductKey, price: Money<'a, iso::Currency>, tags: T) -> Self {
+        Self {
+            product,
+            price,
+            tags,
+        }
+    }
+
+    /// Returns the product of the item
+    pub fn product(&self) -> ProductKey {
+        self.product
     }
 
     /// Returns the price of the item
@@ -53,10 +66,11 @@ mod tests {
     fn test_cheapest_item() {
         let items: [Item<'_, StringTagCollection>; 2] = [
             Item::with_tags(
+                ProductKey::default(),
                 Money::from_minor(100, iso::USD),
                 StringTagCollection::empty(),
             ),
-            Item::new(Money::from_minor(200, iso::USD)),
+            Item::new(ProductKey::default(), Money::from_minor(200, iso::USD)),
         ];
 
         let cheapest = cheapest_item(&items).expect("expected cheapest item");
@@ -66,11 +80,23 @@ mod tests {
     #[test]
     fn item_tag_accessors_work() {
         let tags = StringTagCollection::from_strs(&["fresh"]);
-        let mut item = Item::with_tags(Money::from_minor(150, iso::USD), tags);
+        let mut item = Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(150, iso::USD),
+            tags,
+        );
 
         assert!(item.tags().contains("fresh"));
 
         item.tags_mut().add("sale");
         assert!(item.tags().contains("sale"));
+    }
+
+    #[test]
+    fn item_product_accessor_returns_key() {
+        let key = ProductKey::default();
+        let item: Item<'_, StringTagCollection> = Item::new(key, Money::from_minor(100, iso::USD));
+
+        assert_eq!(item.product(), key);
     }
 }

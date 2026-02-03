@@ -6,7 +6,11 @@ use good_lp::{Expression, ProblemVariables, Solution, SolverModel};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
-use crate::{basket::Basket, promotions::Promotion, solvers::SolverError};
+use crate::{
+    basket::Basket,
+    promotions::{Promotion, PromotionKey, applications::PromotionApplication},
+    solvers::SolverError,
+};
 
 mod simple_discount;
 
@@ -80,16 +84,12 @@ pub struct PromotionInstance<'a> {
 }
 
 impl<'a> PromotionInstance<'a> {
-    /// Create a new promotion instance (promotion + its solver variables).
+    /// Create a new promotion instance (promotion & its solver variables).
     ///
-    /// If the promotion cannot possibly apply to the provided `basket`/`items`, we avoid adding
-    /// any decision variables and instead store a no-op variable adapter. This keeps the global
-    /// model smaller and prevents inapplicable promotions from contributing to:
-    /// - the objective expression (`cost`), or
-    /// - any per-item usage sums used for exclusivity constraints.
-    ///
-    /// `pb` and `cost` are mutated to register variables and their objective coefficients for
-    /// applicable promotions.
+    /// If the promotion cannot apply to the provided `basket`/`items`, we can avoid adding
+    /// any decision variables and instead store a no-op one. This keeps the global
+    /// model smaller and prevents inapplicable promotions from contributing to the objective
+    /// expression (`cost`), or any per-item usage sums used for the exclusivity constraints.
     ///
     /// # Errors
     ///
@@ -114,8 +114,8 @@ impl<'a> PromotionInstance<'a> {
 
     /// Contribute this promotion's per-item usage term for `item_idx`.
     ///
-    /// This is called while building the global per-item equality that enforces:
-    /// "an item is either full price (`z_i`) or used by exactly one promotion".
+    /// This is called while building the global per-item equality that enforces that
+    /// an item is either full price, or used by exactly one promotion.
     pub fn add_item_usage(&self, usage: Expression, item_idx: usize) -> Expression {
         self.vars.add_item_usage(usage, item_idx)
     }
@@ -133,7 +133,7 @@ impl<'a> PromotionInstance<'a> {
     ) -> S {
         match &self.promotion {
             Promotion::SimpleDiscount(simple) => {
-                ILPPromotion::add_constraints(simple, model, self.vars.as_ref(), basket, items)
+                simple.add_constraints(model, self.vars.as_ref(), basket, items)
             }
         }
     }
@@ -142,16 +142,44 @@ impl<'a> PromotionInstance<'a> {
     ///
     /// Reads the solved variable values to determine which items this promotion selected and
     /// returns the per-item `(original_minor, discounted_minor)` pairs for those items.
+    ///
+    /// # Errors
+    ///
+    /// Returns `SolverError` if a selected item index is invalid (missing from the basket),
+    /// or if the discount for a selected item cannot be computed.
     pub fn calculate_item_discounts(
         &self,
         solution: &dyn Solution,
         basket: &'a Basket<'a>,
         items: &[usize],
-    ) -> FxHashMap<usize, (i64, i64)> {
+    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
         match &self.promotion {
             Promotion::SimpleDiscount(simple) => {
                 simple.calculate_item_discounts(solution, self.vars.as_ref(), basket, items)
             }
+        }
+    }
+
+    /// Post-solve interpretation returning full promotion applications.
+    ///
+    /// Reads the solved variable values to determine which items this promotion selected and
+    /// returns [`PromotionApplication`] instances with bundle IDs and price details.
+    pub fn calculate_item_applications(
+        &self,
+        solution: &dyn Solution,
+        basket: &'a Basket<'a>,
+        items: &[usize],
+        next_bundle_id: &mut usize,
+    ) -> SmallVec<[PromotionApplication<'a>; 10]> {
+        match &self.promotion {
+            Promotion::SimpleDiscount(simple) => simple.calculate_item_applications(
+                self.promotion.key(),
+                solution,
+                self.vars.as_ref(),
+                basket,
+                items,
+                next_bundle_id,
+            ),
         }
     }
 }
@@ -160,11 +188,6 @@ impl<'a> PromotionInstance<'a> {
 ///
 /// A promotion can expose a set of per-item decision variables (typically binary) that indicate
 /// whether the promotion uses a given item.
-///
-/// The global ILP model enforces exclusivity with a per-item equality like:
-/// `z_i + sum_p x_{p,i} = 1`, where `z_i` means "pay full price" and `x_{p,i}` means "promotion p
-/// uses item i". Implementors of this trait contribute their `x_{p,i}` terms to that sum and
-/// allow the post-solve step to query which items were selected.
 pub trait PromotionVars: fmt::Debug + Send + Sync {
     /// Add this promotion's usage term for `item_idx` to the running `usage` expression.
     ///
@@ -203,7 +226,7 @@ pub trait PromotionVars: fmt::Debug + Send + Sync {
 ///   Implementations should therefore treat an "empty" `vars` as "selects nothing" and avoid
 ///   introducing constraints that would accidentally affect the global model.
 pub trait ILPPromotion<'a>: Send + Sync {
-    /// Return whether this promotion *might* apply to the given basket and candidate items.
+    /// Return whether this promotion _might_ apply to the given basket and candidate items.
     ///
     /// This is used as a fast pre-check to avoid allocating variables/constraints for
     /// promotions that cannot possibly contribute to the solution.
@@ -247,8 +270,8 @@ pub trait ILPPromotion<'a>: Send + Sync {
     ///
     /// `vars` is whatever was returned from [`ILPPromotion::add_variables`]. When
     /// this promotion is not applicable, `vars` will be a no-op implementation that
-    /// never selects an item; in that case, this method should behave like an identity
-    /// function and return `model` unchanged.
+    /// never selects an item; in that case, this method should just return `model`
+    /// unchanged.
     fn add_constraints<S: SolverModel>(
         &self,
         model: S,
@@ -264,17 +287,43 @@ pub trait ILPPromotion<'a>: Send + Sync {
     ///
     /// Requirements:
     /// - Only include items that are selected in `solution` according to `vars`.
-    /// - Values must be in **minor units** and must be consistent with the objective
+    /// - Values must be in minor units and must be consistent with the objective
     ///   coefficients used in [`ILPPromotion::add_variables`].
     /// - The returned map is later applied by the solver; incorrect values will
     ///   directly translate into incorrect totals.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SolverError`] if a selected item index is invalid (missing from the basket),
+    /// or if the discount for a selected item cannot be computed.
     fn calculate_item_discounts(
         &self,
         solution: &dyn Solution,
         vars: &dyn PromotionVars,
         basket: &'a Basket<'a>,
         items: &[usize],
-    ) -> FxHashMap<usize, (i64, i64)>;
+    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError>;
+
+    /// Calculate promotion applications for selected items.
+    ///
+    /// Similar to [`ILPPromotion::calculate_item_discounts`], but returns full
+    /// [`PromotionApplication`] instances with bundle IDs and `Money` values.
+    ///
+    /// Each promotion type determines its own bundling semantics:
+    /// - `SimpleDiscount`: Each item gets its own unique `bundle_id` (no bundling).
+    /// - Future bundle promotions: Items in the same deal share one `bundle_id`.
+    ///
+    /// The `next_bundle_id` counter is passed mutably and should be incremented
+    /// for each new bundle created. This ensures unique IDs across all promotions.
+    fn calculate_item_applications(
+        &self,
+        promotion_key: PromotionKey,
+        solution: &dyn Solution,
+        vars: &dyn PromotionVars,
+        basket: &'a Basket<'a>,
+        items: &[usize],
+        next_bundle_id: &mut usize,
+    ) -> SmallVec<[PromotionApplication<'a>; 10]>;
 }
 
 /// No-op promotion variables implementation
@@ -288,5 +337,61 @@ impl PromotionVars for NoopPromotionVars {
 
     fn is_item_selected(&self, _solution: &dyn Solution, _item_idx: usize) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use good_lp::{Expression, ProblemVariables, Solution, SolutionStatus, Variable};
+    use rusty_money::{Money, iso};
+    use testresult::TestResult;
+
+    use crate::{
+        basket::Basket,
+        discounts::Discount,
+        items::Item,
+        products::ProductKey,
+        promotions::{Promotion, PromotionKey, simple_discount::SimpleDiscount},
+        tags::{collection::TagCollection, string::StringTagCollection},
+    };
+
+    use super::PromotionInstance;
+
+    #[derive(Debug)]
+    struct SelectAllSolution;
+
+    impl Solution for SelectAllSolution {
+        fn status(&self) -> SolutionStatus {
+            SolutionStatus::Optimal
+        }
+
+        fn value(&self, _variable: Variable) -> f64 {
+            1.0
+        }
+    }
+
+    #[test]
+    fn promotion_instance_calculates_item_discounts_via_inner_promotion() -> TestResult {
+        let items = [Item::new(
+            ProductKey::default(),
+            Money::from_minor(100, iso::GBP),
+        )];
+        let basket = Basket::with_items(items, iso::GBP)?;
+
+        let promotion = Promotion::SimpleDiscount(SimpleDiscount::new(
+            PromotionKey::default(),
+            StringTagCollection::empty(),
+            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+        ));
+
+        let mut pb = ProblemVariables::new();
+        let mut cost = Expression::default();
+        let instance = PromotionInstance::new(&promotion, &basket, &[0], &mut pb, &mut cost)?;
+
+        let discounts = instance.calculate_item_discounts(&SelectAllSolution, &basket, &[0])?;
+
+        assert_eq!(discounts.get(&0), Some(&(100, 50)));
+
+        Ok(())
     }
 }
