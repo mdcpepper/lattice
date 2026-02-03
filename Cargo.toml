@@ -3,10 +3,27 @@ name = "dante"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Default to the minimal bundled MILP solver.
+default = ["solver-microlp"]
+
+# Use microlp (bundled) as the MILP solver backend.
+solver-microlp = ["good_lp/microlp"]
+
+# Use HiGHS as the MILP solver backend (requires building the `highs` crate).
+# If you enable both, the code will prefer HiGHS.
+solver-highs = ["good_lp/highs"]
+
 [dependencies]
+anyhow = "1.0.100"
+comfy-table = "7.2.2"
 decimal-percentage = "0.1.4"
+good_lp = { version = "1.14.2", default-features = false }
+num-traits = "0.2.19"
 rust_decimal = "1.40.0"
+rustc-hash = "2.1.1"
 rusty-money = "0.5.0"
+slotmap = "1.1.1"
 smallvec = "1.15.1"
 testresult = "0.4.1"
 thiserror = "2.0.18"

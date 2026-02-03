@@ -1,6 +1,6 @@
 //! Prices
 
-use rusty_money::{Money, MoneyError, iso};
+use rusty_money::{Money, MoneyError, iso::Currency};
 use thiserror::Error;
 
 use crate::{items::Item, tags::collection::TagCollection};
@@ -25,7 +25,7 @@ pub enum TotalPriceError {
 /// - [`TotalPriceError::Money`]: Wrapped money arithmetic or currency mismatch error.
 pub fn total_price<'a, T: TagCollection>(
     items: &[Item<'a, T>],
-) -> Result<Money<'a, iso::Currency>, TotalPriceError> {
+) -> Result<Money<'a, Currency>, TotalPriceError> {
     let first = items.first().ok_or(TotalPriceError::NoItems)?;
 
     let total = items.iter().try_fold(
@@ -38,20 +38,21 @@ pub fn total_price<'a, T: TagCollection>(
 
 #[cfg(test)]
 mod tests {
+    use rusty_money::iso::GBP;
     use testresult::TestResult;
 
-    use crate::tags::string::StringTagCollection;
+    use crate::{products::ProductKey, tags::string::StringTagCollection};
 
     use super::*;
 
     #[test]
     fn test_total_price() -> TestResult {
         let items: [Item<'_, StringTagCollection>; 2] = [
-            Item::new(Money::from_minor(100, iso::USD)),
-            Item::new(Money::from_minor(200, iso::USD)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
         ];
 
-        assert_eq!(total_price(&items)?, Money::from_minor(300, iso::USD));
+        assert_eq!(total_price(&items)?, Money::from_minor(300, GBP));
 
         Ok(())
     }

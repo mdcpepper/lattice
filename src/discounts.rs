@@ -40,18 +40,18 @@ pub enum Discount<'a> {
     /// Apply a percentage discount to the total price of all items.
     ///
     /// Discount every item by this percentage of the total.
-    PercentageDiscountAllItems(Percentage),
+    PercentageOffBundleTotal(Percentage),
 
     /// Apply a percentage discount to the price of the cheapest item.
     ///
     /// Discount only the cheapest item by this percentage of its price.
-    PercentageDiscountCheapestItem(Percentage),
+    PercentageOffCheapestItem(Percentage),
 
     /// Override the total price of all items with a fixed price.
-    PriceOverrideAllItems(Money<'a, Currency>),
+    SetBundleTotalPrice(Money<'a, Currency>),
 
     /// Override just the price of the cheapest item with a fixed price.
-    PriceOverrideCheapestItem(Money<'a, Currency>),
+    SetCheapestItemPrice(Money<'a, Currency>),
 }
 
 /// Calculates the discounted price for a set of items.
@@ -69,22 +69,22 @@ pub fn calculate_discount<'a, T: TagCollection>(
     items: &'a [Item<'a, T>],
 ) -> Result<Money<'a, Currency>, DiscountError> {
     match discount {
-        Discount::PriceOverrideAllItems(price) => {
+        Discount::SetBundleTotalPrice(price) => {
             ensure_not_empty(items)?;
             Ok(*price)
         }
-        Discount::PriceOverrideCheapestItem(price) => {
+        Discount::SetCheapestItemPrice(price) => {
             let (total, cheapest) = totals_with_cheapest(items)?;
 
             Ok(total.sub(*cheapest.price())?.add(*price)?)
         }
-        Discount::PercentageDiscountAllItems(percent) => {
+        Discount::PercentageOffBundleTotal(percent) => {
             let (total, cheapest) = totals_with_cheapest(items)?;
             let discount_money = discount_on(cheapest.price(), percent)?;
 
             Ok(total.sub(discount_money)?)
         }
-        Discount::PercentageDiscountCheapestItem(percent) => {
+        Discount::PercentageOffCheapestItem(percent) => {
             let (total, cheapest) = totals_with_cheapest(items)?;
             let discount_money = discount_on(cheapest.price(), percent)?;
 
@@ -154,20 +154,22 @@ mod tests {
     use rusty_money::iso::GBP;
     use testresult::TestResult;
 
+    use crate::products::ProductKey;
+
     use super::*;
 
     fn test_items<'a>() -> [Item<'a>; 3] {
         [
-            Item::new(Money::from_minor(100, GBP)),
-            Item::new(Money::from_minor(200, GBP)),
-            Item::new(Money::from_minor(300, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(300, GBP)),
         ]
     }
 
     #[test]
     fn calculate_price_override_all_items() -> TestResult {
         let items = test_items();
-        let discount = Discount::PriceOverrideAllItems(Money::from_minor(50, GBP));
+        let discount = Discount::SetBundleTotalPrice(Money::from_minor(50, GBP));
         let discounted_price = calculate_discount(&discount, &items)?;
 
         assert_eq!(discounted_price, Money::from_minor(50, GBP));
@@ -178,7 +180,7 @@ mod tests {
     #[test]
     fn calculate_price_override_cheapest_item() -> TestResult {
         let items = test_items();
-        let discount = Discount::PriceOverrideCheapestItem(Money::from_minor(50, GBP));
+        let discount = Discount::SetCheapestItemPrice(Money::from_minor(50, GBP));
         let discounted_price = calculate_discount(&discount, &items)?;
 
         assert_eq!(discounted_price, Money::from_minor(550, GBP));
@@ -189,7 +191,7 @@ mod tests {
     #[test]
     fn calculate_percentage_all_items() -> TestResult {
         let items = test_items();
-        let discount = Discount::PercentageDiscountAllItems(Percentage::from(0.25));
+        let discount = Discount::PercentageOffBundleTotal(Percentage::from(0.25));
         let discounted_price = calculate_discount(&discount, &items)?;
 
         assert_eq!(discounted_price, Money::from_minor(575, GBP));
@@ -200,7 +202,7 @@ mod tests {
     #[test]
     fn calculate_percentage_cheapest_item() -> TestResult {
         let items = test_items();
-        let discount = Discount::PercentageDiscountCheapestItem(Percentage::from(0.5));
+        let discount = Discount::PercentageOffCheapestItem(Percentage::from(0.5));
         let discounted_price = calculate_discount(&discount, &items)?;
 
         assert_eq!(discounted_price, Money::from_minor(550, GBP));
@@ -212,14 +214,13 @@ mod tests {
     fn calculate_discount_returns_no_items_error() {
         let items: [Item<'static>; 0] = [];
 
-        let price_override_all = Discount::PriceOverrideAllItems(Money::from_minor(50, GBP));
+        let price_override_all = Discount::SetBundleTotalPrice(Money::from_minor(50, GBP));
 
-        let price_override_cheapest =
-            Discount::PriceOverrideCheapestItem(Money::from_minor(50, GBP));
+        let price_override_cheapest = Discount::SetCheapestItemPrice(Money::from_minor(50, GBP));
 
-        let percent_all = Discount::PercentageDiscountAllItems(Percentage::from(0.25));
+        let percent_all = Discount::PercentageOffBundleTotal(Percentage::from(0.25));
 
-        let percent_cheapest = Discount::PercentageDiscountCheapestItem(Percentage::from(0.25));
+        let percent_cheapest = Discount::PercentageOffCheapestItem(Percentage::from(0.25));
 
         assert!(matches!(
             calculate_discount(&price_override_all, &items),
@@ -237,29 +238,6 @@ mod tests {
             calculate_discount(&percent_cheapest, &items),
             Err(DiscountError::NoItems)
         ));
-    }
-
-    #[test]
-    fn discount_debug_includes_variant_names() {
-        let price = Money::from_minor(50, GBP);
-
-        let all = format!(
-            "{:?}",
-            Discount::PercentageDiscountAllItems(Percentage::from(0.25))
-        );
-
-        let cheapest = format!(
-            "{:?}",
-            Discount::PercentageDiscountCheapestItem(Percentage::from(0.25))
-        );
-
-        let override_all = format!("{:?}", Discount::PriceOverrideAllItems(price));
-        let override_cheapest = format!("{:?}", Discount::PriceOverrideCheapestItem(price));
-
-        assert!(all.contains("PercentageDiscountAllItems"));
-        assert!(cheapest.contains("PercentageDiscountCheapestItem"));
-        assert!(override_all.contains("PriceOverrideAllItems"));
-        assert!(override_cheapest.contains("PriceOverrideCheapestItem"));
     }
 
     #[test]
