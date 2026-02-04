@@ -57,6 +57,10 @@ pub enum FixtureError {
     #[error("Unsupported promotion type: {0}")]
     UnsupportedPromotionType(String),
 
+    /// Invalid promotion data
+    #[error("Invalid promotion data: {0}")]
+    InvalidPromotionData(String),
+
     /// Currency mismatch between products
     #[error("Currency mismatch: expected {0}, found {1}")]
     CurrencyMismatch(String, String),
@@ -383,9 +387,9 @@ mod tests {
         let mut fixture = Fixture::new();
 
         fixture
-            .load_products("example_simple_discounts")?
-            .load_items("example_simple_discounts")?
-            .load_promotions("example_simple_discounts")?;
+            .load_products("example_direct_discounts")?
+            .load_items("example_direct_discounts")?
+            .load_promotions("example_direct_discounts")?;
 
         // Check products were loaded
         assert_eq!(fixture.product_keys.len(), 3);
@@ -409,7 +413,7 @@ mod tests {
 
     #[test]
     fn fixture_from_set_loads_all_fixtures() -> TestResult {
-        let fixture = Fixture::from_set("example_simple_discounts")?;
+        let fixture = Fixture::from_set("example_direct_discounts")?;
 
         assert_eq!(fixture.product_keys.len(), 3);
         assert_eq!(fixture.items.len(), 3);
@@ -420,7 +424,7 @@ mod tests {
 
     #[test]
     fn fixture_basket_creates_basket_from_items() -> TestResult {
-        let fixture = Fixture::from_set("example_simple_discounts")?;
+        let fixture = Fixture::from_set("example_direct_discounts")?;
         let basket = fixture.basket()?;
 
         assert_eq!(basket.len(), 3);
@@ -431,7 +435,7 @@ mod tests {
 
     #[test]
     fn fixture_item_group_creates_item_group_from_items() -> TestResult {
-        let fixture = Fixture::from_set("example_simple_discounts")?;
+        let fixture = Fixture::from_set("example_direct_discounts")?;
         let item_group = fixture.item_group()?;
 
         assert_eq!(item_group.len(), 3);
@@ -452,7 +456,7 @@ mod tests {
     fn fixture_no_items_returns_error() -> TestResult {
         let mut fixture = Fixture::new();
 
-        fixture.load_products("example_simple_discounts")?;
+        fixture.load_products("example_direct_discounts")?;
 
         let result = fixture.basket();
 
@@ -558,7 +562,7 @@ mod tests {
 
     #[test]
     fn fixture_items_and_promotions_accessors_return_loaded_data() -> TestResult {
-        let fixture = Fixture::from_set("example_simple_discounts")?;
+        let fixture = Fixture::from_set("example_direct_discounts")?;
 
         assert_eq!(fixture.items().len(), 3);
         assert_eq!(fixture.promotions().len(), 2);
@@ -570,7 +574,7 @@ mod tests {
     fn fixture_item_group_no_items_returns_error() -> TestResult {
         let mut fixture = Fixture::new();
 
-        fixture.load_products("example_simple_discounts")?;
+        fixture.load_products("example_direct_discounts")?;
 
         let result = fixture.item_group();
 
@@ -581,7 +585,7 @@ mod tests {
 
     #[test]
     fn fixture_meta_maps_are_exposed() -> TestResult {
-        let fixture = Fixture::from_set("example_simple_discounts")?;
+        let fixture = Fixture::from_set("example_direct_discounts")?;
 
         assert_eq!(fixture.product_meta_map().len(), 3);
         assert_eq!(fixture.promotion_meta_map().len(), 2);

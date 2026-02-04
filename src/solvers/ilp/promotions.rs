@@ -12,7 +12,7 @@ use crate::{
     solvers::{SolverError, ilp::state::ILPState},
 };
 
-mod simple_discount;
+mod direct_discount;
 
 /// Collection of promotion instances for a solve operation
 #[derive(Debug)]
@@ -98,8 +98,8 @@ impl<'a> PromotionInstance<'a> {
         state: &mut ILPState,
     ) -> Result<Self, SolverError> {
         let vars = match (promotion, promotion.is_applicable(item_group)) {
-            (Promotion::SimpleDiscount(simple_discount), true) => {
-                simple_discount.add_variables(item_group, state)?
+            (Promotion::DirectDiscount(direct_discount), true) => {
+                direct_discount.add_variables(item_group, state)?
             }
             (_promotion, false) => Box::new(NoopPromotionVars) as Box<dyn PromotionVars>,
         };
@@ -122,8 +122,8 @@ impl<'a> PromotionInstance<'a> {
     /// model unchanged.
     fn add_constraints<S: SolverModel>(&self, model: S, item_group: &ItemGroup<'_>) -> S {
         match &self.promotion {
-            Promotion::SimpleDiscount(simple) => {
-                simple.add_constraints(model, self.vars.as_ref(), item_group)
+            Promotion::DirectDiscount(direct_discount) => {
+                direct_discount.add_constraints(model, self.vars.as_ref(), item_group)
             }
         }
     }
@@ -143,8 +143,8 @@ impl<'a> PromotionInstance<'a> {
         item_group: &ItemGroup<'_>,
     ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
         match &self.promotion {
-            Promotion::SimpleDiscount(simple) => {
-                simple.calculate_item_discounts(solution, self.vars.as_ref(), item_group)
+            Promotion::DirectDiscount(direct_discount) => {
+                direct_discount.calculate_item_discounts(solution, self.vars.as_ref(), item_group)
             }
         }
     }
@@ -165,13 +165,14 @@ impl<'a> PromotionInstance<'a> {
         next_bundle_id: &mut usize,
     ) -> Result<SmallVec<[PromotionApplication<'group>; 10]>, SolverError> {
         match &self.promotion {
-            Promotion::SimpleDiscount(simple) => simple.calculate_item_applications(
-                self.promotion.key(),
-                solution,
-                self.vars.as_ref(),
-                item_group,
-                next_bundle_id,
-            ),
+            Promotion::DirectDiscount(direct_discount) => direct_discount
+                .calculate_item_applications(
+                    self.promotion.key(),
+                    solution,
+                    self.vars.as_ref(),
+                    item_group,
+                    next_bundle_id,
+                ),
         }
     }
 }
@@ -297,7 +298,7 @@ pub trait ILPPromotion: Send + Sync {
     /// [`PromotionApplication`] instances with bundle IDs and `Money` values.
     ///
     /// Each promotion type determines its own bundling semantics:
-    /// - `SimpleDiscount`: Each item gets its own unique `bundle_id` (no bundling).
+    /// - `DirectDiscountPromotion`: Each item gets its own unique `bundle_id` (no bundling).
     /// - Future bundle promotions: Items in the same deal share one `bundle_id`.
     ///
     /// The `next_bundle_id` counter is passed mutably and should be incremented
@@ -337,10 +338,12 @@ mod tests {
     use testresult::TestResult;
 
     use crate::{
-        discounts::Discount,
         items::{Item, groups::ItemGroup},
         products::ProductKey,
-        promotions::{Promotion, PromotionKey, simple_discount::SimpleDiscount},
+        promotions::{
+            Promotion, PromotionKey,
+            direct_discount::{DirectDiscount, DirectDiscountPromotion},
+        },
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
@@ -375,10 +378,10 @@ mod tests {
         )];
         let item_group = item_group_from_items(items);
 
-        let promotion = Promotion::SimpleDiscount(SimpleDiscount::new(
+        let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
         ));
 
         let pb = ProblemVariables::new();

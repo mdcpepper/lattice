@@ -286,17 +286,17 @@ mod tests {
     use std::collections::HashMap;
 
     use decimal_percentage::Percentage;
-    use rusty_money::iso;
+    use rusty_money::iso::{self, GBP};
     use smallvec::SmallVec;
     use testresult::TestResult;
 
     use crate::{
-        discounts::Discount,
         items::{Item, groups::ItemGroup},
         products::ProductKey,
         promotions::{
-            Promotion, PromotionKey, applications::PromotionApplication,
-            simple_discount::SimpleDiscount,
+            Promotion, PromotionKey,
+            applications::PromotionApplication,
+            direct_discount::{DirectDiscount, DirectDiscountPromotion},
         },
         tags::{collection::TagCollection, string::StringTagCollection},
     };
@@ -305,9 +305,9 @@ mod tests {
 
     fn test_items<'a>() -> [Item<'a>; 3] {
         [
-            Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(200, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(300, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(300, GBP)),
         ]
     }
 
@@ -315,26 +315,24 @@ mod tests {
         [
             Item::with_tags(
                 ProductKey::default(),
-                Money::from_minor(100, iso::GBP),
+                Money::from_minor(100, GBP),
                 StringTagCollection::from_strs(&["a"]),
             ),
             Item::with_tags(
                 ProductKey::default(),
-                Money::from_minor(200, iso::GBP),
+                Money::from_minor(200, GBP),
                 StringTagCollection::from_strs(&["b"]),
             ),
             Item::with_tags(
                 ProductKey::default(),
-                Money::from_minor(300, iso::GBP),
+                Money::from_minor(300, GBP),
                 StringTagCollection::from_strs(&["a", "b"]),
             ),
         ]
     }
 
     fn item_group_from_items<const N: usize>(items: [Item<'_>; N]) -> ItemGroup<'_> {
-        let currency = items
-            .first()
-            .map_or(iso::GBP, |item| item.price().currency());
+        let currency = items.first().map_or(GBP, |item| item.price().currency());
 
         ItemGroup::new(items.into_iter().collect(), currency)
     }
@@ -372,15 +370,15 @@ mod tests {
         }
 
         // Start from zero so any applied discount would be visible in the result total.
-        let total = Money::from_minor(0, iso::GBP);
+        let total = Money::from_minor(0, GBP);
 
         // Provide an application for item index 1, but the corresponding position is pre-used above.
         let applications = [PromotionApplication {
             promotion_key: PromotionKey::default(),
             item_idx: 1,
             bundle_id: 0,
-            original_price: Money::from_minor(200, iso::GBP),
-            final_price: Money::from_minor(150, iso::GBP),
+            original_price: Money::from_minor(200, GBP),
+            final_price: Money::from_minor(150, GBP),
         }];
 
         let (affected_items, _used_items, total) =
@@ -396,14 +394,14 @@ mod tests {
     #[test]
     fn apply_applications_skips_items_not_in_selection() -> TestResult {
         let used_items: ItemUsageFlags = smallvec![false; 2];
-        let total = Money::from_minor(0, iso::GBP);
+        let total = Money::from_minor(0, GBP);
 
         let applications = [PromotionApplication {
             promotion_key: PromotionKey::default(),
             item_idx: 99,
             bundle_id: 0,
-            original_price: Money::from_minor(200, iso::GBP),
-            final_price: Money::from_minor(150, iso::GBP),
+            original_price: Money::from_minor(200, GBP),
+            final_price: Money::from_minor(150, GBP),
         }];
 
         let (affected_items, _used_items, total) =
@@ -420,10 +418,10 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["a"]),
-            Discount::PercentageOffBundleTotal(Percentage::from(0.25)),
+            DirectDiscount::Percentage(Percentage::from(0.25)),
         ))];
 
         let result = ILPSolver::solve(&promotions, &item_group)?;
@@ -446,10 +444,10 @@ mod tests {
         let items = test_items();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, GBP)),
         ))];
 
         let result = ILPSolver::solve(&promotions, &item_group)?;
@@ -470,10 +468,10 @@ mod tests {
         let items = test_items();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["missing"]),
-            Discount::PercentageOffBundleTotal(Percentage::from(0.25)),
+            DirectDiscount::Percentage(Percentage::from(0.25)),
         ))];
 
         let result = ILPSolver::solve(&promotions, &item_group)?;
@@ -493,10 +491,10 @@ mod tests {
         let items = test_items();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(400, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(400, GBP)),
         ))];
 
         let result = ILPSolver::solve(&promotions, &item_group)?;
@@ -516,10 +514,10 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::SimpleDiscount(SimpleDiscount::new(
+        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["a"]),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, GBP)),
         ))];
 
         let result = ILPSolver::solve(&promotions, &item_group)?;
@@ -534,6 +532,7 @@ mod tests {
         // First application (item 0)
         let first_app = sorted_apps.first();
         assert!(first_app.is_some());
+
         let first_app = first_app.ok_or("Expected first application")?;
         assert_eq!(first_app.item_idx, 0);
         assert_eq!(first_app.original_price, Money::from_minor(100, iso::GBP));
@@ -542,12 +541,13 @@ mod tests {
         // Second application (item 2)
         let second_app = sorted_apps.get(1);
         assert!(second_app.is_some());
+
         let second_app = second_app.ok_or("Expected second application")?;
         assert_eq!(second_app.item_idx, 2);
         assert_eq!(second_app.original_price, Money::from_minor(300, iso::GBP));
         assert_eq!(second_app.final_price, Money::from_minor(50, iso::GBP));
 
-        // Each item should have a unique bundle_id (SimpleDiscount doesn't bundle)
+        // Each item should have a unique bundle_id (DirectDiscountPromotion doesn't bundle)
         assert_ne!(first_app.bundle_id, second_app.bundle_id);
 
         Ok(())
@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn solver_with_no_items_returns_empty_result() -> TestResult {
-        let item_group: ItemGroup<'_> = ItemGroup::new(SmallVec::new(), iso::GBP);
+        let item_group: ItemGroup<'_> = ItemGroup::new(SmallVec::new(), GBP);
 
         let result = ILPSolver::solve(&[], &item_group)?;
 

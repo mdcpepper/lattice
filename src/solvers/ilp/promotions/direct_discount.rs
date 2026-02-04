@@ -1,6 +1,4 @@
-//! Simple Promotions ILP
-
-use std::slice;
+//! Direct Discount Promotions ILP
 
 use good_lp::{Expression, Solution, Variable, variable};
 use num_traits::ToPrimitive;
@@ -10,10 +8,9 @@ use smallvec::SmallVec;
 use rusty_money::Money;
 
 use crate::{
-    discounts::calculate_discount,
     items::groups::ItemGroup,
     promotions::{
-        PromotionKey, applications::PromotionApplication, simple_discount::SimpleDiscount,
+        PromotionKey, applications::PromotionApplication, direct_discount::DirectDiscountPromotion,
     },
     solvers::{
         SolverError,
@@ -26,16 +23,16 @@ use crate::{
     tags::collection::TagCollection,
 };
 
-/// Solver variables for a simple discount promotion.
+/// Solver variables for a direct discount promotion.
 ///
 /// Tracks the mapping from item group indices to their corresponding
 /// binary decision variables in the ILP model.
 #[derive(Debug)]
-pub struct SimpleDiscountVars {
+pub struct DirectDiscountPromotionVars {
     item_vars: SmallVec<[(usize, Variable); 10]>,
 }
 
-impl PromotionVars for SimpleDiscountVars {
+impl PromotionVars for DirectDiscountPromotionVars {
     fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression {
         let mut updated_expr = expr;
 
@@ -55,7 +52,7 @@ impl PromotionVars for SimpleDiscountVars {
     }
 }
 
-impl ILPPromotion for SimpleDiscount<'_> {
+impl ILPPromotion for DirectDiscountPromotion<'_> {
     fn is_applicable(&self, item_group: &ItemGroup<'_>) -> bool {
         if item_group.is_empty() {
             return false;
@@ -91,11 +88,10 @@ impl ILPPromotion for SimpleDiscount<'_> {
             }
 
             // Compute the discounted price in minor units; if the discount can't be computed, return an error.
-            let discounted_minor = match calculate_discount(self.discount(), slice::from_ref(item))
-            {
-                Ok(price) => price.to_minor_units(),
-                Err(err) => return Err(err.into()),
-            };
+            let discounted_minor = self
+                .calculate_discounted_price(item)
+                .map_err(SolverError::from)?
+                .to_minor_units();
 
             // `good_lp` uses floating point coefficients; only accept values that are exactly representable
             // to avoid rounding changing the solver's preferred choice.
@@ -117,7 +113,7 @@ impl ILPPromotion for SimpleDiscount<'_> {
             state.add_to_objective(var, coeff);
         }
 
-        Ok(Box::new(SimpleDiscountVars { item_vars }))
+        Ok(Box::new(DirectDiscountPromotionVars { item_vars }))
     }
 
     fn add_constraints<S: good_lp::SolverModel>(
@@ -145,13 +141,12 @@ impl ILPPromotion for SimpleDiscount<'_> {
 
             // This must mirror the discounted minor unit value used during variable creation.
             // If we can't compute it here, something is inconsistent and should be surfaced.
-            let discounted_minor = calculate_discount(self.discount(), slice::from_ref(item))
-                .map(|price| price.to_minor_units())
-                .map_err(SolverError::from)?;
+            let discounted_minor = self
+                .calculate_discounted_price(item)
+                .map_err(SolverError::from)?
+                .to_minor_units();
 
-            let original_minor = item.price().to_minor_units();
-
-            discounts.insert(item_idx, (original_minor, discounted_minor));
+            discounts.insert(item_idx, (item.price().to_minor_units(), discounted_minor));
         }
 
         Ok(discounts)
@@ -173,13 +168,12 @@ impl ILPPromotion for SimpleDiscount<'_> {
                 continue;
             }
 
-            let discounted_minor = calculate_discount(self.discount(), slice::from_ref(item))
-                .map(|price| price.to_minor_units())
-                .map_err(SolverError::from)?;
+            let discounted_minor = self
+                .calculate_discounted_price(item)
+                .map_err(SolverError::from)?
+                .to_minor_units();
 
-            let original_minor = item.price().to_minor_units();
-
-            // For SimpleDiscount, each item gets its own unique bundle_id
+            // For DirectDiscountPromotion, each item gets its own unique bundle_id
             let bundle_id = *next_bundle_id;
             *next_bundle_id += 1;
 
@@ -187,7 +181,7 @@ impl ILPPromotion for SimpleDiscount<'_> {
                 promotion_key,
                 item_idx,
                 bundle_id,
-                original_price: Money::from_minor(original_minor, currency),
+                original_price: *item.price(),
                 final_price: Money::from_minor(discounted_minor, currency),
             });
         }
@@ -212,15 +206,14 @@ mod tests {
     use testresult::TestResult;
 
     use crate::{
-        discounts::Discount,
         items::{Item, groups::ItemGroup},
         products::ProductKey,
-        promotions::PromotionKey,
+        promotions::{PromotionKey, direct_discount::DirectDiscount},
         solvers::{SolverError, ilp::promotions::ILPPromotion},
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
-    use super::{ILPState, PromotionVars, SimpleDiscount};
+    use super::*;
 
     fn item_group_from_items<const N: usize>(items: [Item<'_>; N]) -> ItemGroup<'_> {
         let currency = items
@@ -260,10 +253,10 @@ mod tests {
     fn is_applicable_returns_false_for_empty_items() {
         let item_group: ItemGroup<'_> = ItemGroup::new(SmallVec::new(), iso::GBP);
 
-        let promo = SimpleDiscount::new(
+        let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
         );
 
         assert!(!promo.is_applicable(&item_group));
@@ -278,10 +271,11 @@ mod tests {
 
         let item_group = item_group_from_items(items);
 
-        let promo = SimpleDiscount::new(
+        // Create a discount with currency mismatch to trigger an error
+        let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetCheapestItemPrice(Money::from_minor(50, iso::USD)),
+            DirectDiscount::AmountOff(Money::from_minor(50, iso::USD)),
         );
 
         let pb = ProblemVariables::new();
@@ -301,10 +295,10 @@ mod tests {
 
         let item_group = item_group_from_items(items);
 
-        let promo = SimpleDiscount::new(
+        let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(9_007_199_254_740_993, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(9_007_199_254_740_993, iso::GBP)),
         );
 
         let pb = ProblemVariables::new();
@@ -327,10 +321,11 @@ mod tests {
 
         let item_group = item_group_from_items(items);
 
-        let promo = SimpleDiscount::new(
+        // Create a discount with currency mismatch to trigger an error
+        let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetCheapestItemPrice(Money::from_minor(50, iso::USD)),
+            DirectDiscount::AmountOff(Money::from_minor(50, iso::USD)),
         );
 
         let vars = AlwaysSelectedVars;
@@ -350,10 +345,10 @@ mod tests {
 
         let item_group = item_group_from_items(items);
 
-        let promo = SimpleDiscount::new(
+        let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
         );
 
         let vars = NeverSelectedVars;
@@ -375,10 +370,10 @@ mod tests {
 
         let item_group = item_group_from_items(items);
 
-        let promo = SimpleDiscount::new(
+        let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
         );
 
         let vars = AlwaysSelectedVars;
@@ -400,10 +395,10 @@ mod tests {
 
         let item_group = item_group_from_items(items);
 
-        let promo = SimpleDiscount::new(
+        let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
         );
 
         let vars = AlwaysSelectedVars;
@@ -458,10 +453,11 @@ mod tests {
 
         let item_group = item_group_from_items(items);
 
-        let promo = SimpleDiscount::new(
+        // Create a discount with currency mismatch to trigger an error
+        let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetCheapestItemPrice(Money::from_minor(50, iso::USD)),
+            DirectDiscount::AmountOff(Money::from_minor(50, iso::USD)),
         );
 
         let vars = AlwaysSelectedVars;
@@ -489,10 +485,10 @@ mod tests {
 
         let item_group = item_group_from_items(items);
 
-        let promo = SimpleDiscount::new(
+        let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
         );
 
         let vars = AlwaysSelectedVars;

@@ -3,12 +3,12 @@
 use slotmap::new_key_type;
 
 use crate::{
-    items::groups::ItemGroup, promotions::simple_discount::SimpleDiscount,
+    items::groups::ItemGroup, promotions::direct_discount::DirectDiscountPromotion,
     solvers::ilp::promotions::ILPPromotion,
 };
 
 pub mod applications;
-pub mod simple_discount;
+pub mod direct_discount;
 
 new_key_type! {
     /// Promotion Key
@@ -25,22 +25,22 @@ pub struct PromotionMeta {
 /// Promotion enum
 #[derive(Debug, Clone)]
 pub enum Promotion<'a> {
-    /// Simple discount promotion
-    SimpleDiscount(SimpleDiscount<'a>),
+    /// Direct Discount Promotion
+    DirectDiscount(DirectDiscountPromotion<'a>),
 }
 
 impl Promotion<'_> {
     /// Return the promotion key.
     pub fn key(&self) -> PromotionKey {
         match self {
-            Promotion::SimpleDiscount(simple_discount) => simple_discount.key(),
+            Promotion::DirectDiscount(direct_discount) => direct_discount.key(),
         }
     }
 
     /// Return whether this promotion _might_ apply to the given item group.
     pub fn is_applicable(&self, item_group: &ItemGroup<'_>) -> bool {
         match self {
-            Promotion::SimpleDiscount(simple_discount) => simple_discount.is_applicable(item_group),
+            Promotion::DirectDiscount(direct_discount) => direct_discount.is_applicable(item_group),
         }
     }
 }
@@ -52,12 +52,12 @@ mod tests {
     use smallvec::SmallVec;
 
     use crate::{
-        discounts::Discount,
         items::groups::ItemGroup,
+        promotions::direct_discount::{DirectDiscount, DirectDiscountPromotion},
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
-    use super::{Promotion, PromotionKey, simple_discount::SimpleDiscount};
+    use super::*;
 
     #[test]
     fn key_delegates_to_inner_promotion_key() {
@@ -67,13 +67,13 @@ mod tests {
         let mut keys = SlotMap::<PromotionKey, ()>::with_key();
         let key = keys.insert(());
 
-        let inner = SimpleDiscount::new(
+        let inner = DirectDiscountPromotion::new(
             key,
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
         );
 
-        let promo = Promotion::SimpleDiscount(inner);
+        let promo = Promotion::DirectDiscount(inner);
 
         assert_eq!(promo.key(), key);
         assert_ne!(promo.key(), PromotionKey::default());
@@ -88,13 +88,13 @@ mod tests {
         // `Promotion::is_applicable` doesn't accidentally short-circuit to `true`.
         let item_group: ItemGroup<'_> = ItemGroup::new(SmallVec::new(), iso::GBP);
 
-        let inner = SimpleDiscount::new(
+        let inner = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            Discount::SetBundleTotalPrice(Money::from_minor(50, iso::GBP)),
+            DirectDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
         );
 
-        let promo = Promotion::SimpleDiscount(inner);
+        let promo = Promotion::DirectDiscount(inner);
 
         assert!(!promo.is_applicable(&item_group));
     }

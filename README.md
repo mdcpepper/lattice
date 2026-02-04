@@ -6,11 +6,6 @@
 Dante is a high-performance, general-purpose pricing, promotion and basket 
 optimisation engine written in Rust.
 
-## Discounts
-
-Percentage or fixed-amount discounts can be applied to either an entire collection 
-of items, or the cheapest one in the bundle.
-
 ## Promotions
 
 Promotions are rules that select candidate items via tag intersections, and 
@@ -24,13 +19,13 @@ per-item applications (including original/final prices and bundle groupings)
 that can be rendered on a receipt. Each promotion type is documented in its own
 section below.
 
-### Simple Discount
+### Direct Discount
 
-A simple percentage discount or fixed price override applied to qualifying 
+A simple, direct percentage discount or fixed price override applied to qualifying 
 items independently (no bundling).
 
 ```
-cargo run --release --example simple_discounts
+cargo run --release --example direct_discounts
 ```
 
 In this example "Drink" qualifies for the "20% off" promotion, and "Snack" 

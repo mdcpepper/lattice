@@ -1,18 +1,15 @@
-//! Discounts
+//! Discount utilities
+//!
+//! This module provides utility functions for discount calculations
+//! that can be shared across different promotion types.
 
 use decimal_percentage::Percentage;
 use rust_decimal::{
     Decimal, RoundingStrategy,
     prelude::{FromPrimitive, ToPrimitive},
 };
-use rusty_money::{Money, MoneyError, iso::Currency};
+use rusty_money::MoneyError;
 use thiserror::Error;
-
-use crate::{
-    items::{Item, cheapest_item},
-    pricing::{TotalPriceError, total_price},
-    tags::collection::TagCollection,
-};
 
 /// Errors specific to discount calculations.
 #[derive(Debug, Error)]
@@ -28,122 +25,26 @@ pub enum DiscountError {
     /// Wrapped money arithmetic or currency mismatch error.
     #[error(transparent)]
     Money(#[from] MoneyError),
-
-    /// Errors bubbled up from total price calculation.
-    #[error(transparent)]
-    TotalPrice(#[from] TotalPriceError),
 }
 
-/// Represents a single, valid discount scenario.
-#[derive(Debug, Copy, Clone)]
-pub enum Discount<'a> {
-    /// Apply a percentage discount to the total price of all items.
-    ///
-    /// Discount every item by this percentage of the total.
-    PercentageOffBundleTotal(Percentage),
-
-    /// Apply a percentage discount to the price of the cheapest item.
-    ///
-    /// Discount only the cheapest item by this percentage of its price.
-    PercentageOffCheapestItem(Percentage),
-
-    /// Override the total price of all items with a fixed price.
-    SetBundleTotalPrice(Money<'a, Currency>),
-
-    /// Override just the price of the cheapest item with a fixed price.
-    SetCheapestItemPrice(Money<'a, Currency>),
-}
-
-/// Calculates the discounted price for a set of items.
+/// Calculate the discount amount in minor units based on a percentage and a minor unit amount.
+///
+/// This is a utility function that can be used by promotion types when calculating
+/// percentage-based discounts.
 ///
 /// # Errors
 ///
 /// Returns an error if:
-/// - `items` is empty and the discount needs an item currency (`DiscountError::NoItems`).
-/// - a percentage calculation cannot be safely represented in minor units
-///   (`DiscountError::PercentConversion`).
-/// - underlying money arithmetic fails (for example, due to currency mismatch)
-///   (`DiscountError::Money`).
-pub fn calculate_discount<'a, T: TagCollection>(
-    discount: &Discount<'a>,
-    items: &'a [Item<'a, T>],
-) -> Result<Money<'a, Currency>, DiscountError> {
-    match discount {
-        Discount::SetBundleTotalPrice(price) => {
-            ensure_not_empty(items)?;
-            Ok(*price)
-        }
-        Discount::SetCheapestItemPrice(price) => {
-            let (total, cheapest) = totals_with_cheapest(items)?;
-
-            Ok(total.sub(*cheapest.price())?.add(*price)?)
-        }
-        Discount::PercentageOffBundleTotal(percent) => {
-            let (total, cheapest) = totals_with_cheapest(items)?;
-            let discount_money = discount_on(cheapest.price(), percent)?;
-
-            Ok(total.sub(discount_money)?)
-        }
-        Discount::PercentageOffCheapestItem(percent) => {
-            let (total, cheapest) = totals_with_cheapest(items)?;
-            let discount_money = discount_on(cheapest.price(), percent)?;
-
-            Ok(total
-                .sub(*cheapest.price())?
-                .add(cheapest.price().sub(discount_money)?)?)
-        }
-    }
-}
-
-/// Return `NoItems` if the slice is empty.
-fn ensure_not_empty<T: TagCollection>(items: &[Item<'_, T>]) -> Result<(), DiscountError> {
-    if items.is_empty() {
-        Err(DiscountError::NoItems)
-    } else {
-        Ok(())
-    }
-}
-
-/// Fetch the cheapest item or surface `NoItems`.
-fn require_cheapest<'a, T: TagCollection>(
-    items: &'a [Item<'a, T>],
-) -> Result<&'a Item<'a, T>, DiscountError> {
-    cheapest_item(items).ok_or(DiscountError::NoItems)
-}
-
-/// Compute total once and return it alongside the cheapest item.
-fn totals_with_cheapest<'a, T: TagCollection>(
-    items: &'a [Item<'a, T>],
-) -> Result<(Money<'a, Currency>, &'a Item<'a, T>), DiscountError> {
-    let cheapest = require_cheapest(items)?;
-    let total = total_price(items)?;
-
-    Ok((total, cheapest))
-}
-
-/// Calculate the discount amount on a price for a percentage.
-fn discount_on<'a>(
-    price: &Money<'a, Currency>,
-    percent: &Percentage,
-) -> Result<Money<'a, Currency>, DiscountError> {
-    let discount_minor = percent_of_minor(percent, price.to_minor_units())?;
-
-    Ok(Money::from_minor(discount_minor, price.currency()))
-}
-
-/// Calculate the discount amount in minor units based on a percentage and a minor unit amount.
-fn percent_of_minor(percent: &Percentage, minor: i64) -> Result<i64, DiscountError> {
-    let percent: Decimal = (*percent) * Decimal::ONE;
-
+/// - The percentage calculation overflows or cannot be safely represented (`DiscountError::PercentConversion`).
+pub fn percent_of_minor(percent: &Percentage, minor: i64) -> Result<i64, DiscountError> {
     let minor = Decimal::from_i64(minor).ok_or(DiscountError::PercentConversion)?;
 
-    let applied = percent
+    ((*percent) * Decimal::ONE) // decimal_percentage crate doesn't actually expose the underlying Decimal
         .checked_mul(minor)
-        .ok_or(DiscountError::PercentConversion)?;
-
-    let rounded = applied.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero);
-
-    rounded.to_i64().ok_or(DiscountError::PercentConversion)
+        .ok_or(DiscountError::PercentConversion)?
+        .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+        .to_i64()
+        .ok_or(DiscountError::PercentConversion)
 }
 
 #[cfg(test)]
@@ -151,94 +52,9 @@ mod tests {
     use std::convert::TryFrom;
 
     use decimal_percentage::Percentage;
-    use rusty_money::iso::GBP;
     use testresult::TestResult;
 
-    use crate::products::ProductKey;
-
     use super::*;
-
-    fn test_items<'a>() -> [Item<'a>; 3] {
-        [
-            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(300, GBP)),
-        ]
-    }
-
-    #[test]
-    fn calculate_price_override_all_items() -> TestResult {
-        let items = test_items();
-        let discount = Discount::SetBundleTotalPrice(Money::from_minor(50, GBP));
-        let discounted_price = calculate_discount(&discount, &items)?;
-
-        assert_eq!(discounted_price, Money::from_minor(50, GBP));
-
-        Ok(())
-    }
-
-    #[test]
-    fn calculate_price_override_cheapest_item() -> TestResult {
-        let items = test_items();
-        let discount = Discount::SetCheapestItemPrice(Money::from_minor(50, GBP));
-        let discounted_price = calculate_discount(&discount, &items)?;
-
-        assert_eq!(discounted_price, Money::from_minor(550, GBP));
-
-        Ok(())
-    }
-
-    #[test]
-    fn calculate_percentage_all_items() -> TestResult {
-        let items = test_items();
-        let discount = Discount::PercentageOffBundleTotal(Percentage::from(0.25));
-        let discounted_price = calculate_discount(&discount, &items)?;
-
-        assert_eq!(discounted_price, Money::from_minor(575, GBP));
-
-        Ok(())
-    }
-
-    #[test]
-    fn calculate_percentage_cheapest_item() -> TestResult {
-        let items = test_items();
-        let discount = Discount::PercentageOffCheapestItem(Percentage::from(0.5));
-        let discounted_price = calculate_discount(&discount, &items)?;
-
-        assert_eq!(discounted_price, Money::from_minor(550, GBP));
-
-        Ok(())
-    }
-
-    #[test]
-    fn calculate_discount_returns_no_items_error() {
-        let items: [Item<'static>; 0] = [];
-
-        let price_override_all = Discount::SetBundleTotalPrice(Money::from_minor(50, GBP));
-
-        let price_override_cheapest = Discount::SetCheapestItemPrice(Money::from_minor(50, GBP));
-
-        let percent_all = Discount::PercentageOffBundleTotal(Percentage::from(0.25));
-
-        let percent_cheapest = Discount::PercentageOffCheapestItem(Percentage::from(0.25));
-
-        assert!(matches!(
-            calculate_discount(&price_override_all, &items),
-            Err(DiscountError::NoItems)
-        ));
-        assert!(matches!(
-            calculate_discount(&price_override_cheapest, &items),
-            Err(DiscountError::NoItems)
-        ));
-        assert!(matches!(
-            calculate_discount(&percent_all, &items),
-            Err(DiscountError::NoItems)
-        ));
-        assert!(matches!(
-            calculate_discount(&percent_cheapest, &items),
-            Err(DiscountError::NoItems)
-        ));
-    }
 
     #[test]
     fn percent_of_minor_overflow_returns_error() {
@@ -269,25 +85,11 @@ mod tests {
     }
 
     #[test]
-    fn discount_on_returns_expected_amount() -> TestResult {
-        let price = Money::from_minor(200, GBP);
+    fn percent_of_minor_calculates_correctly() -> TestResult {
         let percent = Percentage::from(0.25);
+        let result = percent_of_minor(&percent, 200)?;
 
-        let discount = discount_on(&price, &percent)?;
-
-        assert_eq!(discount, Money::from_minor(50, GBP));
-
-        Ok(())
-    }
-
-    #[test]
-    fn totals_with_cheapest_returns_total_and_item() -> TestResult {
-        let items = test_items();
-
-        let (total, cheapest) = totals_with_cheapest(&items)?;
-
-        assert_eq!(total, Money::from_minor(600, GBP));
-        assert_eq!(cheapest.price(), &Money::from_minor(100, GBP));
+        assert_eq!(result, 50);
 
         Ok(())
     }
