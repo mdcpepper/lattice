@@ -246,11 +246,15 @@ impl<'a> Receipt<'a> {
                     ),
                 };
 
-            let final_price_display = if price_is_unchanged(base_price, final_price) {
-                dash_cell()
-            } else {
-                Cell::new(format!("{final_price}")).fg(Color::Green)
-            };
+            let (final_price_display, savings_display) =
+                if price_is_unchanged(base_price, final_price) {
+                    (dash_cell(), dash_cell())
+                } else {
+                    (
+                        Cell::new(format!("{final_price}")).fg(Color::Green),
+                        text_cell(savings),
+                    )
+                };
 
             table.add_row(vec![
                 Cell::new(format!("#{:<3}", item_idx + 1)),
@@ -258,7 +262,7 @@ impl<'a> Receipt<'a> {
                 Cell::new(product_tags).fg(Color::DarkGrey),
                 Cell::new(format!("{base_price}")),
                 final_price_display,
-                text_cell(savings),
+                savings_display,
                 text_cell(promo_name),
                 text_cell(bundle_id),
             ]);
