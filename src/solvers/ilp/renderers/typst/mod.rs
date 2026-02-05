@@ -646,11 +646,7 @@ impl TypstRenderer {
         }
 
         if !formulation.auxiliary_vars.is_empty() {
-            output.push_str("\n=== Auxiliary Variables (DFA)\n\n");
-
-            output.push_str(
-                "DFA positions index eligible items (sorted by price desc, then index asc).\n\n",
-            );
+            output.push_str("\n=== Auxiliary Variables\n\n");
 
             let mut aux_items = formulation.auxiliary_vars.to_vec();
 
