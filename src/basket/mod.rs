@@ -110,7 +110,10 @@ impl<'a, T: TagCollection> Basket<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use rusty_money::{Money, iso};
+    use rusty_money::{
+        Money,
+        iso::{GBP, USD},
+    };
     use testresult::TestResult;
 
     use crate::products::ProductKey;
@@ -119,33 +122,33 @@ mod tests {
 
     fn test_items<'a>() -> [Item<'a>; 3] {
         [
-            Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(200, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(300, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(300, GBP)),
         ]
     }
 
     #[test]
     fn new_with_currency() {
-        let basket = Basket::<'_, StringTagCollection>::new(iso::GBP);
+        let basket = Basket::<'_, StringTagCollection>::new(GBP);
 
-        assert_eq!(basket.currency, iso::GBP);
+        assert_eq!(basket.currency, GBP);
     }
 
     #[test]
     fn with_items_currency_mismatch_errors() {
         let items = [
-            Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(100, iso::USD)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, USD)),
         ];
 
-        let result = Basket::<'_, StringTagCollection>::with_items(items, iso::GBP);
+        let result = Basket::<'_, StringTagCollection>::with_items(items, GBP);
 
         match result {
             Err(BasketError::CurrencyMismatch(idx, item_currency, basket_currency)) => {
                 assert_eq!(idx, 1);
-                assert_eq!(item_currency, iso::USD.iso_alpha_code);
-                assert_eq!(basket_currency, iso::GBP.iso_alpha_code);
+                assert_eq!(item_currency, USD.iso_alpha_code);
+                assert_eq!(basket_currency, GBP.iso_alpha_code);
             }
             other => panic!("expected CurrencyMismatch error, got {other:?}"),
         }
@@ -155,10 +158,10 @@ mod tests {
     fn with_items_all_same_currency_succeeds() -> TestResult {
         let items = test_items();
 
-        let basket = Basket::with_items(items, iso::GBP)?;
+        let basket = Basket::with_items(items, GBP)?;
 
         assert_eq!(basket.len(), 3);
-        assert_eq!(basket.currency(), iso::GBP);
+        assert_eq!(basket.currency(), GBP);
 
         Ok(())
     }
@@ -166,22 +169,22 @@ mod tests {
     #[test]
     fn subtotal_with_items() -> TestResult {
         let items = [
-            Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(200, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
         ];
 
-        let basket = Basket::<'_, StringTagCollection>::with_items(items, iso::GBP)?;
+        let basket = Basket::<'_, StringTagCollection>::with_items(items, GBP)?;
 
-        assert_eq!(basket.subtotal()?, Money::from_minor(300, iso::GBP));
+        assert_eq!(basket.subtotal()?, Money::from_minor(300, GBP));
 
         Ok(())
     }
 
     #[test]
     fn subtotal_with_no_items() -> TestResult {
-        let basket = Basket::<'_, StringTagCollection>::new(iso::GBP);
+        let basket = Basket::<'_, StringTagCollection>::new(GBP);
 
-        assert_eq!(basket.subtotal()?, Money::from_minor(0, iso::GBP));
+        assert_eq!(basket.subtotal()?, Money::from_minor(0, GBP));
 
         Ok(())
     }
@@ -190,7 +193,7 @@ mod tests {
     fn len() -> TestResult {
         let items = test_items();
 
-        let basket = Basket::with_items(items, iso::GBP)?;
+        let basket = Basket::with_items(items, GBP)?;
 
         assert_eq!(basket.len(), 3);
 
@@ -199,8 +202,8 @@ mod tests {
 
     #[test]
     fn is_empty() -> TestResult {
-        let empty_basket = Basket::<'_, StringTagCollection>::with_items([], iso::GBP)?;
-        let non_empty_basket = Basket::with_items(test_items(), iso::GBP)?;
+        let empty_basket = Basket::<'_, StringTagCollection>::with_items([], GBP)?;
+        let non_empty_basket = Basket::with_items(test_items(), GBP)?;
 
         assert!(empty_basket.is_empty());
         assert!(!non_empty_basket.is_empty());
@@ -212,7 +215,7 @@ mod tests {
     fn iter_returns_items_in_order() -> TestResult {
         let items = test_items();
 
-        let basket = Basket::with_items(items, iso::GBP)?;
+        let basket = Basket::with_items(items, GBP)?;
 
         let prices: Vec<i64> = basket
             .iter()
@@ -228,7 +231,7 @@ mod tests {
     fn get_item_returns_item() -> TestResult {
         let items = test_items();
 
-        let basket = Basket::with_items(items, iso::GBP)?;
+        let basket = Basket::with_items(items, GBP)?;
         let item = basket.get_item(1)?;
 
         assert_eq!(item.price().to_minor_units(), 200);
@@ -238,7 +241,7 @@ mod tests {
 
     #[test]
     fn get_item_missing_returns_error() {
-        let basket = Basket::<'_, StringTagCollection>::new(iso::GBP);
+        let basket = Basket::<'_, StringTagCollection>::new(GBP);
 
         let err = basket.get_item(0).err();
 

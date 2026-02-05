@@ -83,7 +83,7 @@ impl<'a, T: TagCollection> DirectDiscountPromotion<'a, T> {
 #[cfg(test)]
 mod tests {
     use decimal_percentage::Percentage;
-    use rusty_money::{Money, iso};
+    use rusty_money::{Money, iso::GBP};
     use slotmap::SlotMap;
     use testresult::TestResult;
 
@@ -99,7 +99,7 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             key,
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(0, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(0, GBP)),
         );
 
         assert_eq!(promo.key(), key);
@@ -114,10 +114,10 @@ mod tests {
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
         );
 
-        let item = Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP));
+        let item = Item::new(ProductKey::default(), Money::from_minor(100, GBP));
         let discounted = promo.calculate_discounted_price(&item)?;
 
-        assert_eq!(discounted, Money::from_minor(75, iso::GBP));
+        assert_eq!(discounted, Money::from_minor(75, GBP));
 
         Ok(())
     }
@@ -127,13 +127,13 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
         );
 
-        let item = Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP));
+        let item = Item::new(ProductKey::default(), Money::from_minor(100, GBP));
         let discounted = promo.calculate_discounted_price(&item)?;
 
-        assert_eq!(discounted, Money::from_minor(50, iso::GBP));
+        assert_eq!(discounted, Money::from_minor(50, GBP));
 
         Ok(())
     }
@@ -143,13 +143,13 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOff(Money::from_minor(25, iso::GBP)),
+            SimpleDiscount::AmountOff(Money::from_minor(25, GBP)),
         );
 
-        let item = Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP));
+        let item = Item::new(ProductKey::default(), Money::from_minor(100, GBP));
         let discounted = promo.calculate_discounted_price(&item)?;
 
-        assert_eq!(discounted, Money::from_minor(75, iso::GBP));
+        assert_eq!(discounted, Money::from_minor(75, GBP));
 
         Ok(())
     }
@@ -162,10 +162,10 @@ mod tests {
             SimpleDiscount::PercentageOff(Percentage::from(2.0)),
         );
 
-        let item = Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP));
+        let item = Item::new(ProductKey::default(), Money::from_minor(100, GBP));
         let discounted = promo.calculate_discounted_price(&item)?;
 
-        assert_eq!(discounted, Money::from_minor(0, iso::GBP));
+        assert_eq!(discounted, Money::from_minor(0, GBP));
 
         Ok(())
     }
@@ -175,13 +175,13 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOff(Money::from_minor(200, iso::GBP)),
+            SimpleDiscount::AmountOff(Money::from_minor(200, GBP)),
         );
 
-        let item = Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP));
+        let item = Item::new(ProductKey::default(), Money::from_minor(100, GBP));
         let discounted = promo.calculate_discounted_price(&item)?;
 
-        assert_eq!(discounted, Money::from_minor(0, iso::GBP));
+        assert_eq!(discounted, Money::from_minor(0, GBP));
 
         Ok(())
     }
@@ -191,13 +191,13 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(-50, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(-50, GBP)),
         );
 
-        let item = Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP));
+        let item = Item::new(ProductKey::default(), Money::from_minor(100, GBP));
         let discounted = promo.calculate_discounted_price(&item)?;
 
-        assert_eq!(discounted, Money::from_minor(0, iso::GBP));
+        assert_eq!(discounted, Money::from_minor(0, GBP));
 
         Ok(())
     }
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn accessors_return_constructor_values() {
         let tags = StringTagCollection::from_strs(&["member", "sale"]);
-        let discount = SimpleDiscount::AmountOff(Money::from_minor(10, iso::GBP));
+        let discount = SimpleDiscount::AmountOff(Money::from_minor(10, GBP));
 
         let promo = DirectDiscountPromotion::new(PromotionKey::default(), tags.clone(), discount);
 

@@ -412,9 +412,9 @@ mod tests {
         let mut fixture = Fixture::new();
 
         fixture
-            .load_products("example_direct_discounts")?
-            .load_items("example_direct_discounts")?
-            .load_promotions("example_direct_discounts")?;
+            .load_products("direct")?
+            .load_items("direct")?
+            .load_promotions("direct")?;
 
         // Check products were loaded
         assert_eq!(fixture.product_keys.len(), 3);
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn fixture_from_set_loads_all_fixtures() -> TestResult {
-        let fixture = Fixture::from_set("example_direct_discounts")?;
+        let fixture = Fixture::from_set("direct")?;
 
         assert_eq!(fixture.product_keys.len(), 3);
         assert_eq!(fixture.items.len(), 3);
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn fixture_basket_creates_basket_from_all_items() -> TestResult {
-        let fixture = Fixture::from_set("example_direct_discounts")?;
+        let fixture = Fixture::from_set("direct")?;
         let basket = fixture.basket(None)?;
 
         assert_eq!(basket.len(), 3);
@@ -460,7 +460,7 @@ mod tests {
 
     #[test]
     fn fixture_basket_creates_basket_from_first_n_items() -> TestResult {
-        let fixture = Fixture::from_set("example_direct_discounts")?;
+        let fixture = Fixture::from_set("direct")?;
         let basket = fixture.basket(Some(2))?;
 
         assert_eq!(basket.len(), 2);
@@ -470,7 +470,7 @@ mod tests {
 
     #[test]
     fn fixture_basket_rejects_request_for_too_many_items() -> TestResult {
-        let fixture = Fixture::from_set("example_direct_discounts")?;
+        let fixture = Fixture::from_set("direct")?;
         let result = fixture.basket(Some(10));
 
         assert!(matches!(
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn fixture_item_group_creates_item_group_from_items() -> TestResult {
-        let fixture = Fixture::from_set("example_direct_discounts")?;
+        let fixture = Fixture::from_set("direct")?;
         let item_group = fixture.item_group()?;
 
         assert_eq!(item_group.len(), 3);
@@ -507,7 +507,7 @@ mod tests {
     fn fixture_no_items_returns_error() -> TestResult {
         let mut fixture = Fixture::new();
 
-        fixture.load_products("example_direct_discounts")?;
+        fixture.load_products("direct")?;
 
         let result = fixture.basket(None);
 
@@ -613,7 +613,7 @@ mod tests {
 
     #[test]
     fn fixture_items_and_promotions_accessors_return_loaded_data() -> TestResult {
-        let fixture = Fixture::from_set("example_direct_discounts")?;
+        let fixture = Fixture::from_set("direct")?;
 
         assert_eq!(fixture.items().len(), 3);
         assert_eq!(fixture.promotions().len(), 2);
@@ -625,7 +625,7 @@ mod tests {
     fn fixture_item_group_no_items_returns_error() -> TestResult {
         let mut fixture = Fixture::new();
 
-        fixture.load_products("example_direct_discounts")?;
+        fixture.load_products("direct")?;
 
         let result = fixture.item_group();
 
@@ -636,7 +636,7 @@ mod tests {
 
     #[test]
     fn fixture_meta_maps_are_exposed() -> TestResult {
-        let fixture = Fixture::from_set("example_direct_discounts")?;
+        let fixture = Fixture::from_set("direct")?;
 
         assert_eq!(fixture.product_meta_map().len(), 3);
         assert_eq!(fixture.promotion_meta_map().len(), 2);

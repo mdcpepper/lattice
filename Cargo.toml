@@ -16,6 +16,7 @@ solver-highs = ["good_lp/highs"]
 
 [dev-dependencies]
 anyhow = "1.0.100"
+tempfile = "3"
 testresult = "0.4.1"
 
 [dependencies]

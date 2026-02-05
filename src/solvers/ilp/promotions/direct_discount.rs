@@ -14,7 +14,7 @@ use crate::{
     solvers::{
         SolverError,
         ilp::{
-            BINARY_THRESHOLD, i64_to_f64_exact,
+            BINARY_THRESHOLD, ILPObserver, i64_to_f64_exact,
             promotions::{ILPPromotion, PromotionVars},
             state::ILPState,
         },
@@ -69,10 +69,12 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
             .any(|item| item.tags().intersects(promotion_tags))
     }
 
-    fn add_variables(
+    fn add_variables<O: ILPObserver + ?Sized>(
         &self,
+        promotion_key: PromotionKey,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
+        observer: &mut O,
     ) -> Result<PromotionVars, SolverError> {
         // An empty tag set means this promotion can target any item, so we can skip tag checks
         // if that is the case.
@@ -109,6 +111,17 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
             // add the discounted price to the total instead of full price". The solver will weigh
             // this against other options when minimizing cost.
             state.add_to_objective(participation_var, coeff);
+
+            // Notify observer
+            observer.on_promotion_variable(
+                promotion_key,
+                item_idx,
+                participation_var,
+                discounted_minor,
+                None,
+            );
+
+            observer.on_objective_term(participation_var, coeff);
         }
 
         Ok(PromotionVars::DirectDiscount(DirectDiscountPromotionVars {
@@ -183,7 +196,10 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
 #[cfg(test)]
 mod tests {
     use good_lp::{Expression, ProblemVariables, Solution, SolutionStatus, Variable};
-    use rusty_money::{Money, iso};
+    use rusty_money::{
+        Money,
+        iso::{self, GBP},
+    };
     use smallvec::SmallVec;
     use testresult::TestResult;
 
@@ -192,16 +208,17 @@ mod tests {
         items::{Item, groups::ItemGroup},
         products::ProductKey,
         promotions::PromotionKey,
-        solvers::{SolverError, ilp::promotions::ILPPromotion},
+        solvers::{
+            SolverError,
+            ilp::{NoopObserver, promotions::ILPPromotion},
+        },
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
     use super::*;
 
     fn item_group_from_items<const N: usize>(items: [Item<'_>; N]) -> ItemGroup<'_> {
-        let currency = items
-            .first()
-            .map_or(iso::GBP, |item| item.price().currency());
+        let currency = items.first().map_or(GBP, |item| item.price().currency());
 
         ItemGroup::new(items.into_iter().collect(), currency)
     }
@@ -234,12 +251,12 @@ mod tests {
 
     #[test]
     fn is_applicable_returns_false_for_empty_items() {
-        let item_group: ItemGroup<'_> = ItemGroup::new(SmallVec::new(), iso::GBP);
+        let item_group: ItemGroup<'_> = ItemGroup::new(SmallVec::new(), GBP);
 
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
         );
 
         assert!(!promo.is_applicable(&item_group));
@@ -249,7 +266,7 @@ mod tests {
     fn add_variables_errors_on_discount_error() {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
         let item_group = item_group_from_items(items);
@@ -264,7 +281,8 @@ mod tests {
         let pb = ProblemVariables::new();
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
-        let result = promo.add_variables(&item_group, &mut state);
+        let mut observer = NoopObserver;
+        let result = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer);
 
         assert!(matches!(result, Err(SolverError::Discount(_))));
     }
@@ -273,7 +291,7 @@ mod tests {
     fn add_variables_errors_on_nonrepresentable_minor_units() {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
         let item_group = item_group_from_items(items);
@@ -281,13 +299,14 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(9_007_199_254_740_993, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(9_007_199_254_740_993, GBP)),
         );
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
-        let result = promo.add_variables(&item_group, &mut state);
+        let mut observer = NoopObserver;
+        let result = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer);
 
         assert!(matches!(
             result,
@@ -299,7 +318,7 @@ mod tests {
     fn calculate_item_discounts_skips_on_discount_error() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
         let item_group = item_group_from_items(items);
@@ -314,12 +333,21 @@ mod tests {
         let pb = ProblemVariables::new();
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
-        let vars = DirectDiscountPromotion::new(
+
+        let promo_with_vars = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
-        )
-        .add_variables(&item_group, &mut state)?;
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
+        );
+
+        let mut observer = NoopObserver;
+
+        let vars = promo_with_vars.add_variables(
+            promo_with_vars.key(),
+            &item_group,
+            &mut state,
+            &mut observer,
+        )?;
 
         let result = promo.calculate_item_discounts(&SelectAllSolution, &vars, &item_group);
 
@@ -332,7 +360,7 @@ mod tests {
     fn calculate_item_discounts_skips_unselected_items() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
         let item_group = item_group_from_items(items);
@@ -340,13 +368,14 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
         );
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
-        let vars = promo.add_variables(&item_group, &mut state)?;
+        let mut observer = NoopObserver;
+        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
 
         let discounts = promo.calculate_item_discounts(&SelectNoneSolution, &vars, &item_group)?;
 
@@ -359,7 +388,7 @@ mod tests {
     fn calculate_item_discounts_returns_discounted_values() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
         let item_group = item_group_from_items(items);
@@ -367,13 +396,14 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
         );
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
-        let vars = promo.add_variables(&item_group, &mut state)?;
+        let mut observer = NoopObserver;
+        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
 
         let discounts = promo.calculate_item_discounts(&SelectAllSolution, &vars, &item_group)?;
 
@@ -385,8 +415,8 @@ mod tests {
     #[test]
     fn calculate_item_applications_returns_applications_with_unique_bundle_ids() -> TestResult {
         let items = [
-            Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(200, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
         ];
 
         let item_group = item_group_from_items(items);
@@ -394,13 +424,14 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
         );
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
-        let vars = promo.add_variables(&item_group, &mut state)?;
+        let mut observer = NoopObserver;
+        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
         let mut next_bundle_id = 0_usize;
 
         let apps = promo.calculate_item_applications(
@@ -424,19 +455,19 @@ mod tests {
         // Verify prices
         assert_eq!(
             apps.first().map(|a| a.original_price),
-            Some(Money::from_minor(100, iso::GBP))
+            Some(Money::from_minor(100, GBP))
         );
         assert_eq!(
             apps.first().map(|a| a.final_price),
-            Some(Money::from_minor(50, iso::GBP))
+            Some(Money::from_minor(50, GBP))
         );
         assert_eq!(
             apps.get(1).map(|a| a.original_price),
-            Some(Money::from_minor(200, iso::GBP))
+            Some(Money::from_minor(200, GBP))
         );
         assert_eq!(
             apps.get(1).map(|a| a.final_price),
-            Some(Money::from_minor(50, iso::GBP))
+            Some(Money::from_minor(50, GBP))
         );
 
         Ok(())
@@ -446,7 +477,7 @@ mod tests {
     fn calculate_item_applications_returns_error_on_discount_error() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
         let item_group = item_group_from_items(items);
@@ -462,12 +493,21 @@ mod tests {
         let pb = ProblemVariables::new();
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
-        let vars = DirectDiscountPromotion::new(
+
+        let promo_with_vars = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
-        )
-        .add_variables(&item_group, &mut state)?;
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
+        );
+
+        let mut observer = NoopObserver;
+
+        let vars = promo_with_vars.add_variables(
+            promo_with_vars.key(),
+            &item_group,
+            &mut state,
+            &mut observer,
+        )?;
 
         let apps = promo.calculate_item_applications(
             PromotionKey::default(),
@@ -487,7 +527,7 @@ mod tests {
     fn calculate_item_applications_continues_bundle_id_counter() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
         let item_group = item_group_from_items(items);
@@ -495,7 +535,7 @@ mod tests {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
         );
 
         // Start with a non-zero bundle_id (e.g., from previous promotions)
@@ -503,7 +543,9 @@ mod tests {
         let pb = ProblemVariables::new();
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
-        let vars = promo.add_variables(&item_group, &mut state)?;
+        let mut observer = NoopObserver;
+
+        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
 
         let apps = promo.calculate_item_applications(
             PromotionKey::default(),

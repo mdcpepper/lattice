@@ -196,11 +196,7 @@ impl<'a> Receipt<'a> {
                 Cell::new("Discounted Price").add_attribute(Attribute::Bold),
                 Cell::new("Savings").add_attribute(Attribute::Bold),
                 Cell::new("Promotion").add_attribute(Attribute::Bold),
-                Cell::new("Bundle ID").add_attribute(Attribute::Bold),
             ]);
-
-        let dash_cell = || Cell::new("-").fg(Color::DarkGrey);
-        let text_cell = |s: String| if s == "-" { dash_cell() } else { Cell::new(s) };
 
         for (item_idx, item) in basket.iter().enumerate() {
             let product_name = &product_meta
@@ -230,7 +226,7 @@ impl<'a> Receipt<'a> {
                             app.original_price,
                             app.final_price,
                             format!(
-                                "{} ({savings_percent_points}%)",
+                                "-{} ({savings_percent_points}%)",
                                 app.savings().map_err(ReceiptError::Money)?,
                             ),
                             promo_name,
@@ -240,19 +236,19 @@ impl<'a> Receipt<'a> {
                     None => (
                         *item.price(),
                         *item.price(),
-                        "-".to_string(),
-                        "-".to_string(),
-                        "-".to_string(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
                     ),
                 };
 
             let (final_price_display, savings_display) =
                 if price_is_unchanged(base_price, final_price) {
-                    (dash_cell(), dash_cell())
+                    (Cell::new(""), Cell::new(""))
                 } else {
                     (
                         Cell::new(format!("{final_price}")).fg(Color::Green),
-                        text_cell(savings),
+                        text_cell(&savings),
                     )
                 };
 
@@ -263,8 +259,7 @@ impl<'a> Receipt<'a> {
                 Cell::new(format!("{base_price}")),
                 final_price_display,
                 savings_display,
-                text_cell(promo_name),
-                text_cell(bundle_id),
+                text_cell(&format!("{bundle_id} {promo_name}")),
             ]);
         }
 
@@ -287,6 +282,14 @@ impl<'a> Receipt<'a> {
     }
 }
 
+fn text_cell(s: &str) -> Cell {
+    if s == "-" {
+        Cell::new("")
+    } else {
+        Cell::new(s)
+    }
+}
+
 /// Converts a fractional percentage to percent points for display.
 fn percent_points_from_fractional_percentage(p: Percentage) -> Decimal {
     // `Percentage` is a fraction (e.g. 0.25), so multiply by 100 to print percent points.
@@ -305,7 +308,10 @@ fn price_is_unchanged<'a>(
 mod tests {
     use num_traits::FromPrimitive;
     use rustc_hash::FxHashMap;
-    use rusty_money::{Money, iso};
+    use rusty_money::{
+        Money,
+        iso::{self, GBP, USD},
+    };
     use slotmap::SlotMap;
     use smallvec::smallvec;
     use testresult::TestResult;
@@ -325,13 +331,13 @@ mod tests {
         let receipt = Receipt::new(
             smallvec![0, 2],
             promotion_apps,
-            Money::from_minor(300, iso::GBP),
-            Money::from_minor(250, iso::GBP),
-            iso::GBP,
+            Money::from_minor(300, GBP),
+            Money::from_minor(250, GBP),
+            GBP,
         );
 
-        assert_eq!(receipt.subtotal(), Money::from_minor(300, iso::GBP));
-        assert_eq!(receipt.total(), Money::from_minor(250, iso::GBP));
+        assert_eq!(receipt.subtotal(), Money::from_minor(300, GBP));
+        assert_eq!(receipt.total(), Money::from_minor(250, GBP));
     }
 
     #[test]
@@ -340,12 +346,12 @@ mod tests {
         let receipt = Receipt::new(
             smallvec![0, 1],
             promotion_apps,
-            Money::from_minor(300, iso::GBP),
-            Money::from_minor(250, iso::GBP),
-            iso::GBP,
+            Money::from_minor(300, GBP),
+            Money::from_minor(250, GBP),
+            GBP,
         );
 
-        assert_eq!(receipt.savings()?, Money::from_minor(50, iso::GBP));
+        assert_eq!(receipt.savings()?, Money::from_minor(50, GBP));
 
         Ok(())
     }
@@ -356,16 +362,16 @@ mod tests {
         let receipt = Receipt::new(
             smallvec![0],
             promotion_apps,
-            Money::from_minor(300, iso::GBP),
+            Money::from_minor(300, GBP),
             Money::from_minor(250, iso::USD),
-            iso::GBP,
+            GBP,
         );
 
         assert_eq!(
             receipt.savings(),
             Err(MoneyError::CurrencyMismatch {
-                expected: iso::GBP.iso_alpha_code,
-                actual: iso::USD.iso_alpha_code,
+                expected: GBP.iso_alpha_code,
+                actual: USD.iso_alpha_code,
             })
         );
     }
@@ -375,9 +381,9 @@ mod tests {
         let receipt = Receipt::new(
             smallvec![],
             FxHashMap::default(),
-            Money::from_minor(0, iso::GBP),
-            Money::from_minor(0, iso::GBP),
-            iso::GBP,
+            Money::from_minor(0, GBP),
+            Money::from_minor(0, GBP),
+            GBP,
         );
 
         assert_eq!(receipt.savings_percent()?, Percentage::from(0.0));
@@ -389,9 +395,9 @@ mod tests {
         let receipt = Receipt::new(
             smallvec![],
             FxHashMap::default(),
-            Money::from_minor(400, iso::GBP),
-            Money::from_minor(300, iso::GBP),
-            iso::GBP,
+            Money::from_minor(400, GBP),
+            Money::from_minor(300, GBP),
+            GBP,
         );
 
         let percent_points = percent_points_from_fractional_percentage(receipt.savings_percent()?);
@@ -406,9 +412,9 @@ mod tests {
 
     #[test]
     fn discounted_price_dash_logic_matches_price_equality() {
-        let base = Money::from_minor(100, iso::GBP);
+        let base = Money::from_minor(100, GBP);
         assert!(price_is_unchanged(base, base));
-        assert!(!price_is_unchanged(base, Money::from_minor(99, iso::GBP)));
+        assert!(!price_is_unchanged(base, Money::from_minor(99, GBP)));
     }
 
     #[test]
@@ -424,44 +430,44 @@ mod tests {
     #[test]
     fn from_solver_result_builds_receipt_with_correct_fields() -> TestResult {
         let items = [
-            Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(200, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(300, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(300, GBP)),
         ];
 
-        let basket = Basket::with_items(items, iso::GBP)?;
+        let basket = Basket::with_items(items, GBP)?;
 
         let promotion_apps = smallvec![
             PromotionApplication {
                 promotion_key: PromotionKey::default(),
                 item_idx: 0,
                 bundle_id: 0,
-                original_price: Money::from_minor(100, iso::GBP),
-                final_price: Money::from_minor(75, iso::GBP),
+                original_price: Money::from_minor(100, GBP),
+                final_price: Money::from_minor(75, GBP),
             },
             PromotionApplication {
                 promotion_key: PromotionKey::default(),
                 item_idx: 2,
                 bundle_id: 1,
-                original_price: Money::from_minor(300, iso::GBP),
-                final_price: Money::from_minor(225, iso::GBP),
+                original_price: Money::from_minor(300, GBP),
+                final_price: Money::from_minor(225, GBP),
             },
         ];
 
         let solver_result = SolverResult {
             affected_items: smallvec![0, 2],
             unaffected_items: smallvec![1],
-            total: Money::from_minor(500, iso::GBP), // 75 + 200 + 225
+            total: Money::from_minor(500, GBP), // 75 + 200 + 225
             promotion_applications: promotion_apps,
         };
 
         let receipt = Receipt::from_solver_result(&basket, solver_result)?;
 
-        assert_eq!(receipt.subtotal(), Money::from_minor(600, iso::GBP));
-        assert_eq!(receipt.total(), Money::from_minor(500, iso::GBP));
+        assert_eq!(receipt.subtotal(), Money::from_minor(600, GBP));
+        assert_eq!(receipt.total(), Money::from_minor(500, GBP));
         assert_eq!(receipt.full_price_items(), &[1]);
         assert_eq!(receipt.promotion_applications().len(), 2);
-        assert_eq!(receipt.currency(), iso::GBP);
+        assert_eq!(receipt.currency(), GBP);
 
         Ok(())
     }
@@ -469,26 +475,26 @@ mod tests {
     #[test]
     fn from_solver_result_handles_no_promotions() -> TestResult {
         let items = [
-            Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(200, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
         ];
 
-        let basket = Basket::with_items(items, iso::GBP)?;
+        let basket = Basket::with_items(items, GBP)?;
 
         let solver_result = SolverResult {
             affected_items: smallvec![],
             unaffected_items: smallvec![0, 1],
-            total: Money::from_minor(300, iso::GBP),
+            total: Money::from_minor(300, GBP),
             promotion_applications: smallvec![],
         };
 
         let receipt = Receipt::from_solver_result(&basket, solver_result)?;
 
-        assert_eq!(receipt.subtotal(), Money::from_minor(300, iso::GBP));
-        assert_eq!(receipt.total(), Money::from_minor(300, iso::GBP));
+        assert_eq!(receipt.subtotal(), Money::from_minor(300, GBP));
+        assert_eq!(receipt.total(), Money::from_minor(300, GBP));
         assert_eq!(receipt.full_price_items(), &[0, 1]);
         assert!(receipt.promotion_applications().is_empty());
-        assert_eq!(receipt.savings()?, Money::from_minor(0, iso::GBP));
+        assert_eq!(receipt.savings()?, Money::from_minor(0, GBP));
 
         Ok(())
     }
@@ -497,23 +503,23 @@ mod tests {
     fn from_solver_result_verifies_promotion_application_details() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
-        let basket = Basket::with_items(items, iso::GBP)?;
+        let basket = Basket::with_items(items, GBP)?;
 
         let promotion_apps = smallvec![PromotionApplication {
             promotion_key: PromotionKey::default(),
             item_idx: 0,
             bundle_id: 42,
-            original_price: Money::from_minor(100, iso::GBP),
-            final_price: Money::from_minor(50, iso::GBP),
+            original_price: Money::from_minor(100, GBP),
+            final_price: Money::from_minor(50, GBP),
         }];
 
         let solver_result = SolverResult {
             affected_items: smallvec![0],
             unaffected_items: smallvec![],
-            total: Money::from_minor(50, iso::GBP),
+            total: Money::from_minor(50, GBP),
             promotion_applications: promotion_apps,
         };
 
@@ -525,8 +531,8 @@ mod tests {
 
         assert_eq!(app.item_idx, 0);
         assert_eq!(app.bundle_id, 42);
-        assert_eq!(app.original_price, Money::from_minor(100, iso::GBP));
-        assert_eq!(app.final_price, Money::from_minor(50, iso::GBP));
+        assert_eq!(app.original_price, Money::from_minor(100, GBP));
+        assert_eq!(app.final_price, Money::from_minor(50, GBP));
 
         Ok(())
     }
@@ -541,22 +547,22 @@ mod tests {
                 promotion_key: PromotionKey::default(),
                 item_idx: 1,
                 bundle_id: 0,
-                original_price: Money::from_minor(200, iso::GBP),
-                final_price: Money::from_minor(150, iso::GBP),
+                original_price: Money::from_minor(200, GBP),
+                final_price: Money::from_minor(150, GBP),
             },
         );
 
         let receipt = Receipt::new(
             smallvec![0, 2],
             promotion_apps,
-            Money::from_minor(600, iso::GBP),
-            Money::from_minor(550, iso::GBP),
-            iso::GBP,
+            Money::from_minor(600, GBP),
+            Money::from_minor(550, GBP),
+            GBP,
         );
 
         assert_eq!(receipt.full_price_items(), &[0, 2]);
         assert_eq!(receipt.promotion_applications().len(), 1);
-        assert_eq!(receipt.currency(), iso::GBP);
+        assert_eq!(receipt.currency(), GBP);
     }
 
     #[test]
@@ -564,8 +570,8 @@ mod tests {
         let mut product_meta = SlotMap::<ProductKey, Product<'_>>::with_key();
         let mut promotion_meta = SlotMap::<PromotionKey, PromotionMeta>::with_key();
 
-        let apple_price = Money::from_minor(100, iso::GBP);
-        let banana_price = Money::from_minor(200, iso::GBP);
+        let apple_price = Money::from_minor(100, GBP);
+        let banana_price = Money::from_minor(200, GBP);
 
         let apple_key = product_meta.insert(Product {
             name: "Apple".to_string(),
@@ -587,7 +593,7 @@ mod tests {
             Item::new(apple_key, apple_price),
             Item::new(banana_key, banana_price),
         ];
-        let basket = Basket::with_items(items, iso::GBP)?;
+        let basket = Basket::with_items(items, GBP)?;
 
         let mut promotion_apps = FxHashMap::default();
         promotion_apps.insert(
@@ -597,16 +603,16 @@ mod tests {
                 item_idx: 0,
                 bundle_id: 0,
                 original_price: apple_price,
-                final_price: Money::from_minor(80, iso::GBP),
+                final_price: Money::from_minor(80, GBP),
             },
         );
 
         let receipt = Receipt::new(
             smallvec![1],
             promotion_apps,
-            Money::from_minor(300, iso::GBP),
-            Money::from_minor(280, iso::GBP),
-            iso::GBP,
+            Money::from_minor(300, GBP),
+            Money::from_minor(280, GBP),
+            GBP,
         );
 
         let mut out = Vec::new();
@@ -626,17 +632,17 @@ mod tests {
     fn write_to_errors_on_missing_product() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
-        let basket = Basket::with_items(items, iso::GBP)?;
+        let basket = Basket::with_items(items, GBP)?;
 
         let receipt = Receipt::new(
             smallvec![0],
             FxHashMap::default(),
-            Money::from_minor(100, iso::GBP),
-            Money::from_minor(100, iso::GBP),
-            iso::GBP,
+            Money::from_minor(100, GBP),
+            Money::from_minor(100, GBP),
+            GBP,
         );
 
         let product_meta = SlotMap::<ProductKey, Product<'_>>::with_key();
@@ -652,8 +658,8 @@ mod tests {
     fn write_to_renders_unknown_promotion_name_and_full_price_items() -> TestResult {
         let mut product_meta = SlotMap::<ProductKey, Product<'_>>::with_key();
 
-        let drink_price = Money::from_minor(100, iso::GBP);
-        let snack_price = Money::from_minor(120, iso::GBP);
+        let drink_price = Money::from_minor(100, GBP);
+        let snack_price = Money::from_minor(120, GBP);
 
         let drink_key = product_meta.insert(Product {
             name: "Drink".to_string(),
@@ -671,9 +677,11 @@ mod tests {
             Item::new(drink_key, drink_price),
             Item::new(snack_key, snack_price),
         ];
-        let basket = Basket::with_items(items, iso::GBP)?;
+
+        let basket = Basket::with_items(items, GBP)?;
 
         let mut promotion_apps = FxHashMap::default();
+
         promotion_apps.insert(
             0,
             PromotionApplication {
@@ -688,9 +696,9 @@ mod tests {
         let receipt = Receipt::new(
             smallvec![1],
             promotion_apps,
-            Money::from_minor(220, iso::GBP),
-            Money::from_minor(220, iso::GBP),
-            iso::GBP,
+            Money::from_minor(220, GBP),
+            Money::from_minor(220, GBP),
+            GBP,
         );
 
         let promotion_meta = SlotMap::<PromotionKey, PromotionMeta>::with_key();
@@ -705,29 +713,90 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn write_to_renders_discounted_price_and_savings_percent() -> TestResult {
+        let mut product_meta = SlotMap::<ProductKey, Product<'_>>::with_key();
+        let mut promotion_meta = SlotMap::<PromotionKey, PromotionMeta>::with_key();
+
+        let apple_price = Money::from_minor(100, GBP);
+        let apple_key = product_meta.insert(Product {
+            name: "Apple".to_string(),
+            tags: StringTagCollection::from_strs(&["fruit"]),
+            price: apple_price,
+        });
+
+        let promo_key = promotion_meta.insert(PromotionMeta {
+            name: "Half Off".to_string(),
+        });
+
+        let items = [Item::new(apple_key, apple_price)];
+        let basket = Basket::with_items(items, GBP)?;
+
+        let mut promotion_apps = FxHashMap::default();
+
+        promotion_apps.insert(
+            0,
+            PromotionApplication {
+                promotion_key: promo_key,
+                item_idx: 0,
+                bundle_id: 0,
+                original_price: apple_price,
+                final_price: Money::from_minor(50, GBP),
+            },
+        );
+
+        let receipt = Receipt::new(
+            smallvec![],
+            promotion_apps,
+            Money::from_minor(100, GBP),
+            Money::from_minor(50, GBP),
+            GBP,
+        );
+
+        let mut out = Vec::new();
+        receipt.write_to(&mut out, &basket, &product_meta, &promotion_meta)?;
+
+        let output = String::from_utf8(out)?;
+        assert!(output.contains("Apple"));
+        assert!(output.contains("Half Off"));
+        assert!(output.contains("Savings:"));
+        assert!(output.contains("(50.00%)"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn text_cell_hides_dash() {
+        let cell = super::text_cell("-");
+        assert_eq!(cell.content(), "");
+
+        let cell = super::text_cell("Value");
+        assert_eq!(cell.content(), "Value");
+    }
+
     #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "duplicate promotion application")]
     fn from_solver_result_panics_on_duplicate_promotion_applications() {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
 
-        let basket = Basket::with_items(items, iso::GBP).expect("basket should build");
+        let basket = Basket::with_items(items, GBP).expect("basket should build");
 
         let app = PromotionApplication {
             promotion_key: PromotionKey::default(),
             item_idx: 0,
             bundle_id: 0,
-            original_price: Money::from_minor(100, iso::GBP),
-            final_price: Money::from_minor(50, iso::GBP),
+            original_price: Money::from_minor(100, GBP),
+            final_price: Money::from_minor(50, GBP),
         };
 
         let solver_result = SolverResult {
             affected_items: smallvec![0],
             unaffected_items: smallvec![],
-            total: Money::from_minor(50, iso::GBP),
+            total: Money::from_minor(50, GBP),
             promotion_applications: smallvec![app.clone(), app],
         };
 

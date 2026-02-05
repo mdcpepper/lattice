@@ -15,11 +15,17 @@ use crate::{
     promotions::{Promotion, applications::PromotionApplication},
     solvers::{
         Solver, SolverError, SolverResult,
-        ilp::{promotions::PromotionInstances, state::ILPState},
+        ilp::{
+            observer::{ILPObserver, NoopObserver},
+            promotions::PromotionInstances,
+            state::ILPState,
+        },
     },
 };
 
+pub mod observer;
 pub mod promotions;
+pub mod renderers;
 pub mod state;
 
 /// Binary threshold for determining truthiness
@@ -34,10 +40,53 @@ type FullPriceState<'a> = (ItemIndexList, Money<'a, Currency>);
 #[derive(Debug)]
 pub struct ILPSolver;
 
-impl Solver for ILPSolver {
-    fn solve<'group>(
+impl ILPSolver {
+    /// Solve with an observer for capturing the ILP formulation.
+    ///
+    /// This method allows passing an observer that will receive callbacks as the
+    /// ILP problem is constructed, enabling capture of variables, constraints, and
+    /// the complete mathematical formulation.
+    ///
+    /// # Parameters
+    ///
+    /// - `promotions`: The promotions to apply
+    /// - `item_group`: The items to optimize pricing for
+    /// - `observer`: Observer to capture formulation
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SolverError`] if the solver encounters an error.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use dante::solvers::ilp::{ILPSolver, renderers::typst::TypstRenderer};
+    /// use std::path::PathBuf;
+    /// # use dante::{fixtures::Fixture, items::groups::ItemGroup};
+    /// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let fixture = Fixture::from_set("example_direct_discounts")?;
+    /// # let basket = fixture.basket(Some(10))?;
+    /// # let item_group = ItemGroup::from(&basket);
+    /// # let promotions = fixture.promotions();
+    ///
+    /// let mut renderer = TypstRenderer::new(PathBuf::from("formulation.typ"));
+    /// let result = ILPSolver::solve_with_observer(promotions, &item_group, &mut renderer)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn solve_with_observer<'group>(
         promotions: &[Promotion<'_>],
         item_group: &'group ItemGroup<'_>,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<SolverResult<'group>, SolverError> {
+        Self::solve_internal(promotions, item_group, observer)
+    }
+
+    /// Internal solve implementation that supports an observer.
+    fn solve_internal<'group, O: ILPObserver + ?Sized>(
+        promotions: &[Promotion<'_>],
+        item_group: &'group ItemGroup<'_>,
+        observer: &mut O,
     ) -> Result<SolverResult<'group>, SolverError> {
         // Return early if the item group is empty
         if item_group.is_empty() {
@@ -62,10 +111,10 @@ impl Solver for ILPSolver {
         // Set up all possible promotion choices for the solver to consider.
         // For each promotion, we create decision variables that let the solver choose
         // whether to apply that promotion to each eligible item.
-        let mut state = ILPState::with_presence_variables(item_group)?;
+        let mut state = ILPState::with_presence_variables_and_observer(item_group, observer)?;
 
         let promotion_instances =
-            PromotionInstances::from_promotions(promotions, item_group, &mut state)?;
+            PromotionInstances::from_promotions(promotions, item_group, &mut state, observer)?;
 
         // Extract state for model creation
         let (pb, cost, item_presence) = state.into_parts();
@@ -87,11 +136,14 @@ impl Solver for ILPSolver {
             let constraint_expr =
                 promotion_instances.add_item_presence_term(Expression::from(z_i), item_idx);
 
+            // Notify observer before adding constraint
+            observer.on_exclusivity_constraint(item_idx, &constraint_expr);
+
             model = model.with(constraint_expr.eq(1));
         }
 
         // Add constraints for all promotions
-        model = promotion_instances.add_constraints(model, item_group);
+        model = promotion_instances.add_constraints(model, item_group, observer);
 
         let solution = model.solve()?;
 
@@ -131,6 +183,17 @@ impl Solver for ILPSolver {
     }
 }
 
+impl Solver for ILPSolver {
+    fn solve<'a>(
+        promotions: &[Promotion<'_>],
+        item_group: &'a ItemGroup<'_>,
+    ) -> Result<SolverResult<'a>, SolverError> {
+        let mut observer = NoopObserver;
+
+        Self::solve_internal(promotions, item_group, &mut observer)
+    }
+}
+
 /// Ensure that the number of presence variables matches the number of selected items.
 fn ensure_presence_vars_len(z_len: usize, items_len: usize) -> Result<(), SolverError> {
     if z_len != items_len {
@@ -147,15 +210,14 @@ fn ensure_presence_vars_len(z_len: usize, items_len: usize) -> Result<(), Solver
 /// # Errors
 ///
 /// Returns a [`SolverError`] if adding a full-price item to the total fails.
-fn build_presence_variables_and_objective(
+fn build_presence_variables_and_objective<O: ILPObserver + ?Sized>(
     item_group: &ItemGroup<'_>,
     pb: &mut ProblemVariables,
+    observer: &mut O,
 ) -> Result<(SmallVec<[Variable; 10]>, Expression), SolverError> {
     // Each item must be present in the solution whether participating in a promotion or not.
     // Create a presence variable for each item representing the full-price option.
-    let presence: SmallVec<[Variable; 10]> = (0..item_group.len())
-        .map(|_| pb.add(variable().binary()))
-        .collect();
+    let mut presence: SmallVec<[Variable; 10]> = SmallVec::new();
 
     // Create expression for total cost. This is what we are trying to minimise.
     let mut cost = Expression::default();
@@ -164,22 +226,22 @@ fn build_presence_variables_and_objective(
     // These are the baseline costs if no promotions are applied. When we add promotion
     // variables later, they'll offer alternative (discounted) costs. The solver will
     // compare full-price vs. discounted options and choose what minimizes the total.
-    presence
-        .iter()
-        .copied()
-        .zip(item_group.iter())
-        .try_for_each(|(var, item)| -> Result<(), SolverError> {
-            let minor_units = item.price().to_minor_units();
+    for (item_idx, item) in item_group.iter().enumerate() {
+        let var = pb.add(variable().binary());
+        let minor_units = item.price().to_minor_units();
 
-            // `good_lp` stores coefficients as `f64`. Only integers with absolute value <= 2^53
-            // can be represented exactly in an IEEE-754 `f64` mantissa; enforce that via a
-            // round-trip check so we never silently change the objective.
-            cost += var
-                * i64_to_f64_exact(minor_units)
-                    .ok_or(SolverError::MinorUnitsNotRepresentable(minor_units))?;
+        // `good_lp` stores coefficients as `f64`. Only integers with absolute value <= 2^53
+        // can be represented exactly in an IEEE-754 `f64` mantissa; enforce that via a
+        // round-trip check so we never silently change the objective.
+        let coeff = i64_to_f64_exact(minor_units)
+            .ok_or(SolverError::MinorUnitsNotRepresentable(minor_units))?;
 
-            Ok(())
-        })?;
+        cost += var * coeff;
+        presence.push(var);
+
+        observer.on_presence_variable(item_idx, var, minor_units);
+        observer.on_objective_term(var, coeff);
+    }
 
     Ok((presence, cost))
 }
@@ -291,7 +353,7 @@ mod tests {
     use std::collections::HashMap;
 
     use decimal_percentage::Percentage;
-    use rusty_money::iso::{self, GBP};
+    use rusty_money::iso::GBP;
     use smallvec::SmallVec;
     use testresult::TestResult;
 
@@ -540,8 +602,8 @@ mod tests {
 
         let first_app = first_app.ok_or("Expected first application")?;
         assert_eq!(first_app.item_idx, 0);
-        assert_eq!(first_app.original_price, Money::from_minor(100, iso::GBP));
-        assert_eq!(first_app.final_price, Money::from_minor(50, iso::GBP));
+        assert_eq!(first_app.original_price, Money::from_minor(100, GBP));
+        assert_eq!(first_app.final_price, Money::from_minor(50, GBP));
 
         // Second application (item 2)
         let second_app = sorted_apps.get(1);
@@ -549,8 +611,8 @@ mod tests {
 
         let second_app = second_app.ok_or("Expected second application")?;
         assert_eq!(second_app.item_idx, 2);
-        assert_eq!(second_app.original_price, Money::from_minor(300, iso::GBP));
-        assert_eq!(second_app.final_price, Money::from_minor(50, iso::GBP));
+        assert_eq!(second_app.original_price, Money::from_minor(300, GBP));
+        assert_eq!(second_app.final_price, Money::from_minor(50, GBP));
 
         // Each item should have a unique bundle_id (DirectDiscountPromotion doesn't bundle)
         assert_ne!(first_app.bundle_id, second_app.bundle_id);
@@ -611,7 +673,9 @@ mod tests {
         let item_group = item_group_from_items(items);
 
         let mut pb = ProblemVariables::new();
-        let (z, objective) = build_presence_variables_and_objective(&item_group, &mut pb)?;
+        let mut observer = NoopObserver;
+        let (z, objective) =
+            build_presence_variables_and_objective(&item_group, &mut pb, &mut observer)?;
 
         let solution: HashMap<Variable, f64> = z.iter().copied().map(|v| (v, 1.0)).collect();
 
@@ -629,7 +693,9 @@ mod tests {
         let item_group = item_group_from_items(items);
 
         let mut pb = ProblemVariables::new();
-        let (z, _objective) = build_presence_variables_and_objective(&item_group, &mut pb)?;
+        let mut observer = NoopObserver;
+        let (z, _objective) =
+            build_presence_variables_and_objective(&item_group, &mut pb, &mut observer)?;
 
         let solution: HashMap<Variable, f64> = z.iter().copied().map(|v| (v, 1.0)).collect();
 
@@ -653,7 +719,9 @@ mod tests {
         let item_group = item_group_from_items(items);
 
         let mut pb = ProblemVariables::new();
-        let (z, _objective) = build_presence_variables_and_objective(&item_group, &mut pb)?;
+        let mut observer = NoopObserver;
+        let (z, _objective) =
+            build_presence_variables_and_objective(&item_group, &mut pb, &mut observer)?;
 
         let solution: HashMap<Variable, f64> = z.iter().copied().map(|v| (v, 1.0)).collect();
 
@@ -666,6 +734,215 @@ mod tests {
 
         assert_eq!(unaffected_items.as_slice(), &[0]);
         assert_eq!(total.to_minor_units(), 100);
+
+        Ok(())
+    }
+
+    #[test]
+    fn solve_with_observer_noop_produces_same_results_as_trait_solve() -> TestResult {
+        let items = test_items_with_tags();
+        let item_group = item_group_from_items(items);
+
+        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+            PromotionKey::default(),
+            StringTagCollection::from_strs(&["a"]),
+            SimpleDiscount::PercentageOff(Percentage::from(0.25)),
+        ))];
+
+        // Solve using trait method
+        let result1 = ILPSolver::solve(&promotions, &item_group)?;
+
+        // Solve using solve_with_observer(NoopObserver)
+        let mut observer = NoopObserver;
+        let result2 = ILPSolver::solve_with_observer(&promotions, &item_group, &mut observer)?;
+
+        // Results should be identical
+        assert_eq!(result1.total, result2.total);
+        assert_eq!(result1.affected_items, result2.affected_items);
+        assert_eq!(result1.unaffected_items, result2.unaffected_items);
+        assert_eq!(
+            result1.promotion_applications.len(),
+            result2.promotion_applications.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn solve_with_observer_calls_observer_methods() -> TestResult {
+        use std::sync::{Arc, Mutex};
+
+        use good_lp::Expression;
+
+        use crate::promotions::PromotionKey;
+
+        // Mock observer that tracks calls
+        #[derive(Default)]
+        #[expect(
+            clippy::struct_field_names,
+            reason = "Test observer tracking call counts"
+        )]
+        struct MockObserver {
+            presence_vars_count: Arc<Mutex<usize>>,
+            promotion_vars_count: Arc<Mutex<usize>>,
+            exclusivity_constraints_count: Arc<Mutex<usize>>,
+        }
+
+        impl ILPObserver for MockObserver {
+            fn on_presence_variable(&mut self, _: usize, _: Variable, _: i64) {
+                if let Ok(mut count) = self.presence_vars_count.lock() {
+                    *count += 1;
+                }
+            }
+
+            fn on_promotion_variable(
+                &mut self,
+                _: PromotionKey,
+                _: usize,
+                _: Variable,
+                _: i64,
+                _: Option<&str>,
+            ) {
+                if let Ok(mut count) = self.promotion_vars_count.lock() {
+                    *count += 1;
+                }
+            }
+
+            fn on_exclusivity_constraint(&mut self, _: usize, _: &Expression) {
+                if let Ok(mut count) = self.exclusivity_constraints_count.lock() {
+                    *count += 1;
+                }
+            }
+
+            fn on_promotion_constraint(
+                &mut self,
+                _: PromotionKey,
+                _: &str,
+                _: &Expression,
+                _: &str,
+                _: f64,
+            ) {
+                // No-op for this test
+            }
+        }
+
+        let items = test_items_with_tags();
+        let item_group = item_group_from_items(items);
+
+        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+            PromotionKey::default(),
+            StringTagCollection::from_strs(&["a"]),
+            SimpleDiscount::PercentageOff(Percentage::from(0.25)),
+        ))];
+
+        let mut observer = MockObserver::default();
+        let presence_count = Arc::clone(&observer.presence_vars_count);
+        let promotion_count = Arc::clone(&observer.promotion_vars_count);
+        let exclusivity_count = Arc::clone(&observer.exclusivity_constraints_count);
+
+        let _result = ILPSolver::solve_with_observer(&promotions, &item_group, &mut observer)?;
+
+        // Verify observer methods were called
+        assert_eq!(
+            presence_count.lock().map_or(0, |c| *c),
+            3,
+            "Expected 3 presence variables (one per item)"
+        );
+        assert!(
+            promotion_count.lock().map_or(0, |c| *c) > 0,
+            "Expected promotion variables to be created"
+        );
+        assert_eq!(
+            exclusivity_count.lock().map_or(0, |c| *c),
+            3,
+            "Expected 3 exclusivity constraints (one per item)"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn solve_with_observer_does_not_affect_results() -> TestResult {
+        use std::sync::{Arc, Mutex};
+
+        use good_lp::Expression;
+
+        use crate::promotions::PromotionKey;
+
+        // Observer that tracks everything
+        #[derive(Default)]
+        struct TrackingObserver {
+            called: Arc<Mutex<bool>>,
+        }
+
+        impl ILPObserver for TrackingObserver {
+            fn on_presence_variable(&mut self, _: usize, _: Variable, _: i64) {
+                if let Ok(mut called) = self.called.lock() {
+                    *called = true;
+                }
+            }
+
+            fn on_promotion_variable(
+                &mut self,
+                _: PromotionKey,
+                _: usize,
+                _: Variable,
+                _: i64,
+                _: Option<&str>,
+            ) {
+            }
+
+            fn on_exclusivity_constraint(&mut self, _: usize, _: &Expression) {}
+
+            fn on_promotion_constraint(
+                &mut self,
+                _: PromotionKey,
+                _: &str,
+                _: &Expression,
+                _: &str,
+                _: f64,
+            ) {
+            }
+        }
+
+        let items = test_items_with_tags();
+        let item_group = item_group_from_items(items);
+
+        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+            PromotionKey::default(),
+            StringTagCollection::from_strs(&["a"]),
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
+        ))];
+
+        // Solve without observer
+        let result_no_observer = ILPSolver::solve(&promotions, &item_group)?;
+
+        // Solve with observer
+        let mut observer = TrackingObserver::default();
+        let called = Arc::clone(&observer.called);
+        let result_with_observer =
+            ILPSolver::solve_with_observer(&promotions, &item_group, &mut observer)?;
+
+        // Verify observer was called
+        assert!(
+            called.lock().is_ok_and(|c| *c),
+            "Observer should have been called"
+        );
+
+        // Verify results are identical
+        assert_eq!(result_no_observer.total, result_with_observer.total);
+        assert_eq!(
+            result_no_observer.affected_items,
+            result_with_observer.affected_items
+        );
+        assert_eq!(
+            result_no_observer.unaffected_items,
+            result_with_observer.unaffected_items
+        );
+        assert_eq!(
+            result_no_observer.promotion_applications.len(),
+            result_with_observer.promotion_applications.len()
+        );
 
         Ok(())
     }

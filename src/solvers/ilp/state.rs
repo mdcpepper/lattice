@@ -7,14 +7,16 @@ use smallvec::SmallVec;
 
 use crate::{
     items::groups::ItemGroup,
-    solvers::{SolverError, ilp::build_presence_variables_and_objective},
+    solvers::{
+        SolverError,
+        ilp::{
+            build_presence_variables_and_objective,
+            observer::{ILPObserver, NoopObserver},
+        },
+    },
 };
 
 /// Builder state for ILP problem variables and objective
-///
-/// Wraps [`ProblemVariables`] and the objective [`Expression`] to provide a more
-/// functional API where state is explicitly threaded through promotion setup rather
-/// than mutated via references.
 pub struct ILPState {
     pb: ProblemVariables,
     cost: Expression,
@@ -55,8 +57,29 @@ impl ILPState {
     /// Returns [`SolverError`] if any item's price cannot be represented exactly as
     /// a solver coefficient.
     pub fn with_presence_variables(item_group: &ItemGroup<'_>) -> Result<Self, SolverError> {
+        let mut observer = NoopObserver;
+
+        Self::with_presence_variables_and_observer(item_group, &mut observer)
+    }
+
+    /// Create ILP state with presence variables and an observer.
+    ///
+    /// This variant allows attaching an observer to capture the formulation
+    /// as it's being built.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SolverError`] if any item's price cannot be represented exactly as
+    /// a solver coefficient.
+    pub fn with_presence_variables_and_observer<O: ILPObserver + ?Sized>(
+        item_group: &ItemGroup<'_>,
+        observer: &mut O,
+    ) -> Result<Self, SolverError> {
         let mut pb = ProblemVariables::new();
-        let (item_presence, cost) = build_presence_variables_and_objective(item_group, &mut pb)?;
+
+        // Build presence variables with observer
+        let (item_presence, cost) =
+            build_presence_variables_and_objective(item_group, &mut pb, observer)?;
 
         Ok(Self {
             pb,

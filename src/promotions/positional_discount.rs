@@ -68,7 +68,7 @@ impl<'a, T: TagCollection> PositionalDiscountPromotion<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use rusty_money::{Money, iso};
+    use rusty_money::{Money, iso::GBP};
     use smallvec::smallvec;
 
     use crate::{discounts::SimpleDiscount, tags::string::StringTagCollection};
@@ -80,7 +80,7 @@ mod tests {
         let key = PromotionKey::default();
         let tags = StringTagCollection::from_strs(&["sale", "vip"]);
         let positions = smallvec![0u16, 2u16];
-        let discount = SimpleDiscount::AmountOff(Money::from_minor(50, iso::GBP));
+        let discount = SimpleDiscount::AmountOff(Money::from_minor(50, GBP));
 
         let promo =
             PositionalDiscountPromotion::new(key, tags.clone(), 3, positions.clone(), discount);

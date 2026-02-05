@@ -8,7 +8,10 @@ use smallvec::SmallVec;
 use crate::{
     items::groups::ItemGroup,
     promotions::{Promotion, PromotionKey, applications::PromotionApplication},
-    solvers::{SolverError, ilp::state::ILPState},
+    solvers::{
+        SolverError,
+        ilp::{ILPObserver, state::ILPState},
+    },
 };
 
 mod direct_discount;
@@ -29,15 +32,16 @@ impl<'a> PromotionInstances<'a> {
     /// # Errors
     ///
     /// Returns [`SolverError`] if any applicable promotion fails to add variables.
-    pub fn from_promotions(
+    pub fn from_promotions<O: ILPObserver + ?Sized>(
         promotions: &'a [Promotion<'_>],
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
+        observer: &mut O,
     ) -> Result<Self, SolverError> {
         let mut instances = SmallVec::new();
 
         for promotion in promotions {
-            let instance = PromotionInstance::new(promotion, item_group, state)?;
+            let instance = PromotionInstance::new(promotion, item_group, state, observer)?;
             instances.push(instance);
         }
 
@@ -64,9 +68,14 @@ impl<'a> PromotionInstances<'a> {
     }
 
     /// Add constraints for all promotion instances
-    pub fn add_constraints<S: SolverModel>(&self, mut model: S, item_group: &ItemGroup<'_>) -> S {
+    pub fn add_constraints<S: SolverModel, O: ILPObserver + ?Sized>(
+        &self,
+        mut model: S,
+        item_group: &ItemGroup<'_>,
+        observer: &mut O,
+    ) -> S {
         for instance in &self.instances {
-            model = instance.add_constraints(model, item_group);
+            model = instance.add_constraints(model, item_group, observer);
         }
 
         model
@@ -95,17 +104,18 @@ impl<'a> PromotionInstance<'a> {
     ///
     /// Returns [`SolverError`] if the promotion fails to add variables (for example, due to
     /// invalid indices, discount errors, or non-representable coefficients).
-    pub fn new(
+    pub fn new<O: ILPObserver + ?Sized>(
         promotion: &'a Promotion<'a>,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
+        observer: &mut O,
     ) -> Result<Self, SolverError> {
         let vars = match (promotion, promotion.is_applicable(item_group)) {
             (Promotion::DirectDiscount(direct_discount), true) => {
-                direct_discount.add_variables(item_group, state)?
+                direct_discount.add_variables(promotion.key(), item_group, state, observer)?
             }
             (Promotion::PositionalDiscount(positional_discount), true) => {
-                positional_discount.add_variables(item_group, state)?
+                positional_discount.add_variables(promotion.key(), item_group, state, observer)?
             }
             (_promotion, false) => PromotionVars::Noop,
         };
@@ -125,8 +135,14 @@ impl<'a> PromotionInstance<'a> {
     ///
     /// This uses the enum to dispatch to the correct constraint logic based on the
     /// concrete vars type.
-    fn add_constraints<S: SolverModel>(&self, model: S, _item_group: &ItemGroup<'_>) -> S {
-        self.vars.add_constraints(model)
+    fn add_constraints<S: SolverModel, O: ILPObserver + ?Sized>(
+        &self,
+        model: S,
+        _item_group: &ItemGroup<'_>,
+        observer: &mut O,
+    ) -> S {
+        self.vars
+            .add_constraints(model, self.promotion.key(), observer)
     }
 
     /// Post-solve interpretation for this promotion instance.
@@ -234,10 +250,17 @@ impl PromotionVars {
     }
 
     /// Add promotion-specific constraints to the model.
-    pub fn add_constraints<S: SolverModel>(&self, model: S) -> S {
+    pub fn add_constraints<S: SolverModel, O: ILPObserver + ?Sized>(
+        &self,
+        model: S,
+        promotion_key: PromotionKey,
+        observer: &mut O,
+    ) -> S {
         match self {
             Self::Noop | Self::DirectDiscount(_) => model,
-            Self::PositionalDiscount(vars) => vars.add_dfa_constraints(model),
+            Self::PositionalDiscount(vars) => {
+                vars.add_dfa_constraints(model, promotion_key, observer)
+            }
         }
     }
 }
@@ -290,10 +313,12 @@ pub trait ILPPromotion: Send + Sync {
     /// Discount calculation errors should be surfaced to callers via [`SolverError::Discount`].
     /// If a discounted minor unit amount cannot be represented exactly as a solver coefficient,
     /// return [`SolverError::MinorUnitsNotRepresentable`].
-    fn add_variables(
+    fn add_variables<O: ILPObserver + ?Sized>(
         &self,
+        promotion_key: PromotionKey,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
+        observer: &mut O,
     ) -> Result<PromotionVars, SolverError>;
 
     /// Calculate per-item discounts chosen for this promotion.
@@ -352,15 +377,27 @@ pub fn i64_to_f64_exact(v: i64) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use good_lp::{Expression, ProblemVariables, Solution, SolutionStatus, Variable};
-    use rusty_money::{Money, iso};
+    use good_lp::{
+        Expression, IntoAffineExpression, ProblemVariables, Solution, SolutionStatus, Variable,
+    };
+    use rusty_money::{Money, iso::GBP};
+    use smallvec::SmallVec;
     use testresult::TestResult;
+
+    #[cfg(feature = "solver-highs")]
+    use good_lp::solvers::highs::highs as default_solver;
+    #[cfg(all(not(feature = "solver-highs"), feature = "solver-microlp"))]
+    use good_lp::solvers::microlp::microlp as default_solver;
 
     use crate::{
         discounts::SimpleDiscount,
         items::{Item, groups::ItemGroup},
         products::ProductKey,
-        promotions::{Promotion, PromotionKey, direct_discount::DirectDiscountPromotion},
+        promotions::{
+            Promotion, PromotionKey, direct_discount::DirectDiscountPromotion,
+            positional_discount::PositionalDiscountPromotion,
+        },
+        solvers::ilp::NoopObserver,
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
@@ -380,9 +417,7 @@ mod tests {
     }
 
     fn item_group_from_items<const N: usize>(items: [Item<'_>; N]) -> ItemGroup<'_> {
-        let currency = items
-            .first()
-            .map_or(iso::GBP, |item| item.price().currency());
+        let currency = items.first().map_or(GBP, |item| item.price().currency());
 
         ItemGroup::new(items.into_iter().collect(), currency)
     }
@@ -391,25 +426,131 @@ mod tests {
     fn promotion_instance_calculates_item_discounts_via_inner_promotion() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
-            Money::from_minor(100, iso::GBP),
+            Money::from_minor(100, GBP),
         )];
         let item_group = item_group_from_items(items);
 
         let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
-            SimpleDiscount::AmountOverride(Money::from_minor(50, iso::GBP)),
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
         ));
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
-        let instance = PromotionInstance::new(&promotion, &item_group, &mut state)?;
+        let mut observer = NoopObserver;
+        let instance = PromotionInstance::new(&promotion, &item_group, &mut state, &mut observer)?;
 
         let discounts = instance.calculate_item_discounts(&SelectAllSolution, &item_group)?;
 
         assert_eq!(discounts.get(&0), Some(&(100, 50)));
 
         Ok(())
+    }
+
+    #[test]
+    fn promotion_instance_handles_positional_promotions() -> TestResult {
+        let items = [
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(300, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(400, GBP)),
+        ];
+        let item_group = item_group_from_items(items);
+
+        let promo = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+            PromotionKey::default(),
+            StringTagCollection::empty(),
+            2,
+            SmallVec::from_vec(vec![1u16]),
+            SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.5)),
+        ));
+
+        let mut state = ILPState::with_presence_variables(&item_group)?;
+        let mut observer = NoopObserver;
+        let instance = PromotionInstance::new(&promo, &item_group, &mut state, &mut observer)?;
+
+        let discounts = instance.calculate_item_discounts(&SelectAllSolution, &item_group)?;
+        assert_eq!(discounts.len(), 4);
+
+        let mut next_bundle_id = 0;
+        let applications = instance.calculate_item_applications(
+            &SelectAllSolution,
+            &item_group,
+            &mut next_bundle_id,
+        )?;
+
+        assert_eq!(applications.len(), 4);
+        assert!(next_bundle_id > 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn promotion_vars_routes_positional_logic() -> TestResult {
+        let items = [
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(300, GBP)),
+        ];
+
+        let item_group = item_group_from_items(items);
+
+        let promo = PositionalDiscountPromotion::new(
+            PromotionKey::default(),
+            StringTagCollection::empty(),
+            2,
+            SmallVec::from_vec(vec![1u16]),
+            SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.5)),
+        );
+
+        let mut state = ILPState::with_presence_variables(&item_group)?;
+        let mut observer = NoopObserver;
+        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+
+        let expr = Expression::default();
+        let updated = vars.add_item_participation_term(expr, 0);
+        assert!(updated.linear_coefficients().next().is_some());
+
+        assert!(vars.is_item_participating(&SelectAllSolution, 0));
+        assert!(vars.is_item_discounted(&SelectAllSolution, 0));
+
+        // Smoke test the revised model
+        let (pb, cost, _presence) = state.into_parts();
+        let model = pb.minimise(cost).using(default_solver);
+        let _model = vars.add_constraints(model, promo.key(), &mut observer);
+
+        Ok(())
+    }
+
+    #[test]
+    fn promotion_vars_reports_direct_discounted() -> TestResult {
+        let items = [Item::new(
+            ProductKey::default(),
+            Money::from_minor(100, GBP),
+        )];
+        let item_group = item_group_from_items(items);
+
+        let promo = DirectDiscountPromotion::new(
+            PromotionKey::default(),
+            StringTagCollection::empty(),
+            SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
+        );
+
+        let mut state = ILPState::with_presence_variables(&item_group)?;
+        let mut observer = NoopObserver;
+        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+
+        assert!(vars.is_item_discounted(&SelectAllSolution, 0));
+
+        Ok(())
+    }
+
+    #[test]
+    fn i64_to_f64_exact_detects_inexact_values() {
+        assert_eq!(i64_to_f64_exact(1_000), Some(1_000.0));
+        // 2^53 + 1 is not exactly representable in f64.
+        assert_eq!(i64_to_f64_exact(9_007_199_254_740_993), None);
     }
 }

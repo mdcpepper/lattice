@@ -78,7 +78,7 @@ impl<'a> From<&'a Basket<'a>> for ItemGroup<'a> {
 
 #[cfg(test)]
 mod tests {
-    use rusty_money::{Money, iso};
+    use rusty_money::{Money, iso::GBP};
     use smallvec::SmallVec;
     use testresult::TestResult;
 
@@ -88,15 +88,15 @@ mod tests {
 
     fn test_items<'a>() -> [Item<'a>; 2] {
         [
-            Item::new(ProductKey::default(), Money::from_minor(100, iso::GBP)),
-            Item::new(ProductKey::default(), Money::from_minor(200, iso::GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
+            Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
         ]
     }
 
     #[test]
     fn get_item_returns_item() -> TestResult {
         let items: SmallVec<[Item<'_>; 10]> = test_items().into_iter().collect();
-        let group = ItemGroup::new(items, iso::GBP);
+        let group = ItemGroup::new(items, GBP);
 
         let item = group.get_item(1)?;
 
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn get_item_missing_returns_error() {
         let items: SmallVec<[Item<'_>; 10]> = test_items().into_iter().collect();
-        let group = ItemGroup::new(items, iso::GBP);
+        let group = ItemGroup::new(items, GBP);
 
         let err = group.get_item(99).err();
 
@@ -117,11 +117,11 @@ mod tests {
 
     #[test]
     fn from_basket_clones_items_and_currency() -> TestResult {
-        let basket = Basket::with_items(test_items(), iso::GBP)?;
+        let basket = Basket::with_items(test_items(), GBP)?;
 
         let group = ItemGroup::from(&basket);
 
-        assert_eq!(group.currency(), iso::GBP);
+        assert_eq!(group.currency(), GBP);
         assert_eq!(group.len(), 2);
 
         let prices: Vec<i64> = group
