@@ -15,9 +15,11 @@ use crate::{
 };
 
 mod direct_discount;
+mod mix_and_match;
 mod positional_discount;
 
 use direct_discount::DirectDiscountPromotionVars;
+use mix_and_match::MixAndMatchVars;
 use positional_discount::PositionalDiscountVars;
 
 /// Collection of promotion instances for a solve operation
@@ -114,6 +116,9 @@ impl<'a> PromotionInstance<'a> {
             (Promotion::DirectDiscount(direct_discount), true) => {
                 direct_discount.add_variables(promotion.key(), item_group, state, observer)?
             }
+            (Promotion::MixAndMatch(mix_and_match), true) => {
+                mix_and_match.add_variables(promotion.key(), item_group, state, observer)?
+            }
             (Promotion::PositionalDiscount(positional_discount), true) => {
                 positional_discount.add_variables(promotion.key(), item_group, state, observer)?
             }
@@ -163,6 +168,9 @@ impl<'a> PromotionInstance<'a> {
             Promotion::DirectDiscount(direct_discount) => {
                 direct_discount.calculate_item_discounts(solution, &self.vars, item_group)
             }
+            Promotion::MixAndMatch(mix_and_match) => {
+                mix_and_match.calculate_item_discounts(solution, &self.vars, item_group)
+            }
             Promotion::PositionalDiscount(positional_discount) => {
                 positional_discount.calculate_item_discounts(solution, &self.vars, item_group)
             }
@@ -193,6 +201,13 @@ impl<'a> PromotionInstance<'a> {
                     item_group,
                     next_bundle_id,
                 ),
+            Promotion::MixAndMatch(mix_and_match) => mix_and_match.calculate_item_applications(
+                self.promotion.key(),
+                solution,
+                &self.vars,
+                item_group,
+                next_bundle_id,
+            ),
             Promotion::PositionalDiscount(positional_discount) => positional_discount
                 .calculate_item_applications(
                     self.promotion.key(),
@@ -215,7 +230,10 @@ pub enum PromotionVars {
     Noop,
 
     /// Direct discount promotion vars
-    DirectDiscount(DirectDiscountPromotionVars),
+    DirectDiscount(Box<DirectDiscountPromotionVars>),
+
+    /// Mix-and-Match promotion vars
+    MixAndMatch(Box<MixAndMatchVars>),
 
     /// Positional discount promotion vars
     PositionalDiscount(Box<PositionalDiscountVars>),
@@ -227,6 +245,7 @@ impl PromotionVars {
         match self {
             Self::Noop => expr,
             Self::DirectDiscount(vars) => vars.add_item_participation_term(expr, item_idx),
+            Self::MixAndMatch(vars) => vars.add_item_participation_term(expr, item_idx),
             Self::PositionalDiscount(vars) => vars.add_item_participation_term(expr, item_idx),
         }
     }
@@ -236,15 +255,18 @@ impl PromotionVars {
         match self {
             Self::Noop => false,
             Self::DirectDiscount(vars) => vars.is_item_participating(solution, item_idx),
+            Self::MixAndMatch(vars) => vars.is_item_participating(solution, item_idx),
             Self::PositionalDiscount(vars) => vars.is_item_participating(solution, item_idx),
         }
     }
 
-    /// Returns true if the item is discounted by the promotion.
-    pub fn is_item_discounted(&self, solution: &dyn Solution, item_idx: usize) -> bool {
+    /// Returns true if the promotion determines the item's final price
+    /// (which may be a discount or a price that stays the same).
+    pub fn is_item_priced_by_promotion(&self, solution: &dyn Solution, item_idx: usize) -> bool {
         match self {
             Self::Noop => false,
             Self::DirectDiscount(vars) => vars.is_item_participating(solution, item_idx),
+            Self::MixAndMatch(vars) => vars.is_item_priced_by_promotion(solution, item_idx),
             Self::PositionalDiscount(vars) => vars.is_item_discounted(solution, item_idx),
         }
     }
@@ -258,6 +280,7 @@ impl PromotionVars {
     ) -> S {
         match self {
             Self::Noop | Self::DirectDiscount(_) => model,
+            Self::MixAndMatch(vars) => vars.add_constraints(model, promotion_key, observer),
             Self::PositionalDiscount(vars) => {
                 vars.add_dfa_constraints(model, promotion_key, observer)
             }
@@ -514,7 +537,7 @@ mod tests {
         assert!(updated.linear_coefficients().next().is_some());
 
         assert!(vars.is_item_participating(&SelectAllSolution, 0));
-        assert!(vars.is_item_discounted(&SelectAllSolution, 0));
+        assert!(vars.is_item_priced_by_promotion(&SelectAllSolution, 0));
 
         // Smoke test the revised model
         let (pb, cost, _presence) = state.into_parts();
@@ -542,7 +565,7 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
 
-        assert!(vars.is_item_discounted(&SelectAllSolution, 0));
+        assert!(vars.is_item_priced_by_promotion(&SelectAllSolution, 0));
 
         Ok(())
     }

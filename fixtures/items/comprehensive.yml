@@ -1,0 +1,30 @@
+# Comprehensive item list for integration testing
+# Includes items from all categories to trigger all promotion types
+
+items:
+  # Fresh Produce items (for direct_discount percentage_off)
+  - apple
+  - banana
+  - orange
+  - lettuce
+
+  # Dairy items (for direct_discount amount_off)
+  - milk
+  - cheese
+  - yogurt
+  - butter
+
+  # Bakery items (for positional_discount 3-for-2)
+  - bread
+  - croissant
+  - muffin
+
+  # Beverage items
+  - water
+  - juice
+  - soda
+
+  # Snack items
+  - chips
+  - cookies
+  - chocolate

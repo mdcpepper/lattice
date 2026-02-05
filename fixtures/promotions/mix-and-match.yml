@@ -1,0 +1,20 @@
+promotions:
+  meal-deal:
+    type: mix_and_match
+    name: Meal Deal
+    slots:
+      - name: main
+        tags: [main]
+        min: 1
+        max: 1
+      - name: drink
+        tags: [drink]
+        min: 1
+        max: 1
+      - name: snack
+        tags: [snack]
+        min: 1
+        max: 1
+    discount:
+      type: fixed_total
+      amount: 5.00 GBP

@@ -1,0 +1,93 @@
+# Comprehensive product catalog for integration testing
+# Covers all promotion types with varied price points and overlapping tags
+
+products:
+  # Fresh Produce
+  apple:
+    name: "Granny Smith Apple"
+    price: 0.75 GBP
+    tags: [produce, healthy, snack]
+
+  banana:
+    name: "Organic Banana"
+    price: 0.50 GBP
+    tags: [produce, healthy, breakfast]
+
+  orange:
+    name: "Navel Orange"
+    price: 0.85 GBP
+    tags: [produce, healthy, snack]
+
+  lettuce:
+    name: "Iceberg Lettuce"
+    price: 1.20 GBP
+    tags: [produce, healthy]
+
+  # Dairy
+  milk:
+    name: "Whole Milk 1L"
+    price: 1.50 GBP
+    tags: [dairy, breakfast]
+
+  cheese:
+    name: "Cheddar Cheese 200g"
+    price: 3.00 GBP
+    tags: [dairy]
+
+  yogurt:
+    name: "Greek Yogurt"
+    price: 2.00 GBP
+    tags: [dairy, breakfast, healthy]
+
+  butter:
+    name: "Salted Butter"
+    price: 2.50 GBP
+    tags: [dairy, bakery]
+
+  # Bakery
+  bread:
+    name: "Sourdough Loaf"
+    price: 2.20 GBP
+    tags: [bakery, breakfast]
+
+  croissant:
+    name: "Butter Croissant"
+    price: 1.80 GBP
+    tags: [bakery, breakfast, treat]
+
+  muffin:
+    name: "Blueberry Muffin"
+    price: 1.50 GBP
+    tags: [bakery, breakfast, treat]
+
+  # Beverages
+  water:
+    name: "Mineral Water 1.5L"
+    price: 0.80 GBP
+    tags: [beverage, healthy]
+
+  juice:
+    name: "Orange Juice 1L"
+    price: 2.50 GBP
+    tags: [beverage, breakfast, healthy]
+
+  soda:
+    name: "Cola 2L"
+    price: 1.60 GBP
+    tags: [beverage]
+
+  # Snacks
+  chips:
+    name: "Sea Salt Crisps"
+    price: 1.00 GBP
+    tags: [snack, treat]
+
+  cookies:
+    name: "Chocolate Chip Cookies"
+    price: 2.00 GBP
+    tags: [snack, treat]
+
+  chocolate:
+    name: "Dark Chocolate Bar"
+    price: 1.50 GBP
+    tags: [snack, treat]

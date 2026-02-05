@@ -124,9 +124,9 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
             observer.on_objective_term(participation_var, coeff);
         }
 
-        Ok(PromotionVars::DirectDiscount(DirectDiscountPromotionVars {
-            item_participation,
-        }))
+        Ok(PromotionVars::DirectDiscount(Box::new(
+            DirectDiscountPromotionVars { item_participation },
+        )))
     }
 
     fn calculate_item_discounts(

@@ -1,0 +1,53 @@
+# Comprehensive promotion set covering all promotion types
+# Tests direct_discount, positional_discount, and mix_and_match
+
+promotions:
+  # Promotion 1: direct_discount with percentage_off
+  produce_discount:
+    name: "15% Off Fresh Produce"
+    type: direct_discount
+    tags: [produce]
+    discount:
+      type: percentage_off
+      amount: 15%
+
+  # Promotion 2: direct_discount with amount_off
+  dairy_discount:
+    name: "£1 Off Dairy Products"
+    type: direct_discount
+    tags: [dairy]
+    discount:
+      type: amount_off
+      amount: 1.00 GBP
+
+  # Promotion 3: positional_discount (3-for-2 on bakery)
+  bakery_three_for_two:
+    name: "3-for-2 on Bakery Items"
+    type: positional_discount
+    tags: [bakery]
+    size: 3
+    positions: [2]
+    discount:
+      type: percentage_off
+      amount: 100%
+
+  # Promotion 4: mix_and_match with fixed_total (Breakfast Bundle)
+  breakfast_bundle:
+    type: mix_and_match
+    name: "Breakfast Bundle £5"
+    slots:
+      - name: dairy
+        tags: [dairy]
+        min: 1
+        max: 1
+      - name: bakery
+        tags: [bakery]
+        min: 1
+        max: 1
+      - name: beverage
+        tags: [beverage]
+        min: 1
+        max: 1
+    discount:
+      type: fixed_total
+      amount: 5.00 GBP

@@ -587,6 +587,7 @@ mod tests {
 
         let promo_key = promotion_meta.insert(PromotionMeta {
             name: "Fruit Sale".to_string(),
+            ..Default::default()
         });
 
         let items = [
@@ -727,6 +728,7 @@ mod tests {
 
         let promo_key = promotion_meta.insert(PromotionMeta {
             name: "Half Off".to_string(),
+            ..Default::default()
         });
 
         let items = [Item::new(apple_key, apple_price)];
@@ -801,5 +803,127 @@ mod tests {
         };
 
         let _ = Receipt::from_solver_result(&basket, solver_result).expect("receipt should build");
+    }
+
+    #[test]
+    fn write_to_renders_item_savings_with_bundle_id() -> TestResult {
+        let mut product_meta = SlotMap::<ProductKey, Product<'_>>::with_key();
+        let mut promotion_meta = SlotMap::<PromotionKey, PromotionMeta>::with_key();
+
+        let wrap_price = Money::from_minor(400, GBP);
+        let drink_price = Money::from_minor(150, GBP);
+
+        let wrap_key = product_meta.insert(Product {
+            name: "Chicken Wrap".to_string(),
+            tags: StringTagCollection::from_strs(&["main", "hot"]),
+            price: wrap_price,
+        });
+
+        let drink_key = product_meta.insert(Product {
+            name: "Water".to_string(),
+            tags: StringTagCollection::from_strs(&["drink", "cold"]),
+            price: drink_price,
+        });
+
+        let promo_key = promotion_meta.insert(PromotionMeta {
+            name: "Meal Deal".to_string(),
+            ..Default::default()
+        });
+
+        let items = [
+            Item::with_tags(
+                wrap_key,
+                wrap_price,
+                StringTagCollection::from_strs(&["main", "hot"]),
+            ),
+            Item::with_tags(
+                drink_key,
+                drink_price,
+                StringTagCollection::from_strs(&["drink", "cold"]),
+            ),
+        ];
+        let basket = Basket::with_items(items, GBP)?;
+
+        let mut promotion_apps = FxHashMap::default();
+
+        promotion_apps.insert(
+            0,
+            PromotionApplication {
+                promotion_key: promo_key,
+                item_idx: 0,
+                bundle_id: 5,
+                original_price: wrap_price,
+                final_price: Money::from_minor(300, GBP),
+            },
+        );
+
+        promotion_apps.insert(
+            1,
+            PromotionApplication {
+                promotion_key: promo_key,
+                item_idx: 1,
+                bundle_id: 5,
+                original_price: drink_price,
+                final_price: Money::from_minor(100, GBP),
+            },
+        );
+
+        let receipt = Receipt::new(
+            smallvec![],
+            promotion_apps,
+            Money::from_minor(550, GBP),
+            Money::from_minor(400, GBP),
+            GBP,
+        );
+
+        let mut out = Vec::new();
+        receipt.write_to(&mut out, &basket, &product_meta, &promotion_meta)?;
+
+        let output = String::from_utf8(out)?;
+        assert!(output.contains("Chicken Wrap"));
+        assert!(output.contains("Water"));
+        assert!(output.contains("Meal Deal"));
+        assert!(output.contains("#6")); // bundle_id 5 displayed as 6 (5+1)
+        assert!(output.contains("Subtotal:"));
+        assert!(output.contains("Total:"));
+        assert!(output.contains("Savings:"));
+        // Tags should appear
+        assert!(output.contains("main"));
+        assert!(output.contains("drink"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn write_to_with_zero_savings_percentage() -> TestResult {
+        let mut product_meta = SlotMap::<ProductKey, Product<'_>>::with_key();
+        let promotion_meta = SlotMap::<PromotionKey, PromotionMeta>::with_key();
+
+        let item_price = Money::from_minor(100, GBP);
+        let item_key = product_meta.insert(Product {
+            name: "Item".to_string(),
+            tags: StringTagCollection::from_strs(&["test"]),
+            price: item_price,
+        });
+
+        let items = [Item::new(item_key, item_price)];
+        let basket = Basket::with_items(items, GBP)?;
+
+        let receipt = Receipt::new(
+            smallvec![0],
+            FxHashMap::default(),
+            Money::from_minor(100, GBP),
+            Money::from_minor(100, GBP),
+            GBP,
+        );
+
+        let mut out = Vec::new();
+        receipt.write_to(&mut out, &basket, &product_meta, &promotion_meta)?;
+
+        let output = String::from_utf8(out)?;
+        assert!(output.contains("Savings:"));
+        assert!(output.contains("(0.00%"));
+
+        Ok(())
     }
 }

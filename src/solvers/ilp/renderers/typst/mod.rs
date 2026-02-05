@@ -646,11 +646,7 @@ impl TypstRenderer {
         }
 
         if !formulation.auxiliary_vars.is_empty() {
-            output.push_str("\n=== Auxiliary Variables (DFA)\n\n");
-
-            output.push_str(
-                "DFA positions index eligible items (sorted by price desc, then index asc).\n\n",
-            );
+            output.push_str("\n=== Auxiliary Variables\n\n");
 
             let mut aux_items = formulation.auxiliary_vars.to_vec();
 
@@ -1080,9 +1076,11 @@ mod tests {
         let mut promotions = SlotMap::<PromotionKey, PromotionMeta>::with_key();
         let promo_a = promotions.insert(PromotionMeta {
             name: "A promo".to_string(),
+            ..Default::default()
         });
         let promo_b = promotions.insert(PromotionMeta {
             name: "B promo".to_string(),
+            ..Default::default()
         });
 
         let mut renderer = TypstRenderer::new_with_metadata(
@@ -1194,9 +1192,11 @@ mod tests {
         let mut promotions = SlotMap::<PromotionKey, PromotionMeta>::with_key();
         let promo_b = promotions.insert(PromotionMeta {
             name: "B promo".to_string(),
+            ..Default::default()
         });
         let promo_a = promotions.insert(PromotionMeta {
             name: "A promo".to_string(),
+            ..Default::default()
         });
 
         let mut renderer = TypstRenderer::new_with_metadata(

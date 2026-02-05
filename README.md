@@ -24,6 +24,24 @@ section below.
 A simple, direct percentage discount or fixed price override applied to qualifying 
 items independently (no bundling).
 
+```yaml
+20-off:
+  type: direct_discount
+  name: 20% Off
+  tags: [20-off]
+  discount:
+    type: percentage_off
+    amount: 20%
+
+40-off:
+  type: direct_discount
+  name: 40% Off
+  tags: [40-off]
+  discount:
+    type: percentage_off
+    amount: 40%
+```
+
 ```bash
 cargo run --release --example basket -- -f direct
 ```
@@ -50,11 +68,23 @@ qualifies for _both_ the "20% off" and the "40% off" promotion. Applying the 40%
 promotion to the "Snack" item results in the cheapest total basket price, so 
 it is that one that is applied to that item.
 
-## Positional Discount Promotion
+### Positional Discount Promotion
 
 These promotions apply discounts to specific positions when items are ordered 
 by price. This category encompasses BOGOF (2-for-1), BOGOHP (second item half price), 
 3-for-2, 5-for-3, and similar X-for-Y offers.
+
+```yaml
+3-for-2:
+  type: positional_discount
+  name: 3-for-2 Vitamins
+  tags: [3-for-2]
+  size: 3
+  positions: [2]
+  discount:
+    type: percentage_off
+    amount: 100%
+```
 
 ```bash
 cargo run --release --example basket -- -f positional
@@ -74,6 +104,58 @@ cargo run --release --example basket -- -f positional
 Subtotal: £19.34
 Total:    £17.35
 Savings:  £1.99 (10.29%)
+```
+
+### Mix and Match Promotions
+
+Mix and Match Bundle promotions define a bundle as a set of required "slots", where each slot must be satisfied by selecting a valid number of qualifying items with specific tags. A bundle only qualifies once all slots are filled.
+
+Typical examples include meal deals (main + drink + snack for a fixed price) and mix-and-match offers (any 3 from a range, with a bundle-level discount applied).
+
+```yaml
+meal-deal:
+  type: mix_and_match
+  name: Meal Deal
+  slots:
+    - name: main
+      tags: [main]
+      min: 1
+      max: 1
+    - name: drink
+      tags: [drink]
+      min: 1
+      max: 1
+    - name: snack
+      tags: [snack]
+      min: 1
+      max: 1
+  discount:
+    type: fixed_total
+    amount: 5.00 GBP
+```
+
+```bash
+cargo run --release --example basket -- -f mix-and-match -n 5
+```
+
+```
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+        Item                Tags    Base Price   Discounted Price   Savings           Promotion      
+═════════════════════════════════════════════════════════════════════════════════════════════════════
+ #1     Chicken Wrap        main    £4.00        £2.30              -£1.70 (42.50%)   #1   Meal Deal 
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+ #2     Spring Water        drink   £1.00                                                            
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+ #3     Apple               snack   £0.80                                                            
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+ #4     Fruit Smoothie      drink   £2.50        £1.44              -£1.06 (42.40%)   #1   Meal Deal 
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+ #5     Chocolate Brownie   snack   £2.20        £1.26              -£0.94 (42.73%)   #1   Meal Deal 
+─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Subtotal: £10.50
+Total:    £6.80
+Savings:  £3.70 (35.24%)
 ```
 
 ## Global Optimisation

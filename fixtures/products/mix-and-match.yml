@@ -1,0 +1,35 @@
+products:
+  wrap:
+    name: Chicken Wrap
+    tags: [main]
+    price: 4.00 GBP
+
+  water:
+    name: Spring Water
+    tags: [drink]
+    price: 1.00 GBP
+
+  apple:
+    name: Apple
+    tags: [snack]
+    price: 0.80 GBP
+
+  smoothie:
+    name: Fruit Smoothie
+    tags: [drink]
+    price: 2.50 GBP
+
+  brownie:
+    name: Chocolate Brownie
+    tags: [snack]
+    price: 2.20 GBP
+
+  salad:
+    name: Garden Salad
+    tags: [main]
+    price: 5.50 GBP
+
+  cookie:
+    name: Cookie
+    tags: [snack]
+    price: 1.50 GBP

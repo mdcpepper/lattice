@@ -566,7 +566,7 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
             let original_minor = item.price().to_minor_units();
 
             // Check if item receives discount
-            let final_minor = if vars.is_item_discounted(solution, item_idx) {
+            let final_minor = if vars.is_item_priced_by_promotion(solution, item_idx) {
                 // If so, calculate discounted price
                 calculate_discounted_price(item, self.discount(), item_group.currency())?
                     .to_minor_units()
@@ -614,7 +614,7 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
             for &(item_idx, price_minor) in chunk {
                 let item = item_group.get_item(item_idx)?;
 
-                let final_price = if vars.is_item_discounted(solution, item_idx) {
+                let final_price = if vars.is_item_priced_by_promotion(solution, item_idx) {
                     calculate_discounted_price(item, self.discount(), currency)?
                 } else {
                     Money::from_minor(price_minor, currency)

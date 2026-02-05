@@ -3,7 +3,7 @@
 use std::{fs, path::PathBuf};
 
 use rustc_hash::FxHashMap;
-use slotmap::SlotMap;
+use slotmap::{SecondaryMap, SlotMap};
 use thiserror::Error;
 
 use crate::{
@@ -213,6 +213,7 @@ impl<'a> Fixture<'a> {
         for (key, promotion_fixture) in fixture.promotions {
             let promotion_key = self.promotion_meta.insert(PromotionMeta {
                 name: String::new(),
+                slot_names: SecondaryMap::new(),
             });
 
             let (meta, promotion) = promotion_fixture.try_into_promotion(promotion_key)?;

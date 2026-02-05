@@ -1,6 +1,12 @@
 //! Utils
 
 use clap::Parser;
+use slotmap::SlotMap;
+
+use crate::{
+    promotions::{PromotionSlotKey, mix_and_match::MixAndMatchSlot},
+    tags::string::StringTagCollection,
+};
 
 /// Arguments for the basket examples
 #[derive(Debug, Parser)]
@@ -16,4 +22,14 @@ pub struct ExampleBasketArgs {
     /// Output file path
     #[clap(short, long)]
     pub out: Option<String>,
+}
+
+/// Create a new promotion slot with the given tags, minimum and maximum values.
+pub fn slot(
+    keys: &mut SlotMap<PromotionSlotKey, ()>,
+    tags: StringTagCollection,
+    min: usize,
+    max: Option<usize>,
+) -> MixAndMatchSlot {
+    MixAndMatchSlot::new(keys.insert(()), tags, min, max)
 }
