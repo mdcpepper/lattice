@@ -663,14 +663,14 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
         Ok(discounts)
     }
 
-    fn calculate_item_applications<'group>(
+    fn calculate_item_applications<'a>(
         &self,
         promotion_key: PromotionKey,
         solution: &dyn Solution,
         vars: &PromotionVars,
-        item_group: &'group ItemGroup<'_>,
+        item_group: &'a ItemGroup<'_>,
         next_bundle_id: &mut usize,
-    ) -> Result<SmallVec<[PromotionApplication<'group>; 10]>, SolverError> {
+    ) -> Result<SmallVec<[PromotionApplication<'a>; 10]>, SolverError> {
         let mut applications = SmallVec::new();
 
         let currency = item_group.currency();

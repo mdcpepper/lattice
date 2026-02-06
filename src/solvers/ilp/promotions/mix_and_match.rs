@@ -10,7 +10,7 @@ use rusty_money::Money;
 
 use crate::{
     discounts::percent_of_minor,
-    items::groups::ItemGroup,
+    items::{Item, groups::ItemGroup},
     promotions::{
         PromotionKey,
         applications::PromotionApplication,
@@ -380,7 +380,7 @@ fn i32_from_usize(value: usize) -> i32 {
 
 /// Calculate discounted price for a single item in mix-and-match context
 fn calculate_discounted_price_for_item<'a>(
-    item: &crate::items::Item<'_>,
+    item: &Item<'_>,
     discount: &MixAndMatchDiscount<'_>,
     item_group: &ItemGroup<'a>,
     _sorted_items: &[(usize, i64)],
@@ -391,6 +391,7 @@ fn calculate_discounted_price_for_item<'a>(
         MixAndMatchDiscount::PercentAllItems(pct) => {
             let discount_amount =
                 percent_of_minor(pct, full_minor).map_err(SolverError::Discount)?;
+
             full_minor.saturating_sub(discount_amount)
         }
         MixAndMatchDiscount::PercentCheapest(pct) => {
@@ -399,6 +400,7 @@ fn calculate_discounted_price_for_item<'a>(
             // This is conservative but ensures budget isn't violated
             let discount_amount =
                 percent_of_minor(pct, full_minor).map_err(SolverError::Discount)?;
+
             full_minor.saturating_sub(discount_amount)
         }
         MixAndMatchDiscount::FixedTotal(_total) => {
@@ -850,14 +852,14 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         calculate_discounts_for_vars(self, solution, vars, item_group)
     }
 
-    fn calculate_item_applications<'group>(
+    fn calculate_item_applications<'a>(
         &self,
         promotion_key: PromotionKey,
         solution: &dyn Solution,
         vars: &PromotionVars,
-        item_group: &'group ItemGroup<'_>,
+        item_group: &'a ItemGroup<'_>,
         next_bundle_id: &mut usize,
-    ) -> Result<SmallVec<[PromotionApplication<'group>; 10]>, SolverError> {
+    ) -> Result<SmallVec<[PromotionApplication<'a>; 10]>, SolverError> {
         let vars = match vars {
             PromotionVars::MixAndMatch(vars) => vars.as_ref(),
             _ => return Ok(SmallVec::new()),

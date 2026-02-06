@@ -74,11 +74,11 @@ impl ILPSolver {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn solve_with_observer<'group>(
+    pub fn solve_with_observer<'a>(
         promotions: &[Promotion<'_>],
-        item_group: &'group ItemGroup<'_>,
+        item_group: &'a ItemGroup<'_>,
         observer: &mut dyn ILPObserver,
-    ) -> Result<SolverResult<'group>, SolverError> {
+    ) -> Result<SolverResult<'a>, SolverError> {
         Self::solve_internal(promotions, item_group, observer)
     }
 
@@ -252,13 +252,13 @@ fn build_presence_variables_and_objective<O: ILPObserver + ?Sized>(
 ///
 /// Returns a [`SolverError`] if any item in the group contains a Money amount in minor units
 /// that cannot be represented exactly as a solver coefficient.
-fn collect_full_price_items<'group>(
-    item_group: &'group ItemGroup<'_>,
+fn collect_full_price_items<'a>(
+    item_group: &'a ItemGroup<'_>,
     solution: &impl Solution,
     z: &[Variable],
     used_items: ItemUsageFlags,
-    total: Money<'group, Currency>,
-) -> Result<FullPriceState<'group>, SolverError> {
+    total: Money<'a, Currency>,
+) -> Result<FullPriceState<'a>, SolverError> {
     let mut unaffected_items = SmallVec::new();
     let mut used_items = used_items;
     let mut total = total;

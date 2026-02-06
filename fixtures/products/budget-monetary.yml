@@ -1,0 +1,15 @@
+products:
+  book:
+    name: "Paperback Novel"
+    price: 6.99 GBP
+    tags: [clearance]
+
+  notebook:
+    name: "A5 Notebook"
+    price: 3.49 GBP
+    tags: [clearance]
+
+  pen:
+    name: "Ballpoint Pen"
+    price: 1.99 GBP
+    tags: [clearance]

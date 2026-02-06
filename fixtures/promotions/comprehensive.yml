@@ -4,9 +4,11 @@
 promotions:
   # Promotion 1: direct_discount with percentage_off
   produce_discount:
-    name: "15% Off Fresh Produce"
+    name: "15% Off Fresh Produce (up to 3 items)"
     type: direct_discount
     tags: [produce]
+    budget:
+      applications: 3
     discount:
       type: percentage_off
       amount: 15%

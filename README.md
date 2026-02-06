@@ -6,6 +6,15 @@
 Dante is a high-performance, general-purpose pricing, promotion and basket 
 optimisation engine written in Rust.
 
+* [Promotions](#promotions)
+  * [Direct Discount Promotions](#direct-discount-promotions)
+  * [Positional Discount Promotions](#positional-discount-promotions)
+  * [Mix and Match Promotions](#mix-and-match-promotions)
+* [Budgets](#budgets)
+  * [Application Budgets](#application-budgets)
+  * [Monetary Budgets](#monetary-budgets)
+* [Global Optimisation](#global-optimisation)
+
 ## Promotions
 
 Promotions are rules that select candidate items via tag intersections, and 
@@ -19,7 +28,7 @@ per-item applications (including original/final prices and bundle groupings)
 that can be rendered on a receipt. Each promotion type is documented in its own
 section below.
 
-### Direct Discount Promotion
+### Direct Discount Promotions
 
 A simple, direct percentage discount or fixed price override applied to qualifying 
 items independently (no bundling).
@@ -68,7 +77,7 @@ qualifies for _both_ the "20% off" and the "40% off" promotion. Applying the 40%
 promotion to the "Snack" item results in the cheapest total basket price, so 
 it is that one that is applied to that item.
 
-### Positional Discount Promotion
+### Positional Discount Promotions
 
 These promotions apply discounts to specific positions when items are ordered 
 by price. This category encompasses BOGOF (2-for-1), BOGOHP (second item half price), 
@@ -162,31 +171,116 @@ Savings:  £3.70 (35.24%)
 
 Promotions can be configured with two types of budgets:
 
-### Application Budget
+### Application Budgets
 
-Promotions can be configured with an application count budget, which limits 
+Promotions can be configured with an application count budget, which limits
 the number of times a promotion can be applied to the basket. This can be used
 to enforce redemption rules such as "once every 30 days" if these are
-pre-calculated for the customer. 
+pre-calculated for the customer.
 
-This can also be used with direct discounts to dynamically make the first `n` 
-matching items free if they were previously purchased in a bundle by the 
-customer and are being redeemed over successive orders, or to allow for 
+This can also be used with direct discounts to dynamically make the first `n`
+matching items free if they were previously purchased in a bundle by the
+customer and are being redeemed over successive orders, or to allow for
 promotions like "every 10th item free" that work across multiple orders.
 
-### Monetary Budget
+```yaml
+snack-bogof:
+  type: positional_discount
+  name: "Buy One Get One Free Snacks"
+  tags: [snack]
+  size: 2
+  positions: [1]
+  discount:
+    type: percentage_off
+    amount: 100%
+  budget:
+    applications: 2
+```
 
-Promotions can be configured with a monetary budget, which limits the total
-amount that promotion can discount for the basket. This can be used for 
+```bash
+cargo run --release --example basket -- -f budget-application
+```
+
+```
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+        Item              Tags    Base Price   Discounted Price   Savings         Promotion                        
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+ #1     Fruit Rollup      snack   £0.80                                                                            
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ #2     Chocolate Bar     snack   £2.50                                           #1   Buy One Get One Free Snacks 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ #3     Sea Salt Crisps   snack   £1.20                                           #2   Buy One Get One Free Snacks 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ #4     Fruit Rollup      snack   £0.80                                                                            
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ #5     Chocolate Bar     snack   £2.50        £0.00              -£2.50 (100%)   #1   Buy One Get One Free Snacks 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ #6     Sea Salt Crisps   snack   £1.20        £0.00              -£1.20 (100%)   #2   Buy One Get One Free Snacks 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Subtotal: £9.00
+Total:    £5.30
+Savings:  £3.70 (41.11%)
+```
+
+In this example, the BOGOF promotion has a budget of 2 applications. The solver
+forms exactly 2 bundles (items 2 & 5 and 3 & 6) using the most expensive items,
+leaving the cheaper fruit rollup items (#1 and #4) at full price. It doesn't 
+apply promotions first-come-first-served, but instead finds the best combination 
+within the budget constraint. Try running with `-n 2` or `-n 4` to see the budget 
+constraint activate as items are added.
+
+### Monetary Budgets
+
+Promotions can also be configured with a monetary budget, which limits the total
+amount that promotion can discount for the basket. This can be used for
 operational limits like "this promotion has £10,000 total spend remaining".
+
+```yaml
+clearance-sale:
+  type: direct_discount
+  name: "50% Off Clearance"
+  tags: [clearance]
+  discount:
+    type: percentage_off
+    amount: 50%
+  budget:
+    monetary: 3.00 GBP
+```
+
+```bash
+cargo run --release --example basket -- -f budget-monetary
+```
+
+```
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+        Item              Tags        Base Price   Discounted Price   Savings           Promotion              
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+ #1     A5 Notebook       clearance   £3.49        £1.74              -£1.75 (50.14%)   #1   50% Off Clearance 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ #2     Paperback Novel   clearance   £6.99                                                                    
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ #3     Ballpoint Pen     clearance   £1.99        £0.99              -£1.00 (50.25%)   #2   50% Off Clearance 
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Subtotal: £12.47
+Total:    £9.72
+Savings:  £2.75 (22.05%)
+```
+
+In this example, all three items qualify for 50% off (with total potential 
+savings of £6.23), but the promotion has a £3.00 monetary budget. The solver 
+applies the discount to items 1 and 3 (for £2.75 total savings), leaving the 
+middle item at full price.
 
 ## Global Optimisation
 
 Baskets are globally optimised for the lowest price given the items added, and 
-the configured promotions. As items are added to the basket, promotions may 
-"steal" products from existing applications, if doing so results in a lower 
-basket price, removing the previous application, as items may only participate 
-in a single promotion (at least until stacking is implemented).
+the configured promotions and budgetary constraints. As items are added to the 
+basket, promotions may "steal" products from existing applications, if doing so 
+results in a lower basket price, removing the previous application, as items 
+may only participate in a single promotion (at least until stacking is 
+implemented).
 
 For example, with two configured promotions:
 

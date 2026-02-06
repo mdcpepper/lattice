@@ -190,12 +190,12 @@ impl<'a> PromotionInstance<'a> {
     ///
     /// Returns [`SolverError`] if a selected item index is invalid (missing from the item group),
     /// or if the discount for a selected item cannot be computed.
-    pub fn calculate_item_applications<'group>(
+    pub fn calculate_item_applications<'b>(
         &self,
         solution: &dyn Solution,
-        item_group: &'group ItemGroup<'_>,
+        item_group: &'b ItemGroup<'_>,
         next_bundle_id: &mut usize,
-    ) -> Result<SmallVec<[PromotionApplication<'group>; 10]>, SolverError> {
+    ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
         match &self.promotion {
             Promotion::DirectDiscount(direct_discount) => direct_discount
                 .calculate_item_applications(
@@ -400,14 +400,14 @@ pub trait ILPPromotion: Send + Sync {
     /// # Errors
     ///
     /// Returns [`SolverError`] if the discount for a selected item cannot be computed.
-    fn calculate_item_applications<'group>(
+    fn calculate_item_applications<'a>(
         &self,
         promotion_key: PromotionKey,
         solution: &dyn Solution,
         vars: &PromotionVars,
-        item_group: &'group ItemGroup<'_>,
+        item_group: &'a ItemGroup<'_>,
         next_bundle_id: &mut usize,
-    ) -> Result<SmallVec<[PromotionApplication<'group>; 10]>, SolverError>;
+    ) -> Result<SmallVec<[PromotionApplication<'a>; 10]>, SolverError>;
 }
 
 /// Check if an i64 value is exactly representable as f64.

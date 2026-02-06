@@ -69,8 +69,8 @@ pub trait Solver {
     /// # Errors
     ///
     /// Returns a [`SolverError`] if the solver encounters an error.
-    fn solve<'group>(
+    fn solve<'a>(
         promotions: &[Promotion<'_>],
-        item_group: &'group ItemGroup<'_>,
-    ) -> Result<SolverResult<'group>, SolverError>;
+        item_group: &'a ItemGroup<'_>,
+    ) -> Result<SolverResult<'a>, SolverError>;
 }

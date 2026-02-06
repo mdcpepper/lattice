@@ -1,0 +1,15 @@
+products:
+  chocolate:
+    name: "Chocolate Bar"
+    price: 2.50 GBP
+    tags: [snack]
+
+  crisps:
+    name: "Sea Salt Crisps"
+    price: 1.20 GBP
+    tags: [snack]
+
+  rollup:
+    name: "Fruit Rollup"
+    price: 0.80 GBP
+    tags: [snack]

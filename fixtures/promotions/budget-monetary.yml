@@ -1,0 +1,10 @@
+promotions:
+  clearance-sale:
+    type: direct_discount
+    name: "50% Off Clearance"
+    tags: [clearance]
+    discount:
+      type: percentage_off
+      amount: 50%
+    budget:
+      monetary: 3.00 GBP

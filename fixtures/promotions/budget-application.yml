@@ -1,0 +1,12 @@
+promotions:
+  snack-bogof:
+    type: positional_discount
+    name: "Buy One Get One Free Snacks"
+    tags: [snack]
+    size: 2
+    positions: [1]
+    discount:
+      type: percentage_off
+      amount: 100%
+    budget:
+      applications: 2
