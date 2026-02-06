@@ -67,9 +67,9 @@ fn test_comprehensive_fixture_solving() -> TestResult {
     // Solve with ILP solver
     let result = ILPSolver::solve(promotions, &item_group)?;
 
-    // Expected total: £20.20 (2020 pence)
+    // Expected total: £20.28 (2028 pence)
     // Allow small tolerance for rounding differences in minor unit arithmetic
-    let expected_total_minor = 2020i64;
+    let expected_total_minor = 2028i64;
     let actual_total_minor = result.total.to_minor_units();
     let tolerance = 1i64; // Allow ±1 pence tolerance for rounding
 
@@ -84,13 +84,11 @@ fn test_comprehensive_fixture_solving() -> TestResult {
         actual_total_minor % 100
     );
 
-    // Verify we have promotion applications
-    // Expected: 4 produce + 3 bakery (bundle) + 4 dairy = 11 promotion applications
-    // Note: The exact count depends on how the solver structures bundles
+    // Verify we have the correct number of promotion applications
     assert_eq!(
         result.promotion_applications.len(),
-        12,
-        "Expected exactly 12 promotion applications"
+        11,
+        "Expected exactly 11 promotion applications"
     );
 
     let mut affected_items = result.affected_items;
@@ -101,7 +99,6 @@ fn test_comprehensive_fixture_solving() -> TestResult {
         affected_items,
         SmallVec::from_buf([
             0,  // Granny Smith Apple
-            1,  // Organic Banana
             2,  // Navel Orange
             3,  // Iceberg Lettuce
             4,  // Whole Milk 1L
@@ -122,6 +119,7 @@ fn test_comprehensive_fixture_solving() -> TestResult {
     assert_eq!(
         unaffected_items,
         SmallVec::from_buf([
+            1,  // Organic Banana (only 3 15% off applications allowed)
             11, // Mineral Water 1L
             13, // Cola 2L
             14, // Sea Salt Crisps
