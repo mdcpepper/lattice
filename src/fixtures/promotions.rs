@@ -367,11 +367,17 @@ impl TryFrom<SimpleDiscountFixture> for SimpleDiscount<'_> {
 mod tests {
     use decimal_percentage::Percentage;
     use rusty_money::iso::GBP;
+    use slotmap::SlotMap;
     use testresult::TestResult;
 
     use crate::{discounts::SimpleDiscount, promotions::PromotionKey};
 
     use super::*;
+
+    fn test_promotion_key() -> PromotionKey {
+        let mut keys = SlotMap::<PromotionKey, ()>::with_key();
+        keys.insert(())
+    }
 
     #[test]
     fn promotion_fixture_rejects_unknown_type() {
@@ -484,10 +490,11 @@ value: 0.10
             budget: None,
         };
 
-        let (meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
+        let key = test_promotion_key();
+        let (meta, promotion) = fixture.try_into_promotion(key)?;
 
         assert_eq!(meta.name, "Member Sale");
-        assert_eq!(promotion.key(), PromotionKey::default());
+        assert_eq!(promotion.key(), key);
 
         Ok(())
     }
@@ -505,10 +512,11 @@ value: 0.10
             budget: None,
         };
 
-        let (meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
+        let key = test_promotion_key();
+        let (meta, promotion) = fixture.try_into_promotion(key)?;
 
         assert_eq!(meta.name, "3-for-2");
-        assert_eq!(promotion.key(), PromotionKey::default());
+        assert_eq!(promotion.key(), key);
 
         Ok(())
     }
@@ -537,10 +545,11 @@ value: 0.10
             budget: None,
         };
 
-        let (meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
+        let key = test_promotion_key();
+        let (meta, promotion) = fixture.try_into_promotion(key)?;
 
         assert_eq!(meta.name, "Meal Deal");
-        assert_eq!(promotion.key(), PromotionKey::default());
+        assert_eq!(promotion.key(), key);
         assert_eq!(meta.slot_names.len(), 2);
 
         Ok(())
@@ -669,8 +678,9 @@ value: 0.10
             }),
         };
 
-        let (_meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
-        assert_eq!(promotion.key(), PromotionKey::default());
+        let key = test_promotion_key();
+        let (_meta, promotion) = fixture.try_into_promotion(key)?;
+        assert_eq!(promotion.key(), key);
 
         Ok(())
     }
@@ -691,8 +701,9 @@ value: 0.10
             }),
         };
 
-        let (_meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
-        assert_eq!(promotion.key(), PromotionKey::default());
+        let key = test_promotion_key();
+        let (_meta, promotion) = fixture.try_into_promotion(key)?;
+        assert_eq!(promotion.key(), key);
 
         Ok(())
     }
