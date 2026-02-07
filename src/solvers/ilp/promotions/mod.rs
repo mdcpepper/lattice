@@ -233,7 +233,7 @@ pub trait ILPPromotionVars: Debug + Send + Sync + Any {
 /// Promotion variable bundle produced by an ILP promotion implementation.
 pub type PromotionVars = Box<dyn ILPPromotionVars>;
 
-/// Makes a [`Promotion`] usable by the ILP solver.
+/// Makes a [`crate::promotions::Promotion`] usable by the ILP solver.
 ///
 /// Implementations are responsible for compiling a promotion into:
 ///
