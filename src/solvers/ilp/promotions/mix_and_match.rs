@@ -654,7 +654,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         let promotion_key = self.key();
 
         if item_group.is_empty() {
-            return Ok(PromotionVars::MixAndMatch(Box::new(MixAndMatchVars {
+            return Ok(Box::new(MixAndMatchVars {
                 slot_vars: Vec::new(),
                 y_bundle: None,
                 bundle_formed: None,
@@ -662,7 +662,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
                 slot_bounds: Vec::new(),
                 bundle_size: 0,
                 sorted_items: SmallVec::new(),
-            })));
+            }));
         }
 
         // Collect eligible items per slot.
@@ -689,7 +689,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         }
 
         if !feasible {
-            return Ok(PromotionVars::MixAndMatch(Box::new(MixAndMatchVars {
+            return Ok(Box::new(MixAndMatchVars {
                 slot_vars: Vec::new(),
                 y_bundle: None,
                 bundle_formed: None,
@@ -697,7 +697,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
                 slot_bounds: Vec::new(),
                 bundle_size: 0,
                 sorted_items: SmallVec::new(),
-            })));
+            }));
         }
 
         // Determine whether we can use a bundle counter.
@@ -847,7 +847,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
             }
         }
 
-        Ok(PromotionVars::MixAndMatch(Box::new(MixAndMatchVars {
+        Ok(Box::new(MixAndMatchVars {
             slot_vars,
             y_bundle,
             bundle_formed,
@@ -855,37 +855,36 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
             slot_bounds,
             bundle_size,
             sorted_items,
-        })))
+        }))
     }
 
     fn add_constraints(
         &self,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<(), SolverError> {
-        match vars {
-            PromotionVars::Noop => Ok(()),
-            PromotionVars::MixAndMatch(vars) => {
-                vars.add_constraints(self.key(), state, observer);
-                vars.add_budget_constraints(self, item_group, state, observer)
-            }
-            _ => Err(SolverError::InvariantViolation {
+        let Some(vars) = vars.as_any().downcast_ref::<MixAndMatchVars>() else {
+            return Err(SolverError::InvariantViolation {
                 message: "promotion type mismatch with vars",
-            }),
-        }
+            });
+        };
+
+        vars.add_constraints(self.key(), state, observer);
+        vars.add_budget_constraints(self, item_group, state, observer)
     }
 
     fn calculate_item_discounts(
         &self,
         solution: &dyn Solution,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
     ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
-        let vars = match vars {
-            PromotionVars::MixAndMatch(vars) => vars.as_ref(),
-            _ => return Ok(FxHashMap::default()),
+        let Some(vars) = vars.as_any().downcast_ref::<MixAndMatchVars>() else {
+            return Err(SolverError::InvariantViolation {
+                message: "promotion type mismatch with vars",
+            });
         };
 
         calculate_discounts_for_vars(self, solution, vars, item_group)
@@ -895,13 +894,14 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         &self,
         promotion_key: PromotionKey,
         solution: &dyn Solution,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'b>,
         next_bundle_id: &mut usize,
     ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
-        let vars = match vars {
-            PromotionVars::MixAndMatch(vars) => vars.as_ref(),
-            _ => return Ok(SmallVec::new()),
+        let Some(vars) = vars.as_any().downcast_ref::<MixAndMatchVars>() else {
+            return Err(SolverError::InvariantViolation {
+                message: "promotion type mismatch with vars",
+            });
         };
 
         let bundles = build_bundles(self, solution, vars);
@@ -1061,9 +1061,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         vars.add_constraints(promo.key(), &mut state, &mut observer);
 
@@ -1113,9 +1114,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         // Select both items into the slots and form one bundle.
         let mut values = Vec::new();
@@ -1131,11 +1133,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::MixAndMatch(vars),
-            &item_group,
-        )?;
+        let discounts = promo.calculate_item_discounts(&solution, vars, &item_group)?;
 
         assert_eq!(discounts.len(), 2);
 
@@ -1185,9 +1183,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1202,11 +1201,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::MixAndMatch(vars),
-            &item_group,
-        )?;
+        let discounts = promo.calculate_item_discounts(&solution, vars, &item_group)?;
 
         assert_eq!(discounts.len(), 2);
 
@@ -1262,9 +1257,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1284,11 +1280,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::MixAndMatch(vars),
-            &item_group,
-        )?;
+        let discounts = promo.calculate_item_discounts(&solution, vars, &item_group)?;
 
         assert_eq!(discounts.len(), 2);
 
@@ -1344,9 +1336,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1366,11 +1359,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::MixAndMatch(vars),
-            &item_group,
-        )?;
+        let discounts = promo.calculate_item_discounts(&solution, vars, &item_group)?;
 
         assert_eq!(discounts.len(), 2);
 
@@ -1427,9 +1416,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         // Should use bundle_formed, not y_bundle
         assert!(vars.bundle_formed.is_some());
@@ -1481,9 +1471,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1503,7 +1494,7 @@ mod tests {
         let applications = promo.calculate_item_applications(
             promo.key(),
             &solution,
-            &PromotionVars::MixAndMatch(vars),
+            vars,
             &item_group,
             &mut next_bundle_id,
         )?;
@@ -1570,9 +1561,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1594,7 +1586,7 @@ mod tests {
         let applications = promo.calculate_item_applications(
             promo.key(),
             &solution,
-            &PromotionVars::MixAndMatch(vars),
+            vars,
             &item_group,
             &mut next_bundle_id,
         )?;
@@ -1631,9 +1623,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         assert!(vars.slot_vars.is_empty());
         assert!(vars.y_bundle.is_none());
@@ -1680,9 +1673,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         // Should return empty vars when not feasible
         assert!(vars.slot_vars.is_empty());
@@ -1732,9 +1726,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         // Should use bundle_formed for variable arity
         assert!(vars.bundle_formed.is_some());
@@ -1796,9 +1791,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         // Don't select any items
         let solution = MapSolution::default();
@@ -1807,7 +1803,7 @@ mod tests {
         let applications = promo.calculate_item_applications(
             promo.key(),
             &solution,
-            &PromotionVars::MixAndMatch(vars),
+            vars,
             &item_group,
             &mut next_bundle_id,
         )?;
@@ -1888,9 +1884,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         // Should have slot vars for all three slots
         assert_eq!(vars.slot_vars.len(), 3);
@@ -1944,9 +1941,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<MixAndMatchVars>()
+            .expect("Expected mix-and-match vars");
 
         // Should have one slot
         assert_eq!(vars.slot_vars.len(), 1);

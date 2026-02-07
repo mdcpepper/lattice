@@ -491,24 +491,21 @@ mod tests {
                 observer.on_objective_term(var, coeff);
             }
 
-            Ok(PromotionVars::Custom(Box::new(TestCustomPromotionVars {
-                item_participation,
-            })))
+            Ok(Box::new(TestCustomPromotionVars { item_participation }))
         }
 
         fn add_constraints(
             &self,
-            vars: &PromotionVars,
+            vars: &dyn ILPPromotionVars,
             _item_group: &ItemGroup<'_>,
             state: &mut ILPState,
             observer: &mut dyn ILPObserver,
         ) -> Result<(), SolverError> {
-            let vars = vars
-                .as_custom()
-                .and_then(|vars| vars.as_any().downcast_ref::<TestCustomPromotionVars>())
-                .ok_or(SolverError::InvariantViolation {
+            let Some(vars) = vars.as_any().downcast_ref::<TestCustomPromotionVars>() else {
+                return Err(SolverError::InvariantViolation {
                     message: "promotion type mismatch with vars",
-                })?;
+                });
+            };
 
             let expr: Expression = vars.item_participation.iter().map(|(_, var)| *var).sum();
             observer.on_promotion_constraint(self.key, "test custom limit", &expr, "<=", 1.0);
@@ -520,7 +517,7 @@ mod tests {
         fn calculate_item_discounts(
             &self,
             solution: &dyn Solution,
-            vars: &PromotionVars,
+            vars: &dyn ILPPromotionVars,
             item_group: &ItemGroup<'_>,
         ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
             let mut discounts = FxHashMap::default();
@@ -541,7 +538,7 @@ mod tests {
             &self,
             promotion_key: PromotionKey,
             solution: &dyn Solution,
-            vars: &PromotionVars,
+            vars: &dyn ILPPromotionVars,
             item_group: &ItemGroup<'b>,
             next_bundle_id: &mut usize,
         ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {

@@ -503,14 +503,12 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
         // Early return if there are insufficient items that are eligible for even
         // a single bundle
         if num_eligible < bundle_size {
-            return Ok(PromotionVars::PositionalDiscount(Box::new(
-                PositionalDiscountVars {
-                    eligible_items: SmallVec::new(),
-                    item_participation: SmallVec::new(),
-                    item_discounts: SmallVec::new(),
-                    dfa_data: None,
-                },
-            )));
+            return Ok(Box::new(PositionalDiscountVars {
+                eligible_items: SmallVec::new(),
+                item_participation: SmallVec::new(),
+                item_discounts: SmallVec::new(),
+                dfa_data: None,
+            }));
         }
 
         // Create participation and discount variables
@@ -631,47 +629,43 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
             })
             .collect();
 
-        Ok(PromotionVars::PositionalDiscount(Box::new(
-            PositionalDiscountVars {
-                eligible_items: eligible,
-                item_participation,
-                item_discounts,
-                dfa_data: Some(PositionalDFAConstraintData {
-                    state_vars: {
-                        state_vars.push(final_states);
-                        state_vars
-                    },
-                    take_vars,
-                    size: self.size(),
-                    positions: self.positions().iter().copied().collect(),
-                }),
-            },
-        )))
+        Ok(Box::new(PositionalDiscountVars {
+            eligible_items: eligible,
+            item_participation,
+            item_discounts,
+            dfa_data: Some(PositionalDFAConstraintData {
+                state_vars: {
+                    state_vars.push(final_states);
+                    state_vars
+                },
+                take_vars,
+                size: self.size(),
+                positions: self.positions().iter().copied().collect(),
+            }),
+        }))
     }
 
     fn add_constraints(
         &self,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<(), SolverError> {
-        match vars {
-            PromotionVars::Noop => Ok(()),
-            PromotionVars::PositionalDiscount(vars) => {
-                vars.add_dfa_constraints(self.key(), state, observer);
-                vars.add_budget_constraints(self, item_group, state, observer)
-            }
-            _ => Err(SolverError::InvariantViolation {
+        let Some(vars) = vars.as_any().downcast_ref::<PositionalDiscountVars>() else {
+            return Err(SolverError::InvariantViolation {
                 message: "promotion type mismatch with vars",
-            }),
-        }
+            });
+        };
+
+        vars.add_dfa_constraints(self.key(), state, observer);
+        vars.add_budget_constraints(self, item_group, state, observer)
     }
 
     fn calculate_item_discounts(
         &self,
         solution: &dyn Solution,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
     ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
         let mut discounts = FxHashMap::default();
@@ -703,7 +697,7 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
         &self,
         promotion_key: PromotionKey,
         solution: &dyn Solution,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'b>,
         next_bundle_id: &mut usize,
     ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
@@ -904,13 +898,13 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        match vars {
-            PromotionVars::PositionalDiscount(vars) => {
-                assert!(vars.eligible_items.is_empty());
-                assert!(vars.dfa_data.is_none());
-            }
-            _ => panic!("Expected positional discount vars"),
-        }
+        let vars = vars
+            .as_any()
+            .downcast_ref::<PositionalDiscountVars>()
+            .expect("Expected positional discount vars");
+
+        assert!(vars.eligible_items.is_empty());
+        assert!(vars.dfa_data.is_none());
 
         Ok(())
     }
@@ -934,9 +928,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<PositionalDiscountVars>()
+            .expect("Expected positional discount vars");
 
         let expr = vars.add_item_participation_term(Expression::default(), 1);
         assert!(expr.linear_coefficients().next().is_some());
@@ -963,9 +958,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<PositionalDiscountVars>()
+            .expect("Expected positional discount vars");
 
         assert!(vars.eligible_items.is_empty());
         assert!(vars.dfa_data.is_none());
@@ -1219,9 +1215,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<PositionalDiscountVars>()
+            .expect("Expected positional discount vars");
 
         assert_eq!(vars.eligible_items.len(), 1);
 
@@ -1245,22 +1242,22 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        match vars {
-            PromotionVars::PositionalDiscount(vars) => {
-                assert_eq!(
-                    vars.eligible_items,
-                    SmallVec::<[(usize, i64); 10]>::from_vec(vec![(1, 300), (2, 200), (0, 100)])
-                );
-                assert_eq!(vars.item_participation.len(), 3);
-                assert_eq!(vars.item_discounts.len(), 3);
+        let vars = vars
+            .as_any()
+            .downcast_ref::<PositionalDiscountVars>()
+            .expect("Expected positional discount vars");
 
-                let dfa_data = vars.dfa_data.as_ref().expect("expected DFA data");
+        assert_eq!(
+            vars.eligible_items,
+            SmallVec::<[(usize, i64); 10]>::from_vec(vec![(1, 300), (2, 200), (0, 100)])
+        );
+        assert_eq!(vars.item_participation.len(), 3);
+        assert_eq!(vars.item_discounts.len(), 3);
 
-                assert_eq!(dfa_data.take_vars.len(), 3);
-                assert_eq!(dfa_data.state_vars.len(), 4);
-            }
-            _ => panic!("Expected positional discount vars"),
-        }
+        let dfa_data = vars.dfa_data.as_ref().expect("expected DFA data");
+
+        assert_eq!(dfa_data.take_vars.len(), 3);
+        assert_eq!(dfa_data.state_vars.len(), 4);
 
         Ok(())
     }
@@ -1282,7 +1279,7 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        if let PromotionVars::PositionalDiscount(vars) = vars {
+        if let Some(vars) = vars.as_any().downcast_ref::<PositionalDiscountVars>() {
             let dfa_data = vars.dfa_data.as_ref().expect("expected DFA data");
 
             assert_eq!(dfa_data.take_vars.len(), 4);
@@ -1313,9 +1310,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<PositionalDiscountVars>()
+            .expect("Expected positional discount vars");
 
         let mut values = Vec::new();
 
@@ -1357,9 +1355,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<PositionalDiscountVars>()
+            .expect("Expected positional discount vars");
 
         let mut values = Vec::new();
 
@@ -1376,11 +1375,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::PositionalDiscount(vars),
-            &item_group,
-        )?;
+        let discounts = promo.calculate_item_discounts(&solution, vars, &item_group)?;
 
         assert_eq!(discounts.get(&0), Some(&(100, 100)));
         assert_eq!(discounts.get(&1), Some(&(200, 100)));
@@ -1406,9 +1401,10 @@ mod tests {
         let mut observer = NoopObserver;
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = vars
+            .as_any()
+            .downcast_ref::<PositionalDiscountVars>()
+            .expect("Expected positional discount vars");
 
         let mut values = Vec::new();
 
@@ -1429,7 +1425,7 @@ mod tests {
         let applications = promo.calculate_item_applications(
             PromotionKey::default(),
             &solution,
-            &PromotionVars::PositionalDiscount(vars),
+            vars,
             &item_group,
             &mut next_bundle_id,
         )?;

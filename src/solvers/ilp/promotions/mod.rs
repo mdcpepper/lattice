@@ -20,10 +20,6 @@ mod direct_discount;
 mod mix_and_match;
 mod positional_discount;
 
-use direct_discount::DirectDiscountPromotionVars;
-use mix_and_match::MixAndMatchVars;
-use positional_discount::PositionalDiscountVars;
-
 /// Collection of promotion instances for a solve operation
 #[derive(Debug)]
 pub struct PromotionInstances<'a> {
@@ -80,7 +76,7 @@ pub struct PromotionInstance<'a> {
     promotion: &'a dyn ILPPromotion,
 
     /// The solver variables for this promotion instance
-    vars: PromotionVars,
+    vars: Option<PromotionVars>,
 }
 
 impl<'a> PromotionInstance<'a> {
@@ -104,11 +100,11 @@ impl<'a> PromotionInstance<'a> {
         let vars = if promotion.is_applicable(item_group) {
             let vars = promotion.add_variables(item_group, state, observer)?;
 
-            promotion.add_constraints(&vars, item_group, state, observer)?;
+            promotion.add_constraints(vars.as_ref(), item_group, state, observer)?;
 
-            vars
+            Some(vars)
         } else {
-            PromotionVars::Noop
+            None
         };
 
         Ok(Self { promotion, vars })
@@ -119,7 +115,10 @@ impl<'a> PromotionInstance<'a> {
     /// This is called while building the per-item presence/exclusivity constraint that
     /// enforces each item is either at full price or used by exactly one promotion.
     pub fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression {
-        self.vars.add_item_participation_term(expr, item_idx)
+        match &self.vars {
+            Some(vars) => vars.add_item_participation_term(expr, item_idx),
+            None => expr,
+        }
     }
 
     /// Post-solve interpretation for this promotion instance.
@@ -136,8 +135,13 @@ impl<'a> PromotionInstance<'a> {
         solution: &dyn Solution,
         item_group: &ItemGroup<'_>,
     ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
-        self.promotion
-            .calculate_item_discounts(solution, &self.vars, item_group)
+        self.vars.as_ref().map_or_else(
+            || Ok(FxHashMap::default()),
+            |vars| {
+                self.promotion
+                    .calculate_item_discounts(solution, vars.as_ref(), item_group)
+            },
+        )
     }
 
     /// Post-solve interpretation returning full promotion applications.
@@ -155,12 +159,17 @@ impl<'a> PromotionInstance<'a> {
         item_group: &ItemGroup<'b>,
         next_bundle_id: &mut usize,
     ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
-        self.promotion.calculate_item_applications(
-            self.promotion.key(),
-            solution,
-            &self.vars,
-            item_group,
-            next_bundle_id,
+        self.vars.as_ref().map_or_else(
+            || Ok(SmallVec::new()),
+            |vars| {
+                self.promotion.calculate_item_applications(
+                    self.promotion.key(),
+                    solution,
+                    vars.as_ref(),
+                    item_group,
+                    next_bundle_id,
+                )
+            },
         )
     }
 }
@@ -182,72 +191,8 @@ pub trait ILPPromotionVars: Debug + Send + Sync {
     fn as_any(&self) -> &dyn Any;
 }
 
-/// Enum wrapping concrete promotion vars types.
-///
-/// This allows us to store promotion-specific vars while still being able to
-/// add promotion-specific constraints without downcasting.
-#[derive(Debug)]
-pub enum PromotionVars {
-    /// No-op vars for inapplicable promotions
-    Noop,
-
-    /// Direct discount promotion vars
-    DirectDiscount(Box<DirectDiscountPromotionVars>),
-
-    /// Mix-and-Match promotion vars
-    MixAndMatch(Box<MixAndMatchVars>),
-
-    /// Positional discount promotion vars
-    PositionalDiscount(Box<PositionalDiscountVars>),
-
-    /// Custom promotion vars for externally-defined promotion types.
-    Custom(Box<dyn ILPPromotionVars>),
-}
-
-impl PromotionVars {
-    fn as_dyn(&self) -> Option<&dyn ILPPromotionVars> {
-        match self {
-            Self::Noop => None,
-            Self::DirectDiscount(vars) => Some(vars.as_ref()),
-            Self::MixAndMatch(vars) => Some(vars.as_ref()),
-            Self::PositionalDiscount(vars) => Some(vars.as_ref()),
-            Self::Custom(vars) => Some(vars.as_ref()),
-        }
-    }
-
-    /// Returns a trait-object view over custom promotion vars, if any.
-    pub fn as_custom(&self) -> Option<&dyn ILPPromotionVars> {
-        match self {
-            Self::Custom(vars) => Some(vars.as_ref()),
-            _ => None,
-        }
-    }
-
-    /// Add item participation term to the expression.
-    pub fn add_item_participation_term(&self, expr: Expression, item_idx: usize) -> Expression {
-        match self.as_dyn() {
-            Some(vars) => vars.add_item_participation_term(expr, item_idx),
-            None => expr,
-        }
-    }
-
-    /// Returns true if the item is participating in the promotion.
-    pub fn is_item_participating(&self, solution: &dyn Solution, item_idx: usize) -> bool {
-        match self.as_dyn() {
-            Some(vars) => vars.is_item_participating(solution, item_idx),
-            None => false,
-        }
-    }
-
-    /// Returns true if the promotion determines the item's final price
-    /// (which may be a discount or a price that stays the same).
-    pub fn is_item_priced_by_promotion(&self, solution: &dyn Solution, item_idx: usize) -> bool {
-        match self.as_dyn() {
-            Some(vars) => vars.is_item_priced_by_promotion(solution, item_idx),
-            None => false,
-        }
-    }
-}
+/// Promotion variable bundle produced by an ILP promotion implementation.
+pub type PromotionVars = Box<dyn ILPPromotionVars>;
 
 /// Makes a [`Promotion`] usable by the ILP solver.
 ///
@@ -313,7 +258,7 @@ pub trait ILPPromotion: Debug + Send + Sync {
     /// applicable promotions.
     fn add_constraints(
         &self,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
@@ -337,7 +282,7 @@ pub trait ILPPromotion: Debug + Send + Sync {
     fn calculate_item_discounts(
         &self,
         solution: &dyn Solution,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
     ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError>;
 
@@ -360,7 +305,7 @@ pub trait ILPPromotion: Debug + Send + Sync {
         &self,
         promotion_key: PromotionKey,
         solution: &dyn Solution,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'b>,
         next_bundle_id: &mut usize,
     ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError>;
@@ -386,7 +331,7 @@ impl ILPPromotion for Arc<dyn ILPPromotion + '_> {
 
     fn add_constraints(
         &self,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
@@ -398,7 +343,7 @@ impl ILPPromotion for Arc<dyn ILPPromotion + '_> {
     fn calculate_item_discounts(
         &self,
         solution: &dyn Solution,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
     ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
         self.as_ref()
@@ -409,7 +354,7 @@ impl ILPPromotion for Arc<dyn ILPPromotion + '_> {
         &self,
         promotion_key: PromotionKey,
         solution: &dyn Solution,
-        vars: &PromotionVars,
+        vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'b>,
         next_bundle_id: &mut usize,
     ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
@@ -576,7 +521,7 @@ mod tests {
         assert!(vars.is_item_priced_by_promotion(&SelectAllSolution, 0));
 
         // Smoke test constraint emission.
-        promo.add_constraints(&vars, &item_group, &mut state, &mut observer)?;
+        promo.add_constraints(vars.as_ref(), &item_group, &mut state, &mut observer)?;
 
         Ok(())
     }
@@ -686,9 +631,6 @@ mod tests {
 
         let mut observer = NoopObserver;
 
-        assert!(!PromotionVars::Noop.is_item_participating(&SelectAllSolution, 0));
-        assert!(!PromotionVars::Noop.is_item_priced_by_promotion(&SelectAllSolution, 0));
-
         let mut slot_keys = slotmap::SlotMap::<PromotionSlotKey, ()>::with_key();
 
         let mm = MixAndMatchPromotion::new(
@@ -731,9 +673,12 @@ mod tests {
 
         let positional_vars = positional.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let Err(err) =
-            direct.add_constraints(&positional_vars, &item_group, &mut state, &mut observer)
-        else {
+        let Err(err) = direct.add_constraints(
+            positional_vars.as_ref(),
+            &item_group,
+            &mut state,
+            &mut observer,
+        ) else {
             panic!("expected promotion/vars mismatch")
         };
 
