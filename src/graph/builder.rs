@@ -375,7 +375,7 @@ mod tests {
     use super::*;
 
     fn test_promotion(key: PromotionKey) -> Promotion<'static> {
-        Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        crate::promotions::promotion(DirectDiscountPromotion::new(
             key,
             StringTagCollection::from_strs(&["a"]),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),

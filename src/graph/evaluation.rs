@@ -327,7 +327,7 @@ mod tests {
     }
 
     fn direct_discount_promotion() -> Promotion<'static> {
-        Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&[]),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),

@@ -8,9 +8,7 @@ use dante::{
     discounts::SimpleDiscount,
     items::{Item, groups::ItemGroup},
     products::ProductKey,
-    promotions::{
-        Promotion, PromotionKey, budget::PromotionBudget, types::DirectDiscountPromotion,
-    },
+    promotions::{PromotionKey, budget::PromotionBudget, types::DirectDiscountPromotion},
     solvers::{Solver, ilp::ILPSolver},
     tags::{collection::TagCollection, string::StringTagCollection},
 };
@@ -38,7 +36,7 @@ fn solver_handles_percentage_off() -> TestResult {
     let basket = Basket::with_items(items, GBP)?;
     let item_group = ItemGroup::from(&basket);
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["fruit"]),
         SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.25)),
@@ -74,7 +72,7 @@ fn solver_handles_amount_off() -> TestResult {
     let basket = Basket::with_items(items, GBP)?;
     let item_group = ItemGroup::from(&basket);
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["premium"]),
         SimpleDiscount::AmountOff(Money::from_minor(50, GBP)),
@@ -113,7 +111,7 @@ fn solver_handles_amount_override() -> TestResult {
     let basket = Basket::with_items(items, GBP)?;
     let item_group = ItemGroup::from(&basket);
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["clearance"]),
         SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
@@ -150,13 +148,13 @@ fn solver_handles_multiple_overlapping_promotions() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     let promotions = vec![
-        Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        dante::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["fruit"]),
             SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.10)),
             PromotionBudget::unlimited(),
         )),
-        Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        dante::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["organic"]),
             SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.20)),
@@ -194,7 +192,7 @@ fn solver_handles_no_matching_tags() -> TestResult {
     let basket = Basket::with_items(items, GBP)?;
     let item_group = ItemGroup::from(&basket);
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["meat"]),
         SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.50)),
@@ -229,7 +227,7 @@ fn solver_handles_empty_tag_promotion() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // Empty tags means no items match
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::empty(),
         SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.50)),
@@ -257,7 +255,7 @@ fn solver_handles_amount_off_capped_at_zero() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // Discount is larger than item price
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["sale"]),
         SimpleDiscount::AmountOff(Money::from_minor(50, GBP)),
@@ -301,7 +299,7 @@ fn solver_applies_promotion_to_all_matching_items() -> TestResult {
     let basket = Basket::with_items(items, GBP)?;
     let item_group = ItemGroup::from(&basket);
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["snack"]),
         SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.20)),

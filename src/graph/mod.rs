@@ -200,7 +200,7 @@ mod tests {
     }
 
     fn make_promo(key: PromotionKey, tags: &[&str], pct: f64) -> Promotion<'static> {
-        Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        crate::promotions::promotion(DirectDiscountPromotion::new(
             key,
             StringTagCollection::from_strs(tags),
             SimpleDiscount::PercentageOff(Percentage::from(pct)),

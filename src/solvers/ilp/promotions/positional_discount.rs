@@ -1,14 +1,17 @@
 //! Positional Discount Promotions ILP
 
-use good_lp::{Expression, Solution, SolverModel, Variable, variable};
+#[cfg(test)]
+use std::any::Any;
+
+use good_lp::{Expression, Solution, Variable, variable};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
-use rusty_money::{Money, iso::Currency};
+use rusty_money::Money;
 
 use crate::{
     discounts::{SimpleDiscount, percent_of_minor},
-    items::{Item, groups::ItemGroup},
+    items::groups::ItemGroup,
     promotions::{
         PromotionKey, applications::PromotionApplication, types::PositionalDiscountPromotion,
     },
@@ -16,12 +19,19 @@ use crate::{
         SolverError,
         ilp::{
             BINARY_THRESHOLD, ILPObserver, i64_to_f64_exact,
-            promotions::{ILPPromotion, PromotionVars},
+            promotions::{ILPPromotion, ILPPromotionVars, PromotionVars},
             state::ILPState,
         },
     },
     tags::collection::TagCollection,
 };
+
+#[derive(Debug, Clone, Copy)]
+enum PositionalRuntimeDiscount {
+    PercentageOff(decimal_percentage::Percentage),
+    AmountOverride(i64),
+    AmountOff(i64),
+}
 
 /// Solver variables for a positional discount promotion.
 ///
@@ -29,6 +39,9 @@ use crate::{
 /// binary decision variables in the ILP model.
 #[derive(Debug)]
 pub struct PositionalDiscountVars {
+    /// Promotion key for observer metadata.
+    promotion_key: PromotionKey,
+
     /// Sorted eligible items: (`item_group_index`, `price_minor`)
     eligible_items: SmallVec<[(usize, i64); 10]>,
 
@@ -40,6 +53,18 @@ pub struct PositionalDiscountVars {
 
     /// DFA constraint data
     dfa_data: Option<PositionalDFAConstraintData>,
+
+    /// Runtime discount mode captured during variable creation.
+    runtime_discount: PositionalRuntimeDiscount,
+
+    /// Bundle size copied from promotion config.
+    bundle_size: usize,
+
+    /// Budget: optional max applications.
+    application_limit: Option<u32>,
+
+    /// Budget: optional max total discount value in minor units.
+    monetary_limit_minor: Option<i64>,
 }
 
 /// Data needed to construct DFA constraints.
@@ -59,25 +84,6 @@ struct PositionalDFAConstraintData {
 }
 
 impl PositionalDiscountVars {
-    pub fn add_item_participation_term(&self, expr: Expression, item_idx: usize) -> Expression {
-        let mut updated_expr = expr;
-
-        for &(idx, var) in &self.item_participation {
-            if idx == item_idx {
-                updated_expr += var;
-            }
-        }
-
-        updated_expr
-    }
-
-    /// Check if an item is participating in the promotion based on the solution.
-    pub fn is_item_participating(&self, solution: &dyn Solution, item_idx: usize) -> bool {
-        self.item_participation
-            .iter()
-            .any(|&(idx, var)| idx == item_idx && solution.value(var) > BINARY_THRESHOLD)
-    }
-
     /// Check if an item is discounted based on the solution.
     pub fn is_item_discounted(&self, solution: &dyn Solution, item_idx: usize) -> bool {
         self.item_discounts
@@ -113,14 +119,14 @@ impl PositionalDiscountVars {
     /// See:
     /// - <https://en.wikipedia.org/wiki/Deterministic_finite_automaton>
     #[expect(clippy::too_many_lines, reason = "Complex DFA constraint logic")]
-    pub fn add_dfa_constraints<S: SolverModel, O: ILPObserver + ?Sized>(
+    pub fn add_dfa_constraints(
         &self,
-        mut model: S,
         promotion_key: PromotionKey,
-        observer: &mut O,
-    ) -> S {
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         let Some(dfa_data) = &self.dfa_data else {
-            return model;
+            return;
         };
 
         // Number of items in the group that could _potentially_ participate in this promotion
@@ -141,7 +147,7 @@ impl PositionalDiscountVars {
                 1.0,
             );
 
-            model = model.with(state_sum.eq(1));
+            state.add_eq_constraint(state_sum, 1.0);
         }
 
         // Constraint 2: Start and end in state 0 (complete bundles only)
@@ -151,7 +157,7 @@ impl PositionalDiscountVars {
 
             observer.on_promotion_constraint(promotion_key, "DFA initial state", &expr, "=", 1.0);
 
-            model = model.with(expr.eq(1));
+            state.add_eq_constraint(expr, 1.0);
         }
 
         if let Some(&last_var) = dfa_data.state_vars.last().and_then(|s| s.first()) {
@@ -159,7 +165,7 @@ impl PositionalDiscountVars {
 
             observer.on_promotion_constraint(promotion_key, "DFA final state", &expr, "=", 1.0);
 
-            model = model.with(expr.eq(1));
+            state.add_eq_constraint(expr, 1.0);
         }
 
         // Constraint 3: DFA state transitions
@@ -218,7 +224,7 @@ impl PositionalDiscountVars {
                     0.0,
                 );
 
-                model = model.with(Expression::from(next_state).eq(transition_expr));
+                state.add_eq_constraint(Expression::from(next_state) - transition_expr, 0.0);
             }
         }
 
@@ -245,7 +251,7 @@ impl PositionalDiscountVars {
                     0.0,
                 );
 
-                model = model.with(expr.eq(take_sum));
+                state.add_eq_constraint(expr - take_sum, 0.0);
             }
         }
 
@@ -282,7 +288,7 @@ impl PositionalDiscountVars {
                     0.0,
                 );
 
-                model = model.with(expr.eq(discount_sum));
+                state.add_eq_constraint(expr - discount_sum, 0.0);
             }
         }
 
@@ -315,33 +321,25 @@ impl PositionalDiscountVars {
                         0.0,
                     );
 
-                    model = model.with(take_var << state_var);
+                    state.add_leq_constraint(Expression::from(take_var) - state_var, 0.0);
                 }
             }
         }
-
-        model
     }
 
     /// Add budget constraints for positional promotions
-    pub fn add_budget_constraints<S, O: ILPObserver + ?Sized>(
+    pub fn add_budget_constraints(
         &self,
-        model: S,
-        promotion: &PositionalDiscountPromotion<'_>,
         item_group: &ItemGroup<'_>,
-        promotion_key: PromotionKey,
-        observer: &mut O,
-    ) -> Result<S, SolverError>
-    where
-        S: SolverModel,
-    {
-        let mut model = model;
-        let budget = promotion.budget();
-        let bundle_size = promotion.size() as usize;
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        let promotion_key = self.promotion_key;
+        let bundle_size = self.bundle_size;
 
         // Application limit: For positional, this limits bundles
         // Constraint: sum(participation_vars) <= application_limit * bundle_size
-        if let Some(application_limit) = budget.application_limit {
+        if let Some(application_limit) = self.application_limit {
             let participation_sum: Expression =
                 self.item_participation.iter().map(|(_, var)| *var).sum();
 
@@ -367,11 +365,11 @@ impl PositionalDiscountVars {
                 limit_f64,
             );
 
-            model = model.with(participation_sum.leq(limit_f64));
+            state.add_leq_constraint(participation_sum, limit_f64);
         }
 
         // Monetary limit: sum(discount_amount * discount_var) <= limit
-        if let Some(monetary_limit) = budget.monetary_limit {
+        if let Some(limit_minor) = self.monetary_limit_minor {
             let mut discount_expr = Expression::default();
 
             for &(item_idx, discount_var) in &self.item_discounts {
@@ -379,8 +377,7 @@ impl PositionalDiscountVars {
 
                 let full_minor = item.price().to_minor_units();
                 let discounted_minor =
-                    calculate_discounted_price(item, promotion.discount(), item_group.currency())?
-                        .to_minor_units();
+                    calculate_discounted_minor_for_runtime(full_minor, self.runtime_discount)?;
 
                 let discount_amount = full_minor.saturating_sub(discounted_minor);
                 let coeff = i64_to_f64_exact(discount_amount)
@@ -389,7 +386,6 @@ impl PositionalDiscountVars {
                 discount_expr += discount_var * coeff;
             }
 
-            let limit_minor = monetary_limit.to_minor_units();
             let limit_f64 = i64_to_f64_exact(limit_minor)
                 .ok_or(SolverError::MinorUnitsNotRepresentable(limit_minor))?;
 
@@ -401,39 +397,163 @@ impl PositionalDiscountVars {
                 limit_f64,
             );
 
-            model = model.with(discount_expr.leq(limit_f64));
+            state.add_leq_constraint(discount_expr, limit_f64);
         }
 
-        Ok(model)
+        Ok(())
     }
 }
 
-/// Calculate the discounted price based on the discount type.
-fn calculate_discounted_price<'a>(
-    item: &Item<'a>,
-    discount: &SimpleDiscount<'_>,
-    currency: &'a Currency,
-) -> Result<Money<'a, Currency>, SolverError> {
-    let discount_minor = match discount {
-        SimpleDiscount::PercentageOff(pct) => {
+impl ILPPromotionVars for PositionalDiscountVars {
+    fn add_item_participation_term(&self, expr: Expression, item_idx: usize) -> Expression {
+        let mut updated_expr = expr;
+
+        for &(idx, var) in &self.item_participation {
+            if idx == item_idx {
+                updated_expr += var;
+            }
+        }
+
+        updated_expr
+    }
+
+    fn is_item_participating(&self, solution: &dyn Solution, item_idx: usize) -> bool {
+        self.item_participation
+            .iter()
+            .any(|&(idx, var)| idx == item_idx && solution.value(var) > BINARY_THRESHOLD)
+    }
+
+    fn is_item_priced_by_promotion(&self, solution: &dyn Solution, item_idx: usize) -> bool {
+        self.is_item_discounted(solution, item_idx)
+    }
+
+    fn add_constraints(
+        &self,
+        promotion_key: PromotionKey,
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        self.add_dfa_constraints(promotion_key, state, observer);
+        self.add_budget_constraints(item_group, state, observer)
+    }
+
+    fn calculate_item_discounts(
+        &self,
+        solution: &dyn Solution,
+        item_group: &ItemGroup<'_>,
+    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
+        let mut discounts = FxHashMap::default();
+
+        for (item_idx, item) in item_group.iter().enumerate() {
+            if !self.is_item_participating(solution, item_idx) {
+                continue;
+            }
+
             let original_minor = item.price().to_minor_units();
+
+            let final_minor = if self.is_item_priced_by_promotion(solution, item_idx) {
+                calculate_discounted_minor_for_runtime(original_minor, self.runtime_discount)?
+            } else {
+                original_minor
+            };
+
+            discounts.insert(item_idx, (original_minor, final_minor));
+        }
+
+        Ok(discounts)
+    }
+
+    fn calculate_item_applications<'b>(
+        &self,
+        promotion_key: PromotionKey,
+        solution: &dyn Solution,
+        item_group: &ItemGroup<'b>,
+        next_bundle_id: &mut usize,
+    ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
+        let mut applications = SmallVec::new();
+        let currency = item_group.currency();
+        let bundle_size = self.bundle_size;
+
+        let mut participating_items: SmallVec<[(usize, i64); 10]> = SmallVec::new();
+
+        for (item_idx, item) in item_group.iter().enumerate() {
+            if self.is_item_participating(solution, item_idx) {
+                participating_items.push((item_idx, item.price().to_minor_units()));
+            }
+        }
+
+        participating_items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+        for chunk in participating_items.chunks(bundle_size) {
+            let bundle_id = *next_bundle_id;
+            *next_bundle_id += 1;
+
+            for &(item_idx, price_minor) in chunk {
+                let item = item_group.get_item(item_idx)?;
+
+                let final_price = if self.is_item_priced_by_promotion(solution, item_idx) {
+                    Money::from_minor(
+                        calculate_discounted_minor_for_runtime(price_minor, self.runtime_discount)?,
+                        currency,
+                    )
+                } else {
+                    Money::from_minor(price_minor, currency)
+                };
+
+                applications.push(PromotionApplication {
+                    promotion_key,
+                    item_idx,
+                    bundle_id,
+                    original_price: *item.price(),
+                    final_price,
+                });
+            }
+        }
+
+        Ok(applications)
+    }
+}
+
+fn positional_runtime_discount_from_config(
+    discount: &SimpleDiscount<'_>,
+) -> PositionalRuntimeDiscount {
+    match discount {
+        SimpleDiscount::PercentageOff(pct) => PositionalRuntimeDiscount::PercentageOff(*pct),
+        SimpleDiscount::AmountOverride(amount) => {
+            PositionalRuntimeDiscount::AmountOverride(amount.to_minor_units())
+        }
+        SimpleDiscount::AmountOff(amount) => {
+            PositionalRuntimeDiscount::AmountOff(amount.to_minor_units())
+        }
+    }
+}
+
+fn calculate_discounted_minor_for_runtime(
+    original_minor: i64,
+    discount: PositionalRuntimeDiscount,
+) -> Result<i64, SolverError> {
+    let discount_minor = match discount {
+        PositionalRuntimeDiscount::PercentageOff(pct) => {
             let discount_minor =
-                percent_of_minor(pct, original_minor).map_err(SolverError::Discount)?;
+                percent_of_minor(&pct, original_minor).map_err(SolverError::Discount)?;
 
             original_minor.saturating_sub(discount_minor)
         }
-        SimpleDiscount::AmountOverride(amount) => amount.to_minor_units(),
-        SimpleDiscount::AmountOff(amount) => item
-            .price()
-            .sub(*amount)
-            .map_err(|e| SolverError::Discount(e.into()))?
-            .to_minor_units(),
+        PositionalRuntimeDiscount::AmountOverride(amount_minor) => amount_minor,
+        PositionalRuntimeDiscount::AmountOff(amount_minor) => {
+            original_minor.saturating_sub(amount_minor)
+        }
     };
 
-    Ok(Money::from_minor(0.max(discount_minor), currency))
+    Ok(0.max(discount_minor))
 }
 
 impl ILPPromotion for PositionalDiscountPromotion<'_> {
+    fn key(&self) -> PromotionKey {
+        PositionalDiscountPromotion::key(self)
+    }
+
     fn is_applicable(&self, item_group: &ItemGroup<'_>) -> bool {
         if item_group.is_empty() {
             return false;
@@ -454,13 +574,21 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
         clippy::too_many_lines,
         reason = "This function is long due to the DFA constraints."
     )]
-    fn add_variables<O: ILPObserver + ?Sized>(
+    fn add_variables(
         &self,
-        promotion_key: PromotionKey,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
-        observer: &mut O,
+        observer: &mut dyn ILPObserver,
     ) -> Result<PromotionVars, SolverError> {
+        let promotion_key = self.key();
+        let runtime_discount = positional_runtime_discount_from_config(self.discount());
+        let bundle_size = self.size() as usize;
+        let application_limit = self.budget().application_limit;
+        let monetary_limit_minor = self
+            .budget()
+            .monetary_limit
+            .map(|value| value.to_minor_units());
+
         // An empty tag set means this promotion can target any item, so we can skip tag checks
         // if that is the case.
         let match_all = self.tags().is_empty();
@@ -481,19 +609,20 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
         });
 
         let num_eligible = eligible.len();
-        let bundle_size = self.size() as usize;
-
         // Early return if there are insufficient items that are eligible for even
         // a single bundle
         if num_eligible < bundle_size {
-            return Ok(PromotionVars::PositionalDiscount(Box::new(
-                PositionalDiscountVars {
-                    eligible_items: SmallVec::new(),
-                    item_participation: SmallVec::new(),
-                    item_discounts: SmallVec::new(),
-                    dfa_data: None,
-                },
-            )));
+            return Ok(Box::new(PositionalDiscountVars {
+                promotion_key,
+                eligible_items: SmallVec::new(),
+                item_participation: SmallVec::new(),
+                item_discounts: SmallVec::new(),
+                dfa_data: None,
+                runtime_discount,
+                bundle_size,
+                application_limit,
+                monetary_limit_minor,
+            }));
         }
 
         // Create participation and discount variables
@@ -528,8 +657,7 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
 
             // Calculate discounted price
             let discounted_minor =
-                calculate_discounted_price(item, self.discount(), item_group.currency())?
-                    .to_minor_units();
+                calculate_discounted_minor_for_runtime(original_minor, runtime_discount)?;
 
             // Create discount variable
             let discount_var = state.problem_variables_mut().add(variable().binary());
@@ -614,106 +742,25 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
             })
             .collect();
 
-        Ok(PromotionVars::PositionalDiscount(Box::new(
-            PositionalDiscountVars {
-                eligible_items: eligible,
-                item_participation,
-                item_discounts,
-                dfa_data: Some(PositionalDFAConstraintData {
-                    state_vars: {
-                        state_vars.push(final_states);
-                        state_vars
-                    },
-                    take_vars,
-                    size: self.size(),
-                    positions: self.positions().iter().copied().collect(),
-                }),
-            },
-        )))
-    }
-
-    fn calculate_item_discounts(
-        &self,
-        solution: &dyn Solution,
-        vars: &PromotionVars,
-        item_group: &ItemGroup<'_>,
-    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
-        let mut discounts = FxHashMap::default();
-
-        for (item_idx, item) in item_group.iter().enumerate() {
-            // Check if item participates
-            if !vars.is_item_participating(solution, item_idx) {
-                continue;
-            }
-
-            let original_minor = item.price().to_minor_units();
-
-            // Check if item receives discount
-            let final_minor = if vars.is_item_priced_by_promotion(solution, item_idx) {
-                // If so, calculate discounted price
-                calculate_discounted_price(item, self.discount(), item_group.currency())?
-                    .to_minor_units()
-            } else {
-                original_minor
-            };
-
-            discounts.insert(item_idx, (original_minor, final_minor));
-        }
-
-        Ok(discounts)
-    }
-
-    fn calculate_item_applications<'b>(
-        &self,
-        promotion_key: PromotionKey,
-        solution: &dyn Solution,
-        vars: &PromotionVars,
-        item_group: &ItemGroup<'b>,
-        next_bundle_id: &mut usize,
-    ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
-        let mut applications = SmallVec::new();
-
-        let currency = item_group.currency();
-        let bundle_size = self.size() as usize;
-
-        // Collect all participating items
-        // (same order used in add_variables when sorting eligible items)
-        let mut participating_items: SmallVec<[(usize, i64); 10]> = SmallVec::new();
-
-        for (item_idx, item) in item_group.iter().enumerate() {
-            if vars.is_item_participating(solution, item_idx) {
-                participating_items.push((item_idx, item.price().to_minor_units()));
-            }
-        }
-
-        // Sort by price descending, then index ascending (matches add_variables sorting)
-        participating_items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-
-        // Group into bundles by chunking by bundle size, and create the applications
-        for chunk in participating_items.chunks(bundle_size) {
-            let bundle_id = *next_bundle_id;
-            *next_bundle_id += 1;
-
-            for &(item_idx, price_minor) in chunk {
-                let item = item_group.get_item(item_idx)?;
-
-                let final_price = if vars.is_item_priced_by_promotion(solution, item_idx) {
-                    calculate_discounted_price(item, self.discount(), currency)?
-                } else {
-                    Money::from_minor(price_minor, currency)
-                };
-
-                applications.push(PromotionApplication {
-                    promotion_key,
-                    item_idx,
-                    bundle_id,
-                    original_price: *item.price(),
-                    final_price,
-                });
-            }
-        }
-
-        Ok(applications)
+        Ok(Box::new(PositionalDiscountVars {
+            promotion_key,
+            eligible_items: eligible,
+            item_participation,
+            item_discounts,
+            dfa_data: Some(PositionalDFAConstraintData {
+                state_vars: {
+                    state_vars.push(final_states);
+                    state_vars
+                },
+                take_vars,
+                size: self.size(),
+                positions: self.positions().iter().copied().collect(),
+            }),
+            runtime_discount,
+            bundle_size,
+            application_limit,
+            monetary_limit_minor,
+        }))
     }
 }
 
@@ -725,11 +772,6 @@ mod tests {
     use rusty_money::{Money, iso::GBP};
     use smallvec::SmallVec;
     use testresult::TestResult;
-
-    #[cfg(feature = "solver-highs")]
-    use good_lp::solvers::highs::highs as default_solver;
-    #[cfg(all(not(feature = "solver-highs"), feature = "solver-microlp"))]
-    use good_lp::solvers::microlp::microlp as default_solver;
 
     use crate::{
         discounts::SimpleDiscount,
@@ -780,39 +822,43 @@ mod tests {
 
     #[test]
     fn calculate_discounted_price_handles_discount_types() -> TestResult {
-        let item = Item::new(ProductKey::default(), Money::from_minor(100, GBP));
+        let original_minor = 100_i64;
 
-        let pct = calculate_discounted_price(
-            &item,
-            &SimpleDiscount::PercentageOff(Percentage::from(0.25)),
-            GBP,
+        let pct = calculate_discounted_minor_for_runtime(
+            original_minor,
+            positional_runtime_discount_from_config(&SimpleDiscount::PercentageOff(
+                Percentage::from(0.25),
+            )),
         )?;
 
-        assert_eq!(pct, Money::from_minor(75, GBP));
+        assert_eq!(pct, 75);
 
-        let override_price = calculate_discounted_price(
-            &item,
-            &SimpleDiscount::AmountOverride(Money::from_minor(60, GBP)),
-            GBP,
+        let override_price = calculate_discounted_minor_for_runtime(
+            original_minor,
+            positional_runtime_discount_from_config(&SimpleDiscount::AmountOverride(
+                Money::from_minor(60, GBP),
+            )),
         )?;
 
-        assert_eq!(override_price, Money::from_minor(60, GBP));
+        assert_eq!(override_price, 60);
 
-        let amount_off = calculate_discounted_price(
-            &item,
-            &SimpleDiscount::AmountOff(Money::from_minor(30, GBP)),
-            GBP,
+        let amount_off = calculate_discounted_minor_for_runtime(
+            original_minor,
+            positional_runtime_discount_from_config(&SimpleDiscount::AmountOff(Money::from_minor(
+                30, GBP,
+            ))),
         )?;
 
-        assert_eq!(amount_off, Money::from_minor(70, GBP));
+        assert_eq!(amount_off, 70);
 
-        let clamped = calculate_discounted_price(
-            &item,
-            &SimpleDiscount::AmountOff(Money::from_minor(200, GBP)),
-            GBP,
+        let clamped = calculate_discounted_minor_for_runtime(
+            original_minor,
+            positional_runtime_discount_from_config(&SimpleDiscount::AmountOff(Money::from_minor(
+                200, GBP,
+            ))),
         )?;
 
-        assert_eq!(clamped, Money::from_minor(0, GBP));
+        assert_eq!(clamped, 0);
 
         Ok(())
     }
@@ -871,15 +917,13 @@ mod tests {
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        match vars {
-            PromotionVars::PositionalDiscount(vars) => {
-                assert!(vars.eligible_items.is_empty());
-                assert!(vars.dfa_data.is_none());
-            }
-            _ => panic!("Expected positional discount vars"),
-        }
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
+            .expect("Expected positional discount vars");
+
+        assert!(vars.eligible_items.is_empty());
+        assert!(vars.dfa_data.is_none());
 
         Ok(())
     }
@@ -901,11 +945,10 @@ mod tests {
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
+            .expect("Expected positional discount vars");
 
         let expr = vars.add_item_participation_term(Expression::default(), 1);
         assert!(expr.linear_coefficients().next().is_some());
@@ -930,33 +973,37 @@ mod tests {
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
-        let (pb, cost, _presence) = state.into_parts();
-        let model = pb.minimise(cost).using(default_solver);
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
+            .expect("Expected positional discount vars");
 
         assert!(vars.eligible_items.is_empty());
         assert!(vars.dfa_data.is_none());
 
-        let _model = vars.add_dfa_constraints(model, promo.key(), &mut observer);
+        vars.add_dfa_constraints(promo.key(), &mut state, &mut observer);
 
         Ok(())
     }
 
     #[test]
     fn add_dfa_constraints_skips_missing_next_state() {
-        let mut pb = good_lp::ProblemVariables::new();
-        let state_var = pb.add(good_lp::variable().binary());
-        let take_var = pb.add(good_lp::variable().binary());
-        let participation_var = pb.add(good_lp::variable().binary());
-        let discount_var = pb.add(good_lp::variable().binary());
-        let cost = Expression::default();
-        let model = pb.minimise(cost).using(default_solver);
+        let mut state = ILPState::new(good_lp::ProblemVariables::new(), Expression::default());
+        let state_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let take_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let participation_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let discount_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
 
         let vars = PositionalDiscountVars {
+            promotion_key: PromotionKey::default(),
             eligible_items: SmallVec::from_vec(vec![(0, 100)]),
             item_participation: SmallVec::from_vec(vec![(0, participation_var)]),
             item_discounts: SmallVec::from_vec(vec![(0, discount_var)]),
@@ -966,6 +1013,10 @@ mod tests {
                 state_vars: SmallVec::from_vec(vec![SmallVec::from_vec(vec![state_var])]),
                 take_vars: SmallVec::from_vec(vec![SmallVec::from_vec(vec![take_var])]),
             }),
+            runtime_discount: PositionalRuntimeDiscount::PercentageOff(Percentage::from(0.5)),
+            bundle_size: 1,
+            application_limit: None,
+            monetary_limit_minor: None,
         };
 
         assert_eq!(vars.eligible_items.len(), 1);
@@ -977,20 +1028,27 @@ mod tests {
         );
 
         let mut observer = NoopObserver;
-        let _model = vars.add_dfa_constraints(model, PromotionKey::default(), &mut observer);
+        vars.add_dfa_constraints(PromotionKey::default(), &mut state, &mut observer);
     }
 
     #[test]
     fn add_dfa_constraints_skips_missing_current_state() {
-        let mut pb = good_lp::ProblemVariables::new();
-        let next_state = pb.add(good_lp::variable().binary());
-        let take_var = pb.add(good_lp::variable().binary());
-        let participation_var = pb.add(good_lp::variable().binary());
-        let discount_var = pb.add(good_lp::variable().binary());
-        let cost = Expression::default();
-        let model = pb.minimise(cost).using(default_solver);
+        let mut state = ILPState::new(good_lp::ProblemVariables::new(), Expression::default());
+        let next_state = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let take_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let participation_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let discount_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
 
         let vars = PositionalDiscountVars {
+            promotion_key: PromotionKey::default(),
             eligible_items: SmallVec::from_vec(vec![(0, 100)]),
             item_participation: SmallVec::from_vec(vec![(0, participation_var)]),
             item_discounts: SmallVec::from_vec(vec![(0, discount_var)]),
@@ -1003,6 +1061,10 @@ mod tests {
                 ]),
                 take_vars: SmallVec::from_vec(vec![SmallVec::from_vec(vec![take_var])]),
             }),
+            runtime_discount: PositionalRuntimeDiscount::PercentageOff(Percentage::from(0.5)),
+            bundle_size: 1,
+            application_limit: None,
+            monetary_limit_minor: None,
         };
 
         assert_eq!(
@@ -1017,20 +1079,27 @@ mod tests {
         );
 
         let mut observer = NoopObserver;
-        let _model = vars.add_dfa_constraints(model, PromotionKey::default(), &mut observer);
+        vars.add_dfa_constraints(PromotionKey::default(), &mut state, &mut observer);
     }
 
     #[test]
     fn add_dfa_constraints_skips_missing_take_current() {
-        let mut pb = good_lp::ProblemVariables::new();
-        let state_now = pb.add(good_lp::variable().binary());
-        let state_next = pb.add(good_lp::variable().binary());
-        let participation_var = pb.add(good_lp::variable().binary());
-        let discount_var = pb.add(good_lp::variable().binary());
-        let cost = Expression::default();
-        let model = pb.minimise(cost).using(default_solver);
+        let mut state = ILPState::new(good_lp::ProblemVariables::new(), Expression::default());
+        let state_now = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let state_next = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let participation_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let discount_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
 
         let vars = PositionalDiscountVars {
+            promotion_key: PromotionKey::default(),
             eligible_items: SmallVec::from_vec(vec![(0, 100)]),
             item_participation: SmallVec::from_vec(vec![(0, participation_var)]),
             item_discounts: SmallVec::from_vec(vec![(0, discount_var)]),
@@ -1043,6 +1112,10 @@ mod tests {
                 ]),
                 take_vars: SmallVec::from_vec(vec![SmallVec::new()]),
             }),
+            runtime_discount: PositionalRuntimeDiscount::PercentageOff(Percentage::from(0.5)),
+            bundle_size: 1,
+            application_limit: None,
+            monetary_limit_minor: None,
         };
 
         assert_eq!(
@@ -1057,21 +1130,30 @@ mod tests {
         );
 
         let mut observer = NoopObserver;
-        let _model = vars.add_dfa_constraints(model, PromotionKey::default(), &mut observer);
+        vars.add_dfa_constraints(PromotionKey::default(), &mut state, &mut observer);
     }
 
     #[test]
     fn add_dfa_constraints_skips_missing_take_prev() {
-        let mut pb = good_lp::ProblemVariables::new();
-        let state_now = pb.add(good_lp::variable().binary());
-        let state_next = pb.add(good_lp::variable().binary());
-        let take_curr = pb.add(good_lp::variable().binary());
-        let participation_var = pb.add(good_lp::variable().binary());
-        let discount_var = pb.add(good_lp::variable().binary());
-        let cost = Expression::default();
-        let model = pb.minimise(cost).using(default_solver);
+        let mut state = ILPState::new(good_lp::ProblemVariables::new(), Expression::default());
+        let state_now = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let state_next = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let take_curr = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let participation_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
+        let discount_var = state
+            .problem_variables_mut()
+            .add(good_lp::variable().binary());
 
         let vars = PositionalDiscountVars {
+            promotion_key: PromotionKey::default(),
             eligible_items: SmallVec::from_vec(vec![(0, 100)]),
             item_participation: SmallVec::from_vec(vec![(0, participation_var)]),
             item_discounts: SmallVec::from_vec(vec![(0, discount_var)]),
@@ -1084,6 +1166,10 @@ mod tests {
                 ]),
                 take_vars: SmallVec::from_vec(vec![SmallVec::from_vec(vec![take_curr])]),
             }),
+            runtime_discount: PositionalRuntimeDiscount::PercentageOff(Percentage::from(0.5)),
+            bundle_size: 2,
+            application_limit: None,
+            monetary_limit_minor: None,
         };
 
         assert_eq!(vars.dfa_data.as_ref().map(|data| data.size), Some(2));
@@ -1096,7 +1182,7 @@ mod tests {
         );
 
         let mut observer = NoopObserver;
-        let _model = vars.add_dfa_constraints(model, PromotionKey::default(), &mut observer);
+        vars.add_dfa_constraints(PromotionKey::default(), &mut state, &mut observer);
     }
 
     #[test]
@@ -1125,7 +1211,7 @@ mod tests {
         let mut observer = NoopObserver;
 
         let err = promo
-            .add_variables(promo.key(), &item_group, &mut state, &mut observer)
+            .add_variables(&item_group, &mut state, &mut observer)
             .expect_err("expected non-representable error");
 
         assert!(matches!(
@@ -1162,11 +1248,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
+            .expect("Expected positional discount vars");
 
         assert_eq!(vars.eligible_items.len(), 1);
 
@@ -1188,24 +1273,22 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        match vars {
-            PromotionVars::PositionalDiscount(vars) => {
-                assert_eq!(
-                    vars.eligible_items,
-                    SmallVec::<[(usize, i64); 10]>::from_vec(vec![(1, 300), (2, 200), (0, 100)])
-                );
-                assert_eq!(vars.item_participation.len(), 3);
-                assert_eq!(vars.item_discounts.len(), 3);
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
+            .expect("Expected positional discount vars");
 
-                let dfa_data = vars.dfa_data.as_ref().expect("expected DFA data");
+        assert_eq!(
+            vars.eligible_items,
+            SmallVec::<[(usize, i64); 10]>::from_vec(vec![(1, 300), (2, 200), (0, 100)])
+        );
+        assert_eq!(vars.item_participation.len(), 3);
+        assert_eq!(vars.item_discounts.len(), 3);
 
-                assert_eq!(dfa_data.take_vars.len(), 3);
-                assert_eq!(dfa_data.state_vars.len(), 4);
-            }
-            _ => panic!("Expected positional discount vars"),
-        }
+        let dfa_data = vars.dfa_data.as_ref().expect("expected DFA data");
+
+        assert_eq!(dfa_data.take_vars.len(), 3);
+        assert_eq!(dfa_data.state_vars.len(), 4);
 
         Ok(())
     }
@@ -1225,18 +1308,15 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
-        let (pb, cost, _presence) = state.into_parts();
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let model = pb.minimise(cost).using(default_solver);
-
-        if let PromotionVars::PositionalDiscount(vars) = vars {
+        if let Some(vars) = (vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>() {
             let dfa_data = vars.dfa_data.as_ref().expect("expected DFA data");
 
             assert_eq!(dfa_data.take_vars.len(), 4);
             assert_eq!(dfa_data.state_vars.len(), 5);
 
-            let _model = vars.add_dfa_constraints(model, PromotionKey::default(), &mut observer);
+            vars.add_dfa_constraints(PromotionKey::default(), &mut state, &mut observer);
         } else {
             panic!("Expected positional discount vars");
         }
@@ -1259,11 +1339,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
+            .expect("Expected positional discount vars");
 
         let mut values = Vec::new();
 
@@ -1303,11 +1382,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
+            .expect("Expected positional discount vars");
 
         let mut values = Vec::new();
 
@@ -1324,11 +1402,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::PositionalDiscount(vars),
-            &item_group,
-        )?;
+        let discounts = vars.calculate_item_discounts(&solution, &item_group)?;
 
         assert_eq!(discounts.get(&0), Some(&(100, 100)));
         assert_eq!(discounts.get(&1), Some(&(200, 100)));
@@ -1352,11 +1426,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::PositionalDiscount(vars) = vars else {
-            panic!("Expected positional discount vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
+            .expect("Expected positional discount vars");
 
         let mut values = Vec::new();
 
@@ -1374,10 +1447,9 @@ mod tests {
 
         let mut next_bundle_id = 0;
 
-        let applications = promo.calculate_item_applications(
+        let applications = vars.calculate_item_applications(
             PromotionKey::default(),
             &solution,
-            &PromotionVars::PositionalDiscount(vars),
             &item_group,
             &mut next_bundle_id,
         )?;

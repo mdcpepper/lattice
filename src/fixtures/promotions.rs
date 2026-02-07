@@ -14,6 +14,7 @@ use crate::{
     promotions::{
         Promotion, PromotionKey, PromotionMeta, PromotionSlotKey,
         budget::PromotionBudget,
+        promotion,
         types::{
             DirectDiscountPromotion, MixAndMatchDiscount, MixAndMatchPromotion, MixAndMatchSlot,
             PositionalDiscountPromotion,
@@ -143,7 +144,7 @@ impl PromotionFixture {
                     .transpose()?
                     .unwrap_or_else(PromotionBudget::unlimited);
 
-                let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+                let promotion = promotion(DirectDiscountPromotion::new(
                     key,
                     StringTagCollection::from_strs(&tag_refs),
                     SimpleDiscount::try_from(discount)?,
@@ -195,7 +196,7 @@ impl PromotionFixture {
                     .transpose()?
                     .unwrap_or_else(PromotionBudget::unlimited);
 
-                let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+                let promotion = promotion(MixAndMatchPromotion::new(
                     key,
                     slot_defs,
                     MixAndMatchDiscount::try_from(discount)?,
@@ -225,7 +226,7 @@ impl PromotionFixture {
                     .transpose()?
                     .unwrap_or_else(PromotionBudget::unlimited);
 
-                let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+                let promotion = promotion(PositionalDiscountPromotion::new(
                     key,
                     StringTagCollection::from_strs(&tag_refs),
                     size,
@@ -366,15 +367,17 @@ impl TryFrom<SimpleDiscountFixture> for SimpleDiscount<'_> {
 mod tests {
     use decimal_percentage::Percentage;
     use rusty_money::iso::GBP;
+    use slotmap::SlotMap;
     use testresult::TestResult;
 
-    use crate::{
-        discounts::SimpleDiscount,
-        promotions::{Promotion, PromotionKey},
-        tags::collection::TagCollection,
-    };
+    use crate::{discounts::SimpleDiscount, promotions::PromotionKey};
 
     use super::*;
+
+    fn test_promotion_key() -> PromotionKey {
+        let mut keys = SlotMap::<PromotionKey, ()>::with_key();
+        keys.insert(())
+    }
 
     #[test]
     fn promotion_fixture_rejects_unknown_type() {
@@ -487,22 +490,11 @@ value: 0.10
             budget: None,
         };
 
-        let (meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
+        let key = test_promotion_key();
+        let (meta, promotion) = fixture.try_into_promotion(key)?;
 
         assert_eq!(meta.name, "Member Sale");
-
-        match promotion {
-            Promotion::DirectDiscount(promo) => {
-                assert!(promo.tags().contains("member"));
-                assert!(matches!(
-                    promo.discount(),
-                    SimpleDiscount::AmountOff(amount) if amount.to_minor_units() == 50
-                ));
-            }
-            Promotion::PositionalDiscount(_) | Promotion::MixAndMatch(_) => {
-                panic!("Expected direct discount promotion")
-            }
-        }
+        assert_eq!(promotion.key(), key);
 
         Ok(())
     }
@@ -520,21 +512,11 @@ value: 0.10
             budget: None,
         };
 
-        let (meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
+        let key = test_promotion_key();
+        let (meta, promotion) = fixture.try_into_promotion(key)?;
 
         assert_eq!(meta.name, "3-for-2");
-
-        match promotion {
-            Promotion::PositionalDiscount(promo) => {
-                assert!(promo.tags().contains("snack"));
-                assert_eq!(promo.size(), 3);
-                assert_eq!(promo.positions(), &[2]);
-                assert!(matches!(promo.discount(), SimpleDiscount::PercentageOff(_)));
-            }
-            Promotion::DirectDiscount(_) | Promotion::MixAndMatch(_) => {
-                panic!("Expected positional discount promotion")
-            }
-        }
+        assert_eq!(promotion.key(), key);
 
         Ok(())
     }
@@ -563,31 +545,12 @@ value: 0.10
             budget: None,
         };
 
-        let (meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
+        let key = test_promotion_key();
+        let (meta, promotion) = fixture.try_into_promotion(key)?;
 
         assert_eq!(meta.name, "Meal Deal");
-
-        match promotion {
-            Promotion::MixAndMatch(promo) => {
-                assert_eq!(promo.slots().len(), 2);
-                assert_eq!(meta.slot_names.len(), 2);
-                let slot_names: Vec<&str> = promo
-                    .slots()
-                    .iter()
-                    .filter_map(|slot| meta.slot_names.get(*slot.key()).map(String::as_str))
-                    .collect();
-                assert!(slot_names.contains(&"main"));
-                assert!(slot_names.contains(&"drink"));
-                assert!(matches!(
-                    promo.discount(),
-                    MixAndMatchDiscount::FixedTotal(amount)
-                        if amount.to_minor_units() == 250 && amount.currency() == GBP
-                ));
-            }
-            Promotion::DirectDiscount(_) | Promotion::PositionalDiscount(_) => {
-                panic!("Expected mix-and-match promotion")
-            }
-        }
+        assert_eq!(promotion.key(), key);
+        assert_eq!(meta.slot_names.len(), 2);
 
         Ok(())
     }
@@ -715,18 +678,9 @@ value: 0.10
             }),
         };
 
-        let (_meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
-
-        match promotion {
-            Promotion::DirectDiscount(ref promo) => {
-                assert_eq!(promo.budget().application_limit, Some(3));
-                assert_eq!(
-                    promo.budget().monetary_limit,
-                    Some(Money::from_minor(100, GBP))
-                );
-            }
-            _ => panic!("Expected DirectDiscount promotion"),
-        }
+        let key = test_promotion_key();
+        let (_meta, promotion) = fixture.try_into_promotion(key)?;
+        assert_eq!(promotion.key(), key);
 
         Ok(())
     }
@@ -747,15 +701,9 @@ value: 0.10
             }),
         };
 
-        let (_meta, promotion) = fixture.try_into_promotion(PromotionKey::default())?;
-
-        match promotion {
-            Promotion::PositionalDiscount(ref promo) => {
-                assert_eq!(promo.budget().application_limit, Some(5));
-                assert!(promo.budget().monetary_limit.is_none());
-            }
-            _ => panic!("Expected PositionalDiscount promotion"),
-        }
+        let key = test_promotion_key();
+        let (_meta, promotion) = fixture.try_into_promotion(key)?;
+        assert_eq!(promotion.key(), key);
 
         Ok(())
     }

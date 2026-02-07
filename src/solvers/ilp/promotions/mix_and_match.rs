@@ -1,7 +1,10 @@
 //! Mix-and-Match Bundle Promotions ILP
 
+#[cfg(test)]
+use std::any::Any;
+
 use decimal_percentage::Percentage;
-use good_lp::{Expression, Solution, SolverModel, Variable, variable};
+use good_lp::{Expression, Solution, Variable, variable};
 use num_traits::ToPrimitive;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
@@ -10,7 +13,7 @@ use rusty_money::Money;
 
 use crate::{
     discounts::percent_of_minor,
-    items::{Item, groups::ItemGroup},
+    items::groups::ItemGroup,
     promotions::{
         PromotionKey,
         applications::PromotionApplication,
@@ -20,16 +23,27 @@ use crate::{
         SolverError,
         ilp::{
             BINARY_THRESHOLD, ILPObserver, i64_to_f64_exact,
-            promotions::{ILPPromotion, PromotionVars},
+            promotions::{ILPPromotion, ILPPromotionVars, PromotionVars},
             state::ILPState,
         },
     },
     tags::collection::TagCollection,
 };
 
+#[derive(Debug, Clone, Copy)]
+enum MixAndMatchRuntimeDiscount {
+    PercentAllItems(Percentage),
+    PercentCheapest(Percentage),
+    FixedCheapest(i64),
+    FixedTotal(i64),
+}
+
 /// Solver variables for a mix-and-match promotion.
 #[derive(Debug)]
 pub struct MixAndMatchVars {
+    /// Promotion key for observer metadata.
+    promotion_key: PromotionKey,
+
     /// Per-slot item selection variables.
     slot_vars: Vec<SmallVec<[(usize, Variable); 10]>>,
 
@@ -50,40 +64,22 @@ pub struct MixAndMatchVars {
 
     /// Eligible items sorted by price asc, then index asc (for cheapest targeting).
     sorted_items: SmallVec<[(usize, i64); 10]>,
+
+    /// Runtime discount mode captured during variable creation.
+    runtime_discount: MixAndMatchRuntimeDiscount,
+
+    /// Budget: optional max applications.
+    application_limit: Option<u32>,
+
+    /// Budget: optional max total discount value in minor units.
+    monetary_limit_minor: Option<i64>,
 }
 
 impl MixAndMatchVars {
-    pub fn add_item_participation_term(&self, expr: Expression, item_idx: usize) -> Expression {
-        let mut updated_expr = expr;
+    fn selected_exprs(&self) -> SmallVec<[Expression; 10]> {
+        let mut exprs: SmallVec<[Expression; 10]> = SmallVec::with_capacity(self.target_vars.len());
 
-        for slot in &self.slot_vars {
-            for &(idx, var) in slot {
-                if idx == item_idx {
-                    updated_expr += var;
-                }
-            }
-        }
-
-        updated_expr
-    }
-
-    pub fn is_item_participating(&self, solution: &dyn Solution, item_idx: usize) -> bool {
-        self.slot_vars.iter().any(|slot| {
-            slot.iter()
-                .any(|&(idx, var)| idx == item_idx && solution.value(var) > BINARY_THRESHOLD)
-        })
-    }
-
-    pub fn is_item_priced_by_promotion(&self, solution: &dyn Solution, item_idx: usize) -> bool {
-        if let Some(var) = self.target_vars.get(item_idx).and_then(|v| *v) {
-            return solution.value(var) > BINARY_THRESHOLD;
-        }
-
-        self.is_item_participating(solution, item_idx)
-    }
-
-    fn selected_exprs(&self) -> Vec<Expression> {
-        let mut exprs = vec![Expression::default(); self.target_vars.len()];
+        exprs.resize_with(self.target_vars.len(), Expression::default);
 
         for slot in &self.slot_vars {
             for &(item_idx, var) in slot {
@@ -101,14 +97,14 @@ impl MixAndMatchVars {
         clippy::too_many_lines,
         reason = "Constraint assembly is verbose by design."
     )]
-    pub fn add_constraints<S: SolverModel, O: ILPObserver + ?Sized>(
+    pub fn add_constraints(
         &self,
-        mut model: S,
         promotion_key: PromotionKey,
-        observer: &mut O,
-    ) -> S {
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         if self.slot_vars.is_empty() || (self.y_bundle.is_none() && self.bundle_formed.is_none()) {
-            return model;
+            return;
         }
 
         // Slot constraints
@@ -122,7 +118,7 @@ impl MixAndMatchVars {
 
                 observer.on_promotion_constraint(promotion_key, "slot min", &expr, ">=", 0.0);
 
-                model = model.with(slot_sum.clone() >> (min_i32 * y_bundle));
+                state.add_geq_constraint(slot_sum.clone() - min_i32 * y_bundle, 0.0);
 
                 if let Some(max) = max {
                     let max_i32 = i32_from_usize(max);
@@ -130,7 +126,7 @@ impl MixAndMatchVars {
 
                     observer.on_promotion_constraint(promotion_key, "slot max", &expr, "<=", 0.0);
 
-                    model = model.with(slot_sum.clone() << (max_i32 * y_bundle));
+                    state.add_leq_constraint(slot_sum.clone() - max_i32 * y_bundle, 0.0);
                 }
             } else if let Some(bundle_formed) = self.bundle_formed {
                 let expr = slot_sum.clone() - min_i32 * bundle_formed;
@@ -143,7 +139,7 @@ impl MixAndMatchVars {
                     0.0,
                 );
 
-                model = model.with(slot_sum.clone() >> (min_i32 * bundle_formed));
+                state.add_geq_constraint(slot_sum.clone() - min_i32 * bundle_formed, 0.0);
 
                 if let Some(max) = max {
                     let max_i32 = i32_from_usize(max);
@@ -157,7 +153,7 @@ impl MixAndMatchVars {
                         0.0,
                     );
 
-                    model = model.with(slot_sum.clone() << (max_i32 * bundle_formed));
+                    state.add_leq_constraint(slot_sum.clone() - max_i32 * bundle_formed, 0.0);
                 }
 
                 // If slot has enough items, bundle can be formed.
@@ -165,7 +161,7 @@ impl MixAndMatchVars {
 
                 observer.on_promotion_constraint(promotion_key, "bundle formed", &expr, "<=", 0.0);
 
-                model = model.with(bundle_formed << (slot_sum / min_i32));
+                state.add_leq_constraint(Expression::from(bundle_formed) - slot_sum / min_i32, 0.0);
             }
         }
 
@@ -173,7 +169,7 @@ impl MixAndMatchVars {
         let needs_target = self.target_vars.iter().any(Option::is_some);
 
         if !needs_target {
-            return model;
+            return;
         }
 
         let selected_exprs = self.selected_exprs();
@@ -196,7 +192,7 @@ impl MixAndMatchVars {
                 0.0,
             );
 
-            model = model.with(target_var << selected_expr);
+            state.add_leq_constraint(Expression::from(target_var) - selected_expr, 0.0);
             target_sum += target_var;
         }
 
@@ -226,9 +222,10 @@ impl MixAndMatchVars {
                         0.0,
                     );
 
-                    model = model.with(
+                    state.add_geq_constraint(
                         prefix_targets.clone()
-                            >> (prefix_selected.clone() - (k_total - 1) * y_bundle),
+                            - (prefix_selected.clone() - (k_total - 1) * y_bundle),
+                        0.0,
                     );
                 }
             }
@@ -237,7 +234,7 @@ impl MixAndMatchVars {
 
             observer.on_promotion_constraint(promotion_key, "target count", &expr, "=", 0.0);
 
-            model = model.with(target_sum.eq(y_bundle));
+            state.add_eq_constraint(target_sum - y_bundle, 0.0);
         } else if let Some(bundle_formed) = self.bundle_formed {
             let expr = target_sum.clone() - bundle_formed;
 
@@ -249,29 +246,19 @@ impl MixAndMatchVars {
                 0.0,
             );
 
-            model = model.with(target_sum.eq(bundle_formed));
+            state.add_eq_constraint(target_sum - bundle_formed, 0.0);
         }
-
-        model
     }
 
     /// Add budget constraints for mix-and-match promotions
-    pub fn add_budget_constraints<S, O: ILPObserver + ?Sized>(
+    pub fn add_budget_constraints(
         &self,
-        model: S,
-        promotion: &MixAndMatchPromotion<'_>,
         item_group: &ItemGroup<'_>,
-        promotion_key: PromotionKey,
-        observer: &mut O,
-    ) -> Result<S, SolverError>
-    where
-        S: SolverModel,
-    {
-        let mut model = model;
-        let budget = promotion.budget();
-
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
         // Application limit: For mix-and-match, this limits bundles
-        if let Some(application_limit) = budget.application_limit {
+        if let Some(application_limit) = self.application_limit {
             // Use bundle counter variable if available
             if let Some(y_bundle) = self.y_bundle {
                 let limit_f64 = i64_to_f64_exact(i64::from(application_limit)).ok_or(
@@ -281,14 +268,14 @@ impl MixAndMatchVars {
                 let expr = Expression::from(y_bundle);
 
                 observer.on_promotion_constraint(
-                    promotion_key,
+                    self.promotion_key,
                     "application count budget (bundle limit)",
                     &expr,
                     "<=",
                     limit_f64,
                 );
 
-                model = model.with(expr.leq(limit_f64));
+                state.add_leq_constraint(expr, limit_f64);
             } else if let Some(bundle_formed) = self.bundle_formed {
                 // Variable-arity bundles: bundle_formed is binary (0 or 1)
                 // application_limit only makes sense if >= 1
@@ -296,38 +283,30 @@ impl MixAndMatchVars {
                     let expr = Expression::from(bundle_formed);
 
                     observer.on_promotion_constraint(
-                        promotion_key,
+                        self.promotion_key,
                         "application count budget (no bundles)",
                         &expr,
                         "=",
                         0.0,
                     );
 
-                    model = model.with(expr.eq(0));
+                    state.add_eq_constraint(expr, 0.0);
                 }
                 // If application_limit >= 1, no constraint needed (bundle_formed is already <= 1)
             }
         }
 
         // Monetary limit: sum(discount_amount * participation_var) <= limit
-        if let Some(monetary_limit) = budget.monetary_limit {
+        if let Some(limit_minor) = self.monetary_limit_minor {
             let mut discount_expr = Expression::default();
 
             // Iterate over all slot variables to compute total discount
             for slot in &self.slot_vars {
                 for &(item_idx, var) in slot {
                     let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
-
                     let full_minor = item.price().to_minor_units();
-
-                    // Calculate discounted price based on discount type
-                    let discounted_minor = calculate_discounted_price_for_item(
-                        item,
-                        promotion.discount(),
-                        item_group,
-                        &self.sorted_items,
-                    )?
-                    .to_minor_units();
+                    let discounted_minor =
+                        calculate_discounted_minor_for_budget(full_minor, self.runtime_discount)?;
 
                     let discount_amount = full_minor.saturating_sub(discounted_minor);
                     let coeff = i64_to_f64_exact(discount_amount)
@@ -337,22 +316,21 @@ impl MixAndMatchVars {
                 }
             }
 
-            let limit_minor = monetary_limit.to_minor_units();
             let limit_f64 = i64_to_f64_exact(limit_minor)
                 .ok_or(SolverError::MinorUnitsNotRepresentable(limit_minor))?;
 
             observer.on_promotion_constraint(
-                promotion_key,
+                self.promotion_key,
                 "monetary value budget",
                 &discount_expr,
                 "<=",
                 limit_f64,
             );
 
-            model = model.with(discount_expr.leq(limit_f64));
+            state.add_leq_constraint(discount_expr, limit_f64);
         }
 
-        Ok(model)
+        Ok(())
     }
 
     fn bundle_count(&self, solution: &dyn Solution) -> usize {
@@ -368,6 +346,98 @@ impl MixAndMatchVars {
     }
 }
 
+impl ILPPromotionVars for MixAndMatchVars {
+    fn add_item_participation_term(&self, expr: Expression, item_idx: usize) -> Expression {
+        let mut updated_expr = expr;
+
+        for slot in &self.slot_vars {
+            for &(idx, var) in slot {
+                if idx == item_idx {
+                    updated_expr += var;
+                }
+            }
+        }
+
+        updated_expr
+    }
+
+    fn is_item_participating(&self, solution: &dyn Solution, item_idx: usize) -> bool {
+        self.slot_vars.iter().any(|slot| {
+            slot.iter()
+                .any(|&(idx, var)| idx == item_idx && solution.value(var) > BINARY_THRESHOLD)
+        })
+    }
+
+    fn is_item_priced_by_promotion(&self, solution: &dyn Solution, item_idx: usize) -> bool {
+        if let Some(var) = self.target_vars.get(item_idx).and_then(|v| *v) {
+            return solution.value(var) > BINARY_THRESHOLD;
+        }
+
+        self.is_item_participating(solution, item_idx)
+    }
+
+    fn add_constraints(
+        &self,
+        promotion_key: PromotionKey,
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        self.add_constraints(promotion_key, state, observer);
+        self.add_budget_constraints(item_group, state, observer)
+    }
+
+    fn calculate_item_discounts(
+        &self,
+        solution: &dyn Solution,
+        item_group: &ItemGroup<'_>,
+    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
+        calculate_discounts_for_vars(solution, self, item_group)
+    }
+
+    fn calculate_item_applications<'b>(
+        &self,
+        promotion_key: PromotionKey,
+        solution: &dyn Solution,
+        item_group: &ItemGroup<'b>,
+        next_bundle_id: &mut usize,
+    ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
+        let bundles = build_bundles(solution, self);
+
+        if bundles.is_empty() {
+            return Ok(SmallVec::new());
+        }
+
+        let discounts = calculate_discounts_for_vars(solution, self, item_group)?;
+        let currency = item_group.currency();
+        let mut applications = SmallVec::new();
+
+        for bundle in bundles {
+            let bundle_id = *next_bundle_id;
+            *next_bundle_id += 1;
+
+            for item_idx in bundle {
+                let item = item_group.get_item(item_idx)?;
+                let original_minor = item.price().to_minor_units();
+
+                let final_minor = discounts
+                    .get(&item_idx)
+                    .map_or(original_minor, |(_, final_minor)| *final_minor);
+
+                applications.push(PromotionApplication {
+                    promotion_key,
+                    item_idx,
+                    bundle_id,
+                    original_price: *item.price(),
+                    final_price: Money::from_minor(final_minor, currency),
+                });
+            }
+        }
+
+        Ok(applications)
+    }
+}
+
 fn discounted_minor_percent(pct: &Percentage, original_minor: i64) -> Result<i64, SolverError> {
     let discount_minor = percent_of_minor(pct, original_minor).map_err(SolverError::Discount)?;
 
@@ -378,47 +448,42 @@ fn i32_from_usize(value: usize) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
-/// Calculate discounted price for a single item in mix-and-match context
-fn calculate_discounted_price_for_item<'a>(
-    item: &Item<'_>,
-    discount: &MixAndMatchDiscount<'_>,
-    item_group: &ItemGroup<'a>,
-    _sorted_items: &[(usize, i64)],
-) -> Result<Money<'a, rusty_money::iso::Currency>, SolverError> {
-    let full_minor = item.price().to_minor_units();
-
-    let discounted_minor = match discount {
+fn runtime_discount_from_config(discount: &MixAndMatchDiscount<'_>) -> MixAndMatchRuntimeDiscount {
+    match discount {
         MixAndMatchDiscount::PercentAllItems(pct) => {
-            let discount_amount =
-                percent_of_minor(pct, full_minor).map_err(SolverError::Discount)?;
-
-            full_minor.saturating_sub(discount_amount)
+            MixAndMatchRuntimeDiscount::PercentAllItems(*pct)
         }
         MixAndMatchDiscount::PercentCheapest(pct) => {
-            // For cheapest-only discounts, worst case is full discount on this item
-            // For budget calculation purposes, assume it could be the cheapest
-            // This is conservative but ensures budget isn't violated
+            MixAndMatchRuntimeDiscount::PercentCheapest(*pct)
+        }
+        MixAndMatchDiscount::FixedCheapest(amount) => {
+            MixAndMatchRuntimeDiscount::FixedCheapest(amount.to_minor_units())
+        }
+        MixAndMatchDiscount::FixedTotal(amount) => {
+            MixAndMatchRuntimeDiscount::FixedTotal(amount.to_minor_units())
+        }
+    }
+}
+
+fn calculate_discounted_minor_for_budget(
+    full_minor: i64,
+    discount: MixAndMatchRuntimeDiscount,
+) -> Result<i64, SolverError> {
+    let discounted_minor = match discount {
+        MixAndMatchRuntimeDiscount::PercentAllItems(pct)
+        | MixAndMatchRuntimeDiscount::PercentCheapest(pct) => {
             let discount_amount =
-                percent_of_minor(pct, full_minor).map_err(SolverError::Discount)?;
+                percent_of_minor(&pct, full_minor).map_err(SolverError::Discount)?;
 
             full_minor.saturating_sub(discount_amount)
         }
-        MixAndMatchDiscount::FixedTotal(_total) => {
-            // For fixed total, distribute evenly across bundle
-            // Conservative approximation: assume zero price (max discount)
-            0
-        }
-        MixAndMatchDiscount::FixedCheapest(fixed_price) => {
-            // Cheapest item gets fixed price, others full price
-            // Conservative: assume this item could be cheapest
-            fixed_price.to_minor_units()
-        }
+        // Conservative approximation for budgeting fixed-total bundles:
+        // assume the item could be fully discounted.
+        MixAndMatchRuntimeDiscount::FixedTotal(_) => 0,
+        MixAndMatchRuntimeDiscount::FixedCheapest(fixed_minor) => fixed_minor,
     };
 
-    Ok(Money::from_minor(
-        discounted_minor.max(0),
-        item_group.currency(),
-    ))
+    Ok(discounted_minor.max(0))
 }
 
 fn proportional_alloc(total: i64, part: i64, denom: i64) -> i64 {
@@ -436,11 +501,7 @@ fn proportional_alloc(total: i64, part: i64, denom: i64) -> i64 {
     i64::try_from(value).unwrap_or(0)
 }
 
-fn build_bundles(
-    promotion: &MixAndMatchPromotion<'_>,
-    solution: &dyn Solution,
-    vars: &MixAndMatchVars,
-) -> Vec<Vec<usize>> {
+fn build_bundles(solution: &dyn Solution, vars: &MixAndMatchVars) -> Vec<Vec<usize>> {
     let bundles_applied = vars.bundle_count(solution);
 
     if bundles_applied == 0 {
@@ -468,8 +529,7 @@ fn build_bundles(
         for bundle_idx in 0..bundles_applied {
             let mut bundle_items = Vec::new();
 
-            for (slot_idx, slot) in promotion.slots().iter().enumerate() {
-                let min = slot.min();
+            for (slot_idx, (min, _max)) in vars.slot_bounds.iter().copied().enumerate() {
                 let items: &[usize] = slot_items.get(slot_idx).map_or(&[], |v| v.as_slice());
                 let start = bundle_idx * min;
 
@@ -504,27 +564,26 @@ fn build_bundles(
 }
 
 fn calculate_discounts_for_vars(
-    promotion: &MixAndMatchPromotion<'_>,
     solution: &dyn Solution,
     vars: &MixAndMatchVars,
     item_group: &ItemGroup<'_>,
 ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
     let mut discounts = FxHashMap::default();
 
-    match promotion.discount() {
-        MixAndMatchDiscount::PercentAllItems(pct) => {
+    match vars.runtime_discount {
+        MixAndMatchRuntimeDiscount::PercentAllItems(pct) => {
             for (item_idx, item) in item_group.iter().enumerate() {
                 if !vars.is_item_participating(solution, item_idx) {
                     continue;
                 }
 
                 let original_minor = item.price().to_minor_units();
-                let discounted_minor = discounted_minor_percent(pct, original_minor)?;
+                let discounted_minor = discounted_minor_percent(&pct, original_minor)?;
 
                 discounts.insert(item_idx, (original_minor, discounted_minor));
             }
         }
-        MixAndMatchDiscount::PercentCheapest(pct) => {
+        MixAndMatchRuntimeDiscount::PercentCheapest(pct) => {
             for (item_idx, item) in item_group.iter().enumerate() {
                 if !vars.is_item_participating(solution, item_idx) {
                     continue;
@@ -535,14 +594,14 @@ fn calculate_discounts_for_vars(
                 discounts.insert(item_idx, (original_minor, original_minor));
 
                 if vars.is_item_priced_by_promotion(solution, item_idx) {
-                    let discounted_minor = discounted_minor_percent(pct, original_minor)?;
+                    let discounted_minor = discounted_minor_percent(&pct, original_minor)?;
 
                     discounts.insert(item_idx, (original_minor, discounted_minor));
                 }
             }
         }
-        MixAndMatchDiscount::FixedCheapest(amount) => {
-            let fixed_minor = amount.to_minor_units().max(0);
+        MixAndMatchRuntimeDiscount::FixedCheapest(fixed_minor) => {
+            let fixed_minor = fixed_minor.max(0);
 
             for (item_idx, item) in item_group.iter().enumerate() {
                 if !vars.is_item_participating(solution, item_idx) {
@@ -560,9 +619,8 @@ fn calculate_discounts_for_vars(
                 discounts.insert(item_idx, (original_minor, final_minor));
             }
         }
-        MixAndMatchDiscount::FixedTotal(amount) => {
-            let bundle_price = amount.to_minor_units();
-            let bundles = build_bundles(promotion, solution, vars);
+        MixAndMatchRuntimeDiscount::FixedTotal(bundle_price) => {
+            let bundles = build_bundles(solution, vars);
 
             for bundle_items in bundles {
                 if bundle_items.is_empty() {
@@ -603,6 +661,10 @@ fn calculate_discounts_for_vars(
 }
 
 impl ILPPromotion for MixAndMatchPromotion<'_> {
+    fn key(&self) -> PromotionKey {
+        MixAndMatchPromotion::key(self)
+    }
+
     fn is_applicable(&self, item_group: &ItemGroup<'_>) -> bool {
         if item_group.is_empty() {
             return false;
@@ -626,15 +688,23 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         clippy::too_many_lines,
         reason = "Complexity due to multiple discount types"
     )]
-    fn add_variables<O: ILPObserver + ?Sized>(
+    fn add_variables(
         &self,
-        promotion_key: PromotionKey,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
-        observer: &mut O,
+        observer: &mut dyn ILPObserver,
     ) -> Result<PromotionVars, SolverError> {
+        let promotion_key = self.key();
+        let runtime_discount = runtime_discount_from_config(self.discount());
+        let application_limit = self.budget().application_limit;
+        let monetary_limit_minor = self
+            .budget()
+            .monetary_limit
+            .map(|value| value.to_minor_units());
+
         if item_group.is_empty() {
-            return Ok(PromotionVars::MixAndMatch(Box::new(MixAndMatchVars {
+            return Ok(Box::new(MixAndMatchVars {
+                promotion_key,
                 slot_vars: Vec::new(),
                 y_bundle: None,
                 bundle_formed: None,
@@ -642,7 +712,10 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
                 slot_bounds: Vec::new(),
                 bundle_size: 0,
                 sorted_items: SmallVec::new(),
-            })));
+                runtime_discount,
+                application_limit,
+                monetary_limit_minor,
+            }));
         }
 
         // Collect eligible items per slot.
@@ -669,7 +742,8 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         }
 
         if !feasible {
-            return Ok(PromotionVars::MixAndMatch(Box::new(MixAndMatchVars {
+            return Ok(Box::new(MixAndMatchVars {
+                promotion_key,
                 slot_vars: Vec::new(),
                 y_bundle: None,
                 bundle_formed: None,
@@ -677,7 +751,10 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
                 slot_bounds: Vec::new(),
                 bundle_size: 0,
                 sorted_items: SmallVec::new(),
-            })));
+                runtime_discount,
+                application_limit,
+                monetary_limit_minor,
+            }));
         }
 
         // Determine whether we can use a bundle counter.
@@ -827,7 +904,8 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
             }
         }
 
-        Ok(PromotionVars::MixAndMatch(Box::new(MixAndMatchVars {
+        Ok(Box::new(MixAndMatchVars {
+            promotion_key,
             slot_vars,
             y_bundle,
             bundle_formed,
@@ -835,69 +913,10 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
             slot_bounds,
             bundle_size,
             sorted_items,
-        })))
-    }
-
-    fn calculate_item_discounts(
-        &self,
-        solution: &dyn Solution,
-        vars: &PromotionVars,
-        item_group: &ItemGroup<'_>,
-    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
-        let vars = match vars {
-            PromotionVars::MixAndMatch(vars) => vars.as_ref(),
-            _ => return Ok(FxHashMap::default()),
-        };
-
-        calculate_discounts_for_vars(self, solution, vars, item_group)
-    }
-
-    fn calculate_item_applications<'b>(
-        &self,
-        promotion_key: PromotionKey,
-        solution: &dyn Solution,
-        vars: &PromotionVars,
-        item_group: &ItemGroup<'b>,
-        next_bundle_id: &mut usize,
-    ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
-        let vars = match vars {
-            PromotionVars::MixAndMatch(vars) => vars.as_ref(),
-            _ => return Ok(SmallVec::new()),
-        };
-
-        let bundles = build_bundles(self, solution, vars);
-
-        if bundles.is_empty() {
-            return Ok(SmallVec::new());
-        }
-
-        let discounts = calculate_discounts_for_vars(self, solution, vars, item_group)?;
-        let currency = item_group.currency();
-        let mut applications = SmallVec::new();
-
-        for bundle in bundles {
-            let bundle_id = *next_bundle_id;
-            *next_bundle_id += 1;
-
-            for item_idx in bundle {
-                let item = item_group.get_item(item_idx)?;
-                let original_minor = item.price().to_minor_units();
-
-                let final_minor = discounts
-                    .get(&item_idx)
-                    .map_or(original_minor, |(_, final_minor)| *final_minor);
-
-                applications.push(PromotionApplication {
-                    promotion_key,
-                    item_idx,
-                    bundle_id,
-                    original_price: *item.price(),
-                    final_price: Money::from_minor(final_minor, currency),
-                });
-            }
-        }
-
-        Ok(applications)
+            runtime_discount,
+            application_limit,
+            monetary_limit_minor,
+        }))
     }
 }
 
@@ -909,11 +928,6 @@ mod tests {
     use slotmap::SlotMap;
     use smallvec::SmallVec;
     use testresult::TestResult;
-
-    #[cfg(feature = "solver-highs")]
-    use good_lp::solvers::highs::highs as default_solver;
-    #[cfg(all(not(feature = "solver-highs"), feature = "solver-microlp"))]
-    use good_lp::solvers::microlp::microlp as default_solver;
 
     use crate::{
         items::{Item, groups::ItemGroup},
@@ -1025,15 +1039,12 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
-        let (pb, cost, _presence) = state.into_parts();
-        let model = pb.minimise(cost).using(default_solver);
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
-        let _model = vars.add_constraints(model, promo.key(), &mut observer);
+        vars.add_constraints(promo.key(), &mut state, &mut observer);
 
         Ok(())
     }
@@ -1079,11 +1090,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         // Select both items into the slots and form one bundle.
         let mut values = Vec::new();
@@ -1099,11 +1109,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::MixAndMatch(vars),
-            &item_group,
-        )?;
+        let discounts = vars.calculate_item_discounts(&solution, &item_group)?;
 
         assert_eq!(discounts.len(), 2);
 
@@ -1151,11 +1157,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1170,11 +1175,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::MixAndMatch(vars),
-            &item_group,
-        )?;
+        let discounts = vars.calculate_item_discounts(&solution, &item_group)?;
 
         assert_eq!(discounts.len(), 2);
 
@@ -1228,11 +1229,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1252,11 +1252,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::MixAndMatch(vars),
-            &item_group,
-        )?;
+        let discounts = vars.calculate_item_discounts(&solution, &item_group)?;
 
         assert_eq!(discounts.len(), 2);
 
@@ -1310,11 +1306,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1334,11 +1329,7 @@ mod tests {
         }
 
         let solution = MapSolution::with(&values);
-        let discounts = promo.calculate_item_discounts(
-            &solution,
-            &PromotionVars::MixAndMatch(vars),
-            &item_group,
-        )?;
+        let discounts = vars.calculate_item_discounts(&solution, &item_group)?;
 
         assert_eq!(discounts.len(), 2);
 
@@ -1393,11 +1384,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         // Should use bundle_formed, not y_bundle
         assert!(vars.bundle_formed.is_some());
@@ -1447,11 +1437,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1468,10 +1457,9 @@ mod tests {
         let solution = MapSolution::with(&values);
         let mut next_bundle_id = 0;
 
-        let applications = promo.calculate_item_applications(
+        let applications = vars.calculate_item_applications(
             promo.key(),
             &solution,
-            &PromotionVars::MixAndMatch(vars),
             &item_group,
             &mut next_bundle_id,
         )?;
@@ -1536,11 +1524,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         let mut values = Vec::new();
 
@@ -1559,10 +1546,9 @@ mod tests {
         let solution = MapSolution::with(&values);
         let mut next_bundle_id = 0;
 
-        let applications = promo.calculate_item_applications(
+        let applications = vars.calculate_item_applications(
             promo.key(),
             &solution,
-            &PromotionVars::MixAndMatch(vars),
             &item_group,
             &mut next_bundle_id,
         )?;
@@ -1597,11 +1583,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         assert!(vars.slot_vars.is_empty());
         assert!(vars.y_bundle.is_none());
@@ -1646,11 +1631,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         // Should return empty vars when not feasible
         assert!(vars.slot_vars.is_empty());
@@ -1698,18 +1682,15 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
-        let (pb, cost, _presence) = state.into_parts();
-        let model = pb.minimise(cost).using(default_solver);
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         // Should use bundle_formed for variable arity
         assert!(vars.bundle_formed.is_some());
 
-        let _model = vars.add_constraints(model, promo.key(), &mut observer);
+        vars.add_constraints(promo.key(), &mut state, &mut observer);
 
         Ok(())
     }
@@ -1764,20 +1745,18 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         // Don't select any items
         let solution = MapSolution::default();
         let mut next_bundle_id = 0;
 
-        let applications = promo.calculate_item_applications(
+        let applications = vars.calculate_item_applications(
             promo.key(),
             &solution,
-            &PromotionVars::MixAndMatch(vars),
             &item_group,
             &mut next_bundle_id,
         )?;
@@ -1791,6 +1770,7 @@ mod tests {
     #[test]
     fn is_item_priced_by_promotion_without_target() {
         let vars = MixAndMatchVars {
+            promotion_key: PromotionKey::default(),
             slot_vars: vec![SmallVec::new()],
             y_bundle: None,
             bundle_formed: None,
@@ -1798,6 +1778,9 @@ mod tests {
             slot_bounds: Vec::new(),
             bundle_size: 0,
             sorted_items: SmallVec::new(),
+            runtime_discount: MixAndMatchRuntimeDiscount::PercentAllItems(Percentage::from(0.0)),
+            application_limit: None,
+            monetary_limit_minor: None,
         };
 
         let solution = MapSolution::default();
@@ -1856,11 +1839,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         // Should have slot vars for all three slots
         assert_eq!(vars.slot_vars.len(), 3);
@@ -1912,11 +1894,10 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let PromotionVars::MixAndMatch(vars) = vars else {
-            panic!("Expected mix-and-match vars");
-        };
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
 
         // Should have one slot
         assert_eq!(vars.slot_vars.len(), 1);

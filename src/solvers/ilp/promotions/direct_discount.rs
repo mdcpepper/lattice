@@ -15,7 +15,7 @@ use crate::{
         SolverError,
         ilp::{
             BINARY_THRESHOLD, ILPObserver, i64_to_f64_exact,
-            promotions::{ILPPromotion, PromotionVars},
+            promotions::{ILPPromotion, ILPPromotionVars, PromotionVars},
             state::ILPState,
         },
     },
@@ -28,46 +28,41 @@ use crate::{
 /// binary decision variables in the ILP model.
 #[derive(Debug)]
 pub struct DirectDiscountPromotionVars {
+    /// Promotion key for observer/application output.
+    promotion_key: PromotionKey,
+
     /// Variables for tracking item participation
     item_participation: SmallVec<[(usize, Variable); 10]>,
+
+    /// Discounted minor unit value captured during variable creation.
+    discounted_minor_by_item: FxHashMap<usize, i64>,
+
+    /// Budget: optional max applications.
+    application_limit: Option<u32>,
+
+    /// Budget: optional max total discount value in minor units.
+    monetary_limit_minor: Option<i64>,
 }
 
 impl DirectDiscountPromotionVars {
-    pub fn add_item_participation_term(&self, expr: Expression, item_idx: usize) -> Expression {
-        let mut updated_expr = expr;
-
-        for &(idx, var) in &self.item_participation {
-            if idx == item_idx {
-                updated_expr += var;
-            }
-        }
-
-        updated_expr
+    fn discounted_minor_for_item(&self, item_idx: usize) -> Result<i64, SolverError> {
+        self.discounted_minor_by_item.get(&item_idx).copied().ok_or(
+            SolverError::InvariantViolation {
+                message: "missing discounted value for participating item",
+            },
+        )
     }
 
-    pub fn is_item_participating(&self, solution: &dyn Solution, item_idx: usize) -> bool {
-        self.item_participation
-            .iter()
-            .any(|&(idx, var)| idx == item_idx && solution.value(var) > BINARY_THRESHOLD)
-    }
-
-    /// Add budget constraints to the model
-    pub fn add_budget_constraints<S, O: ILPObserver + ?Sized>(
+    /// Add budget constraints to the ILP state.
+    pub fn add_budget_constraints(
         &self,
-        model: S,
-        promotion: &DirectDiscountPromotion<'_>,
-        item_group: &ItemGroup<'_>,
         promotion_key: PromotionKey,
-        observer: &mut O,
-    ) -> Result<S, SolverError>
-    where
-        S: good_lp::SolverModel,
-    {
-        let mut model = model;
-        let budget = promotion.budget();
-
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
         // Application count limit: sum(participation_vars) <= limit
-        if let Some(application_limit) = budget.application_limit {
+        if let Some(application_limit) = self.application_limit {
             let participation_sum: Expression =
                 self.item_participation.iter().map(|(_, var)| *var).sum();
 
@@ -83,21 +78,17 @@ impl DirectDiscountPromotionVars {
                 limit_f64,
             );
 
-            model = model.with(participation_sum.leq(limit_f64));
+            state.add_leq_constraint(participation_sum, limit_f64);
         }
 
         // Monetary limit: sum((full_price - discounted_price) * var) <= limit
-        if let Some(monetary_limit) = budget.monetary_limit {
+        if let Some(limit_minor) = self.monetary_limit_minor {
             let mut discount_expr = Expression::default();
 
             for &(item_idx, var) in &self.item_participation {
                 let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
-
                 let full_minor = item.price().to_minor_units();
-                let discounted_minor = promotion
-                    .calculate_discounted_price(item)
-                    .map_err(SolverError::from)?
-                    .to_minor_units();
+                let discounted_minor = self.discounted_minor_for_item(item_idx)?;
 
                 let discount_amount = full_minor.saturating_sub(discounted_minor);
                 let coeff = i64_to_f64_exact(discount_amount)
@@ -106,7 +97,6 @@ impl DirectDiscountPromotionVars {
                 discount_expr += var * coeff;
             }
 
-            let limit_minor = monetary_limit.to_minor_units();
             let limit_f64 = i64_to_f64_exact(limit_minor)
                 .ok_or(SolverError::MinorUnitsNotRepresentable(limit_minor))?;
 
@@ -118,14 +108,103 @@ impl DirectDiscountPromotionVars {
                 limit_f64,
             );
 
-            model = model.with(discount_expr.leq(limit_f64));
+            state.add_leq_constraint(discount_expr, limit_f64);
         }
 
-        Ok(model)
+        Ok(())
+    }
+}
+
+impl ILPPromotionVars for DirectDiscountPromotionVars {
+    fn add_item_participation_term(&self, expr: Expression, item_idx: usize) -> Expression {
+        let mut updated_expr = expr;
+
+        for &(idx, var) in &self.item_participation {
+            if idx == item_idx {
+                updated_expr += var;
+            }
+        }
+
+        updated_expr
+    }
+
+    fn is_item_participating(&self, solution: &dyn Solution, item_idx: usize) -> bool {
+        self.item_participation
+            .iter()
+            .any(|&(idx, var)| idx == item_idx && solution.value(var) > BINARY_THRESHOLD)
+    }
+
+    fn add_constraints(
+        &self,
+        _promotion_key: PromotionKey,
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        self.add_budget_constraints(self.promotion_key, item_group, state, observer)
+    }
+
+    fn calculate_item_discounts(
+        &self,
+        solution: &dyn Solution,
+        item_group: &ItemGroup<'_>,
+    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
+        let mut discounts = FxHashMap::default();
+
+        for (item_idx, item) in item_group.iter().enumerate() {
+            if !self.is_item_participating(solution, item_idx) {
+                continue;
+            }
+
+            let discounted_minor = self.discounted_minor_for_item(item_idx)?;
+
+            discounts.insert(item_idx, (item.price().to_minor_units(), discounted_minor));
+        }
+
+        Ok(discounts)
+    }
+
+    fn calculate_item_applications<'b>(
+        &self,
+        promotion_key: PromotionKey,
+        solution: &dyn Solution,
+        item_group: &ItemGroup<'b>,
+        next_bundle_id: &mut usize,
+    ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
+        let mut applications = SmallVec::new();
+        let currency = item_group.currency();
+
+        for item_idx in 0..item_group.len() {
+            let item = item_group.get_item(item_idx)?;
+
+            if !self.is_item_participating(solution, item_idx) {
+                continue;
+            }
+
+            let discounted_minor = self.discounted_minor_for_item(item_idx)?;
+
+            // For DirectDiscountPromotion, each item gets its own unique bundle_id
+            let bundle_id = *next_bundle_id;
+            *next_bundle_id += 1;
+
+            applications.push(PromotionApplication {
+                promotion_key,
+                item_idx,
+                bundle_id,
+                original_price: *item.price(),
+                final_price: Money::from_minor(discounted_minor, currency),
+            });
+        }
+
+        Ok(applications)
     }
 }
 
 impl ILPPromotion for DirectDiscountPromotion<'_> {
+    fn key(&self) -> PromotionKey {
+        DirectDiscountPromotion::key(self)
+    }
+
     fn is_applicable(&self, item_group: &ItemGroup<'_>) -> bool {
         if item_group.is_empty() {
             return false;
@@ -142,19 +221,21 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
             .any(|item| item.tags().intersects(promotion_tags))
     }
 
-    fn add_variables<O: ILPObserver + ?Sized>(
+    fn add_variables(
         &self,
-        promotion_key: PromotionKey,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
-        observer: &mut O,
+        observer: &mut dyn ILPObserver,
     ) -> Result<PromotionVars, SolverError> {
+        let promotion_key = self.key();
+
         // An empty tag set means this promotion can target any item, so we can skip tag checks
         // if that is the case.
         let match_all = self.tags().is_empty();
 
         // Keep the mapping from item group index to solver variable so we can interpret solutions later.
         let mut item_participation = SmallVec::new();
+        let mut discounted_minor_by_item = FxHashMap::default();
 
         for (item_idx, item) in item_group.iter().enumerate() {
             // Enforce the promotion's tagging rules up-front so the solver doesn't need extra constraints.
@@ -179,6 +260,7 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
 
             // Persist the variable so we can later mark items as participating from the solved model.
             item_participation.push((item_idx, participation_var));
+            discounted_minor_by_item.insert(item_idx, discounted_minor);
 
             // Tell the solver "if you set this variable to 1 (apply this promotion to this item),
             // add the discounted price to the total instead of full price". The solver will weigh
@@ -197,74 +279,13 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
             observer.on_objective_term(participation_var, coeff);
         }
 
-        Ok(PromotionVars::DirectDiscount(Box::new(
-            DirectDiscountPromotionVars { item_participation },
-        )))
-    }
-
-    fn calculate_item_discounts(
-        &self,
-        solution: &dyn Solution,
-        vars: &PromotionVars,
-        item_group: &ItemGroup<'_>,
-    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
-        let mut discounts = FxHashMap::default();
-
-        for (item_idx, item) in item_group.iter().enumerate() {
-            if !vars.is_item_participating(solution, item_idx) {
-                continue;
-            }
-
-            // This must mirror the discounted minor unit value used during variable creation.
-            // If we can't compute it here, something is inconsistent and should be surfaced.
-            let discounted_minor = self
-                .calculate_discounted_price(item)
-                .map_err(SolverError::from)?
-                .to_minor_units();
-
-            discounts.insert(item_idx, (item.price().to_minor_units(), discounted_minor));
-        }
-
-        Ok(discounts)
-    }
-
-    fn calculate_item_applications<'b>(
-        &self,
-        promotion_key: PromotionKey,
-        solution: &dyn Solution,
-        vars: &PromotionVars,
-        item_group: &ItemGroup<'b>,
-        next_bundle_id: &mut usize,
-    ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
-        let mut applications = SmallVec::new();
-        let currency = item_group.currency();
-
-        for item_idx in 0..item_group.len() {
-            let item = item_group.get_item(item_idx)?;
-
-            if !vars.is_item_participating(solution, item_idx) {
-                continue;
-            }
-
-            let discounted_minor = self
-                .calculate_discounted_price(item)
-                .map_err(SolverError::from)?
-                .to_minor_units();
-
-            // For DirectDiscountPromotion, each item gets its own unique bundle_id
-            let bundle_id = *next_bundle_id;
-            *next_bundle_id += 1;
-
-            applications.push(PromotionApplication {
-                promotion_key,
-                item_idx,
-                bundle_id,
-                original_price: *item.price(),
-                final_price: Money::from_minor(discounted_minor, currency),
-            });
-        }
-
-        Ok(applications)
+        Ok(Box::new(DirectDiscountPromotionVars {
+            promotion_key,
+            item_participation,
+            discounted_minor_by_item,
+            application_limit: self.budget().application_limit,
+            monetary_limit_minor: self.budget().monetary_limit.map(|v| v.to_minor_units()),
+        }))
     }
 }
 
@@ -346,8 +367,6 @@ mod tests {
         )];
 
         let item_group = item_group_from_items(items);
-
-        // Create a discount with currency mismatch to trigger an error
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
@@ -359,7 +378,7 @@ mod tests {
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
-        let result = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer);
+        let result = promo.add_variables(&item_group, &mut state, &mut observer);
 
         assert!(matches!(result, Err(SolverError::Discount(_))));
     }
@@ -384,7 +403,7 @@ mod tests {
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
-        let result = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer);
+        let result = promo.add_variables(&item_group, &mut state, &mut observer);
 
         assert!(matches!(
             result,
@@ -393,21 +412,13 @@ mod tests {
     }
 
     #[test]
-    fn calculate_item_discounts_skips_on_discount_error() -> TestResult {
+    fn calculate_item_discounts_uses_vars_runtime_data() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
             Money::from_minor(100, GBP),
         )];
 
         let item_group = item_group_from_items(items);
-
-        // Create a discount with currency mismatch to trigger an error
-        let promo = DirectDiscountPromotion::new(
-            PromotionKey::default(),
-            StringTagCollection::empty(),
-            SimpleDiscount::AmountOff(Money::from_minor(50, iso::USD)),
-            PromotionBudget::unlimited(),
-        );
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
@@ -422,16 +433,12 @@ mod tests {
 
         let mut observer = NoopObserver;
 
-        let vars = promo_with_vars.add_variables(
-            promo_with_vars.key(),
-            &item_group,
-            &mut state,
-            &mut observer,
-        )?;
+        let vars = promo_with_vars.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let result = promo.calculate_item_discounts(&SelectAllSolution, &vars, &item_group);
-
-        assert!(matches!(result, Err(SolverError::Discount(_))));
+        let discounts = vars
+            .as_ref()
+            .calculate_item_discounts(&SelectAllSolution, &item_group)?;
+        assert_eq!(discounts.get(&0), Some(&(100, 50)));
 
         Ok(())
     }
@@ -456,9 +463,11 @@ mod tests {
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let discounts = promo.calculate_item_discounts(&SelectNoneSolution, &vars, &item_group)?;
+        let discounts = vars
+            .as_ref()
+            .calculate_item_discounts(&SelectNoneSolution, &item_group)?;
 
         assert!(discounts.is_empty());
 
@@ -485,9 +494,11 @@ mod tests {
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let discounts = promo.calculate_item_discounts(&SelectAllSolution, &vars, &item_group)?;
+        let discounts = vars
+            .as_ref()
+            .calculate_item_discounts(&SelectAllSolution, &item_group)?;
 
         assert_eq!(discounts.get(&0), Some(&(100, 50)));
 
@@ -514,13 +525,12 @@ mod tests {
         let cost = Expression::default();
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
         let mut next_bundle_id = 0_usize;
 
-        let apps = promo.calculate_item_applications(
+        let apps = vars.as_ref().calculate_item_applications(
             PromotionKey::default(),
             &SelectAllSolution,
-            &vars,
             &item_group,
             &mut next_bundle_id,
         )?;
@@ -557,21 +567,13 @@ mod tests {
     }
 
     #[test]
-    fn calculate_item_applications_returns_error_on_discount_error() -> TestResult {
+    fn calculate_item_applications_uses_vars_runtime_data() -> TestResult {
         let items = [Item::new(
             ProductKey::default(),
             Money::from_minor(100, GBP),
         )];
 
         let item_group = item_group_from_items(items);
-
-        // Create a discount with currency mismatch to trigger an error
-        let promo = DirectDiscountPromotion::new(
-            PromotionKey::default(),
-            StringTagCollection::empty(),
-            SimpleDiscount::AmountOff(Money::from_minor(50, iso::USD)),
-            PromotionBudget::unlimited(),
-        );
 
         let mut next_bundle_id = 0_usize;
         let pb = ProblemVariables::new();
@@ -587,23 +589,20 @@ mod tests {
 
         let mut observer = NoopObserver;
 
-        let vars = promo_with_vars.add_variables(
-            promo_with_vars.key(),
-            &item_group,
-            &mut state,
-            &mut observer,
-        )?;
+        let vars = promo_with_vars.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let apps = promo.calculate_item_applications(
+        let apps = vars.as_ref().calculate_item_applications(
             PromotionKey::default(),
             &SelectAllSolution,
-            &vars,
             &item_group,
             &mut next_bundle_id,
+        )?;
+        assert_eq!(apps.len(), 1);
+        assert_eq!(
+            apps.first().map(|a| a.final_price),
+            Some(Money::from_minor(50, GBP))
         );
-
-        assert!(matches!(apps, Err(SolverError::Discount(_))));
-        assert_eq!(next_bundle_id, 0);
+        assert_eq!(next_bundle_id, 1);
 
         Ok(())
     }
@@ -631,12 +630,11 @@ mod tests {
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
 
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
-        let apps = promo.calculate_item_applications(
+        let apps = vars.as_ref().calculate_item_applications(
             PromotionKey::default(),
             &SelectAllSolution,
-            &vars,
             &item_group,
             &mut next_bundle_id,
         )?;

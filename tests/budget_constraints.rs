@@ -12,8 +12,9 @@ use dante::{
     items::{Item, groups::ItemGroup},
     products::ProductKey,
     promotions::{
-        Promotion, PromotionKey, PromotionSlotKey,
+        PromotionKey, PromotionSlotKey,
         budget::PromotionBudget,
+        promotion,
         types::{
             DirectDiscountPromotion, MixAndMatchDiscount, MixAndMatchPromotion,
             PositionalDiscountPromotion,
@@ -53,7 +54,7 @@ fn direct_discount_respects_application_limit() -> TestResult {
         monetary_limit: None,
     };
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["fruit"]),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
@@ -98,7 +99,7 @@ fn direct_discount_respects_monetary_limit() -> TestResult {
         monetary_limit: Some(Money::from_minor(75, GBP)),
     };
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["sale"]),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
@@ -164,7 +165,7 @@ fn mix_and_match_respects_application_limit() -> TestResult {
         monetary_limit: None,
     };
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::FixedTotal(Money::from_minor(350, GBP)),
@@ -220,7 +221,7 @@ fn mix_and_match_respects_monetary_limit() -> TestResult {
         monetary_limit: Some(Money::from_minor(50, GBP)),
     };
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
@@ -270,7 +271,7 @@ fn positional_discount_respects_application_limit() -> TestResult {
         monetary_limit: None,
     };
 
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["snack"]),
         2,
@@ -322,7 +323,7 @@ fn positional_discount_respects_monetary_limit() -> TestResult {
         monetary_limit: Some(Money::from_minor(75, GBP)),
     };
 
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["item"]),
         2,
@@ -364,7 +365,7 @@ fn budget_zero_application_limit_prevents_all_applications() -> TestResult {
         monetary_limit: None,
     };
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["fruit"]),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
@@ -397,7 +398,7 @@ fn budget_zero_monetary_limit_prevents_all_applications() -> TestResult {
         monetary_limit: Some(Money::from_minor(0, GBP)),
     };
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["sale"]),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
@@ -442,7 +443,7 @@ fn budget_both_limits_enforced() -> TestResult {
         monetary_limit: Some(Money::from_minor(50, GBP)),
     };
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["item"]),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
