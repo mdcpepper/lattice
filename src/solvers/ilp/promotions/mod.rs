@@ -100,7 +100,11 @@ impl<'a> PromotionInstance<'a> {
         let vars = if promotion.is_applicable(item_group) {
             let vars = promotion.add_variables(item_group, state, observer)?;
 
-            promotion.add_constraints(vars.as_ref(), item_group, state, observer)?;
+            if vars.owns_runtime_behavior() {
+                vars.add_constraints(promotion.key(), item_group, state, observer)?;
+            } else {
+                promotion.add_constraints(vars.as_ref(), item_group, state, observer)?;
+            }
 
             Some(vars)
         } else {
@@ -138,8 +142,12 @@ impl<'a> PromotionInstance<'a> {
         self.vars.as_ref().map_or_else(
             || Ok(FxHashMap::default()),
             |vars| {
-                self.promotion
-                    .calculate_item_discounts(solution, vars.as_ref(), item_group)
+                if vars.owns_runtime_behavior() {
+                    vars.calculate_item_discounts(solution, item_group)
+                } else {
+                    self.promotion
+                        .calculate_item_discounts(solution, vars.as_ref(), item_group)
+                }
             },
         )
     }
@@ -162,13 +170,22 @@ impl<'a> PromotionInstance<'a> {
         self.vars.as_ref().map_or_else(
             || Ok(SmallVec::new()),
             |vars| {
-                self.promotion.calculate_item_applications(
-                    self.promotion.key(),
-                    solution,
-                    vars.as_ref(),
-                    item_group,
-                    next_bundle_id,
-                )
+                if vars.owns_runtime_behavior() {
+                    vars.calculate_item_applications(
+                        self.promotion.key(),
+                        solution,
+                        item_group,
+                        next_bundle_id,
+                    )
+                } else {
+                    self.promotion.calculate_item_applications(
+                        self.promotion.key(),
+                        solution,
+                        vars.as_ref(),
+                        item_group,
+                        next_bundle_id,
+                    )
+                }
             },
         )
     }
@@ -185,6 +202,55 @@ pub trait ILPPromotionVars: Debug + Send + Sync {
     /// Returns true if this promotion determines the final price for `item_idx`.
     fn is_item_priced_by_promotion(&self, solution: &dyn Solution, item_idx: usize) -> bool {
         self.is_item_participating(solution, item_idx)
+    }
+
+    /// Returns true when this vars implementation owns runtime behavior
+    /// (constraints + post-solve interpretation).
+    fn owns_runtime_behavior(&self) -> bool {
+        false
+    }
+
+    /// Emit vars-owned constraints into the ILP state.
+    ///
+    /// Default: no vars-owned behavior; caller should use promotion fallback.
+    fn add_constraints(
+        &self,
+        _promotion_key: PromotionKey,
+        _item_group: &ItemGroup<'_>,
+        _state: &mut ILPState,
+        _observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        Err(SolverError::InvariantViolation {
+            message: "promotion type mismatch with vars",
+        })
+    }
+
+    /// Vars-owned post-solve discount extraction.
+    ///
+    /// Default: no vars-owned behavior; caller should use promotion fallback.
+    fn calculate_item_discounts(
+        &self,
+        _solution: &dyn Solution,
+        _item_group: &ItemGroup<'_>,
+    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
+        Err(SolverError::InvariantViolation {
+            message: "promotion type mismatch with vars",
+        })
+    }
+
+    /// Vars-owned post-solve promotion application extraction.
+    ///
+    /// Default: no vars-owned behavior; caller should use promotion fallback.
+    fn calculate_item_applications<'b>(
+        &self,
+        _promotion_key: PromotionKey,
+        _solution: &dyn Solution,
+        _item_group: &ItemGroup<'b>,
+        _next_bundle_id: &mut usize,
+    ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
+        Err(SolverError::InvariantViolation {
+            message: "promotion type mismatch with vars",
+        })
     }
 
     /// Runtime downcasting support for custom promotion implementations.
