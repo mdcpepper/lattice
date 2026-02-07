@@ -12,6 +12,7 @@ use dante::{
     promotions::{
         PromotionKey, PromotionSlotKey,
         budget::PromotionBudget,
+        promotion,
         types::{MixAndMatchDiscount, MixAndMatchPromotion},
     },
     solvers::{Solver, ilp::ILPSolver},
@@ -53,7 +54,7 @@ fn solver_handles_percent_all_items() -> TestResult {
         ),
     ];
 
-    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
@@ -113,7 +114,7 @@ fn solver_handles_percent_cheapest() -> TestResult {
         ),
     ];
 
-    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::PercentCheapest(Percentage::from(0.50)),
@@ -164,7 +165,7 @@ fn solver_handles_fixed_total() -> TestResult {
         ),
     ];
 
-    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::FixedTotal(Money::from_minor(500, GBP)),
@@ -213,7 +214,7 @@ fn solver_handles_fixed_cheapest() -> TestResult {
         ),
     ];
 
-    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::FixedCheapest(Money::from_minor(50, GBP)),
@@ -254,6 +255,7 @@ fn solver_handles_variable_arity_bundles() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
     let slots = vec![slot(
         &mut slot_keys,
         StringTagCollection::from_strs(&["snack"]),
@@ -261,7 +263,7 @@ fn solver_handles_variable_arity_bundles() -> TestResult {
         None, // Variable arity
     )];
 
-    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
@@ -273,6 +275,7 @@ fn solver_handles_variable_arity_bundles() -> TestResult {
     // Variable arity bundle may form if beneficial
     // Total should not exceed full price (300)
     assert!(result.total.to_minor_units() <= 300);
+
     // If promotion is applied, verify bundle properties
     if !result.promotion_applications.is_empty() {
         assert!(result.promotion_applications.len() >= 2); // At least min bundle size
@@ -306,6 +309,7 @@ fn solver_handles_variable_arity_with_max() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
     let slots = vec![slot(
         &mut slot_keys,
         StringTagCollection::from_strs(&["snack"]),
@@ -313,7 +317,7 @@ fn solver_handles_variable_arity_with_max() -> TestResult {
         Some(2), // Variable arity with max
     )];
 
-    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::PercentCheapest(Percentage::from(0.50)),
@@ -325,6 +329,7 @@ fn solver_handles_variable_arity_with_max() -> TestResult {
     // Variable arity with max - bundle may form if beneficial
     // Total should not exceed full price (300)
     assert!(result.total.to_minor_units() <= 300);
+
     // If promotion is applied, check that discount was beneficial
     if !result.promotion_applications.is_empty() {
         assert!(result.total.to_minor_units() < 300);
@@ -362,6 +367,7 @@ fn solver_handles_multiple_bundles() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
     let slots = vec![
         slot(
             &mut slot_keys,
@@ -377,7 +383,7 @@ fn solver_handles_multiple_bundles() -> TestResult {
         ),
     ];
 
-    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::FixedTotal(Money::from_minor(350, GBP)),
@@ -396,11 +402,14 @@ fn solver_handles_multiple_bundles() -> TestResult {
         .iter()
         .map(|app| app.bundle_id)
         .collect();
+
     assert_eq!(bundle_ids.len(), 4);
+
     // Should have exactly 2 distinct bundle IDs
     let mut unique_ids = bundle_ids.clone();
     unique_ids.sort_unstable();
     unique_ids.dedup();
+
     assert_eq!(unique_ids.len(), 2);
 
     Ok(())
@@ -418,6 +427,7 @@ fn solver_skips_infeasible_mix_and_match() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
     let slots = vec![
         slot(
             &mut slot_keys,
@@ -433,7 +443,7 @@ fn solver_skips_infeasible_mix_and_match() -> TestResult {
         ),
     ];
 
-    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
+    let promotion = promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::FixedTotal(Money::from_minor(300, GBP)),

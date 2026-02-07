@@ -34,6 +34,7 @@ pub struct PromotionGraphBuilder<'a> {
 
 impl<'a> PromotionGraphBuilder<'a> {
     /// Create a new empty builder.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             graph: StableDiGraph::new(),

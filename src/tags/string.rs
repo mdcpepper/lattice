@@ -20,6 +20,7 @@ pub struct StringTagCollection {
 
 impl StringTagCollection {
     /// Create a new string tag collection from a vector of strings.
+    #[must_use]
     pub fn new(tags: SmallVec<[String; 5]>) -> Self {
         let mut collection = Self { tags };
 
@@ -39,6 +40,7 @@ impl StringTagCollection {
     }
 
     /// Convert the tag collection to a vector of strings.
+    #[must_use]
     pub fn to_strs(&self) -> SmallVec<[String; 5]> {
         self.tags.clone()
     }

@@ -19,6 +19,7 @@ pub struct Item<'a, T: TagCollection = StringTagCollection> {
 
 impl<'a, T: TagCollection> Item<'a, T> {
     /// Creates a new item with the given price and empty tags.
+    #[must_use]
     pub fn new(product: ProductKey, price: Money<'a, Currency>) -> Self {
         Self::with_tags(product, price, T::empty())
     }

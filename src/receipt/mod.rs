@@ -71,6 +71,7 @@ pub struct Receipt<'a> {
 
 impl<'a> Receipt<'a> {
     /// Create a new receipt with the given details.
+    #[must_use]
     pub fn new(
         full_price_items: SmallVec<[usize; 10]>,
         promotion_applications: FxHashMap<usize, SmallVec<[PromotionApplication<'a>; 3]>>,
@@ -88,11 +89,13 @@ impl<'a> Receipt<'a> {
     }
 
     /// Total cost before any promotion applications
+    #[must_use]
     pub fn subtotal(&self) -> Money<'a, Currency> {
         self.subtotal
     }
 
     /// Total amount paid for all items
+    #[must_use]
     pub fn total(&self) -> Money<'a, Currency> {
         self.total
     }
@@ -183,11 +186,13 @@ impl<'a> Receipt<'a> {
     }
 
     /// Indexes of items purchased at full price (not in any promotion).
+    #[must_use]
     pub fn full_price_items(&self) -> &[usize] {
         &self.full_price_items
     }
 
     /// Promotion application details keyed by basket item index.
+    #[must_use]
     pub fn promotion_applications(
         &self,
     ) -> &FxHashMap<usize, SmallVec<[PromotionApplication<'a>; 3]>> {
@@ -207,6 +212,7 @@ impl<'a> Receipt<'a> {
     }
 
     /// Currency used for all monetary values.
+    #[must_use]
     pub fn currency(&self) -> &'static Currency {
         self.currency
     }

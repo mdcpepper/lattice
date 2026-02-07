@@ -20,6 +20,9 @@ mod direct_discount;
 mod mix_and_match;
 mod positional_discount;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 /// Collection of promotion instances for a solve operation
 #[derive(Debug)]
 pub(crate) struct PromotionInstances<'a> {
@@ -318,16 +321,14 @@ pub fn i64_to_f64_exact(v: i64) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use good_lp::{
-        Expression, IntoAffineExpression, ProblemVariables, Solution, SolutionStatus, Variable,
-    };
+    use good_lp::{Expression, IntoAffineExpression, ProblemVariables};
     use rusty_money::{Money, iso::GBP};
     use smallvec::SmallVec;
     use testresult::TestResult;
 
     use crate::{
         discounts::SimpleDiscount,
-        items::{Item, groups::ItemGroup},
+        items::Item,
         products::ProductKey,
         promotions::{
             PromotionKey, PromotionSlotKey,
@@ -337,70 +338,17 @@ mod tests {
                 PositionalDiscountPromotion,
             },
         },
-        solvers::ilp::NoopObserver,
+        solvers::ilp::{
+            NoopObserver,
+            promotions::test_support::{
+                CountingObserver, SelectAllSolution, item_group_from_items,
+            },
+        },
         tags::{collection::TagCollection, string::StringTagCollection},
         utils::slot,
     };
 
     use super::*;
-
-    #[derive(Debug, Default)]
-    struct CountingObserver {
-        promotion_variables: usize,
-        objective_terms: usize,
-        promotion_constraints: usize,
-    }
-
-    impl ILPObserver for CountingObserver {
-        fn on_presence_variable(&mut self, _item_idx: usize, _var: Variable, _price_minor: i64) {}
-
-        fn on_promotion_variable(
-            &mut self,
-            _promotion_key: PromotionKey,
-            _item_idx: usize,
-            _var: Variable,
-            _discounted_price_minor: i64,
-            _metadata: Option<&str>,
-        ) {
-            self.promotion_variables += 1;
-        }
-
-        fn on_exclusivity_constraint(&mut self, _item_idx: usize, _constraint_expr: &Expression) {}
-
-        fn on_promotion_constraint(
-            &mut self,
-            _promotion_key: PromotionKey,
-            _constraint_type: &str,
-            _constraint_expr: &Expression,
-            _relation: &str,
-            _rhs: f64,
-        ) {
-            self.promotion_constraints += 1;
-        }
-
-        fn on_objective_term(&mut self, _var: Variable, _coefficient: f64) {
-            self.objective_terms += 1;
-        }
-    }
-
-    #[derive(Debug)]
-    struct SelectAllSolution;
-
-    impl Solution for SelectAllSolution {
-        fn status(&self) -> SolutionStatus {
-            SolutionStatus::Optimal
-        }
-
-        fn value(&self, _variable: Variable) -> f64 {
-            1.0
-        }
-    }
-
-    fn item_group_from_items<const N: usize>(items: [Item<'_>; N]) -> ItemGroup<'_> {
-        let currency = items.first().map_or(GBP, |item| item.price().currency());
-
-        ItemGroup::new(items.into_iter().collect(), currency)
-    }
 
     #[test]
     fn promotion_instance_calculates_item_discounts_for_direct_discount() -> TestResult {

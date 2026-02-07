@@ -9,6 +9,7 @@ use testresult::TestResult;
 use dante::{
     discounts::SimpleDiscount,
     items::{Item, groups::ItemGroup},
+    prelude::promotion,
     products::ProductKey,
     promotions::{
         PromotionKey,
@@ -151,6 +152,7 @@ impl ILPPromotion for ExternalCustomPromotion {
             state.add_to_objective(var, coeff);
             observer.on_promotion_variable(self.key, item_idx, var, self.final_minor, Some("ext"));
             observer.on_objective_term(var, coeff);
+
             item_participation.push((item_idx, var));
         }
 
@@ -171,10 +173,11 @@ fn solve_supports_external_custom_promotion_types() -> TestResult {
     ];
     let item_group = ItemGroup::new(items.into_iter().collect(), GBP);
 
-    let promotion = dante::promotions::promotion(ExternalCustomPromotion {
+    let promotion = promotion(ExternalCustomPromotion {
         key: PromotionKey::default(),
         final_minor: 1,
     });
+
     let promotions = [promotion];
 
     let result = ILPSolver::solve(&promotions, &item_group)?;
@@ -209,17 +212,18 @@ fn solve_handles_builtin_and_external_promotions() -> TestResult {
 
     let item_group = ItemGroup::new(items.into_iter().collect(), GBP);
 
-    let promotion = dante::promotions::promotion(DirectDiscountPromotion::new(
+    let external = promotion(ExternalCustomPromotion {
+        key: PromotionKey::default(),
+        final_minor: 1,
+    });
+
+    let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["fruit"]),
         SimpleDiscount::AmountOverride(Money::from_minor(10, GBP)),
         PromotionBudget::unlimited(),
     ));
 
-    let external = dante::promotions::promotion(ExternalCustomPromotion {
-        key: PromotionKey::default(),
-        final_minor: 1,
-    });
     let result = ILPSolver::solve(&[promotion, external], &item_group)?;
 
     // External promotion should win on the highest-priced item (200 -> 1),

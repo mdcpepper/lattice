@@ -30,6 +30,7 @@ pub struct Basket<'a, T: TagCollection = StringTagCollection> {
 
 impl<'a, T: TagCollection> Basket<'a, T> {
     /// Create a new basket with the given items.
+    #[must_use]
     pub fn new(currency: &'static Currency) -> Self {
         Basket {
             items: Vec::new(),
@@ -93,16 +94,19 @@ impl<'a, T: TagCollection> Basket<'a, T> {
     }
 
     /// Get the number of items in the basket.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
     /// Check if the basket is empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
     /// Get the currency of the basket.
+    #[must_use]
     pub fn currency(&self) -> &'static Currency {
         self.currency
     }

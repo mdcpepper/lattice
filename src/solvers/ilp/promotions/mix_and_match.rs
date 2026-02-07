@@ -923,64 +923,42 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
 #[cfg(test)]
 mod tests {
     use decimal_percentage::Percentage;
-    use good_lp::{Solution, SolutionStatus, Variable};
+    use good_lp::{ProblemVariables, Solution, SolverModel, Variable, variable};
     use rusty_money::{Money, iso::GBP};
     use slotmap::SlotMap;
-    use smallvec::SmallVec;
+    use smallvec::{SmallVec, smallvec};
     use testresult::TestResult;
+
+    #[cfg(feature = "solver-highs")]
+    use good_lp::solvers::highs::highs as test_solver;
+    #[cfg(all(not(feature = "solver-highs"), feature = "solver-microlp"))]
+    use good_lp::solvers::microlp::microlp as test_solver;
 
     use crate::{
         items::{Item, groups::ItemGroup},
         products::ProductKey,
         promotions::{PromotionKey, PromotionSlotKey, budget::PromotionBudget},
-        solvers::ilp::{NoopObserver, state::ILPState},
+        solvers::ilp::{
+            NoopObserver,
+            promotions::test_support::{
+                MapSolution, RecordingObserver, assert_relation_holds,
+                assert_state_constraints_hold, item_group_from_prices,
+                observed_lhs_values_for_type, state_lhs_values_for_relation,
+            },
+            state::{ConstraintRelation, ILPState},
+        },
         tags::string::StringTagCollection,
         utils::slot,
     };
 
     use super::*;
 
-    #[derive(Debug, Default)]
-    struct MapSolution {
-        values: FxHashMap<Variable, f64>,
-    }
-
-    impl MapSolution {
-        fn with(values: &[(Variable, f64)]) -> Self {
-            let mut map = FxHashMap::default();
-
-            for (var, value) in values {
-                map.insert(*var, *value);
-            }
-
-            Self { values: map }
-        }
-    }
-
-    impl Solution for MapSolution {
-        fn status(&self) -> SolutionStatus {
-            SolutionStatus::Optimal
-        }
-
-        fn value(&self, variable: Variable) -> f64 {
-            *self.values.get(&variable).unwrap_or(&0.0)
-        }
-    }
-
-    fn item_group_from_prices(prices: &[i64]) -> ItemGroup<'_> {
-        let items: SmallVec<[Item<'_>; 10]> = prices
-            .iter()
-            .map(|&price| Item::new(ProductKey::default(), Money::from_minor(price, GBP)))
-            .collect();
-
-        ItemGroup::new(items, GBP)
-    }
-
     #[test]
     fn is_applicable_checks_slots() {
         let item_group = item_group_from_prices(&[100]);
 
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![slot(
             &mut slot_keys,
             StringTagCollection::from_strs(&["main"]),
@@ -1014,7 +992,9 @@ mod tests {
         ]);
 
         let item_group = ItemGroup::new(items, GBP);
+
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![
             slot(
                 &mut slot_keys,
@@ -1065,7 +1045,9 @@ mod tests {
         ]);
 
         let item_group = ItemGroup::new(items, GBP);
+
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![
             slot(
                 &mut slot_keys,
@@ -1112,6 +1094,15 @@ mod tests {
         let discounts = vars.calculate_item_discounts(&solution, &item_group)?;
 
         assert_eq!(discounts.len(), 2);
+        assert_eq!(discounts.get(&0), Some(&(200, 100)));
+        assert_eq!(discounts.get(&1), Some(&(100, 50)));
+
+        let total_final: i64 = discounts
+            .values()
+            .map(|(_, final_minor)| *final_minor)
+            .sum();
+
+        assert_eq!(total_final, 150);
 
         Ok(())
     }
@@ -1132,7 +1123,9 @@ mod tests {
         ]);
 
         let item_group = ItemGroup::new(items, GBP);
+
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![
             slot(
                 &mut slot_keys,
@@ -1205,6 +1198,7 @@ mod tests {
 
         let item_group = ItemGroup::new(items, GBP);
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![
             slot(
                 &mut slot_keys,
@@ -1281,7 +1275,9 @@ mod tests {
         ]);
 
         let item_group = ItemGroup::new(items, GBP);
+
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![
             slot(
                 &mut slot_keys,
@@ -1306,6 +1302,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1366,6 +1363,7 @@ mod tests {
 
         // Variable arity: min=2, max=None
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![slot(
             &mut slot_keys,
             StringTagCollection::from_strs(&["main"]),
@@ -1384,6 +1382,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1412,7 +1411,9 @@ mod tests {
         ]);
 
         let item_group = ItemGroup::new(items, GBP);
+
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![
             slot(
                 &mut slot_keys,
@@ -1437,6 +1438,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1499,7 +1501,9 @@ mod tests {
         ]);
 
         let item_group = ItemGroup::new(items, GBP);
+
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![
             slot(
                 &mut slot_keys,
@@ -1524,6 +1528,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1583,6 +1588,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1605,6 +1611,7 @@ mod tests {
         let item_group = ItemGroup::new(items, GBP);
 
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![
             slot(
                 &mut slot_keys,
@@ -1631,6 +1638,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1666,6 +1674,7 @@ mod tests {
 
         // Variable arity with max: min=1, max=2
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![slot(
             &mut slot_keys,
             StringTagCollection::from_strs(&["main"]),
@@ -1682,6 +1691,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1696,30 +1706,6 @@ mod tests {
     }
 
     #[test]
-    fn proportional_alloc_distributes_correctly() {
-        // Test proportional allocation helper
-        let result = proportional_alloc(150, 200, 300);
-        assert_eq!(result, 100); // 150 * 200 / 300 = 100
-
-        // Test with rounding
-        let result = proportional_alloc(100, 1, 3);
-        assert_eq!(result, 33); // (100*1 + 3/2) / 3 = 33
-
-        // Test zero denominator
-        let result = proportional_alloc(100, 50, 0);
-        assert_eq!(result, 0);
-    }
-
-    #[test]
-    fn i32_from_usize_handles_overflow() {
-        let result = i32_from_usize(100);
-        assert_eq!(result, 100);
-
-        let result = i32_from_usize(usize::MAX);
-        assert_eq!(result, i32::MAX);
-    }
-
-    #[test]
     fn calculate_item_applications_with_no_bundles() -> TestResult {
         let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![Item::with_tags(
             ProductKey::default(),
@@ -1728,7 +1714,9 @@ mod tests {
         )]);
 
         let item_group = ItemGroup::new(items, GBP);
+
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![slot(
             &mut slot_keys,
             StringTagCollection::from_strs(&["main"]),
@@ -1745,6 +1733,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1788,6 +1777,907 @@ mod tests {
     }
 
     #[test]
+    fn add_constraints_returns_early_without_bundle_control_vars() {
+        let mut pb = ProblemVariables::new();
+        let slot_var = pb.add(variable().binary());
+        let target_var = pb.add(variable().binary());
+
+        let vars = MixAndMatchVars {
+            promotion_key: PromotionKey::default(),
+            slot_vars: vec![smallvec![(0, slot_var)]],
+            y_bundle: None,
+            bundle_formed: None,
+            target_vars: vec![Some(target_var)],
+            slot_bounds: vec![(1, Some(1))],
+            bundle_size: 1,
+            sorted_items: smallvec![(0, 100)],
+            runtime_discount: MixAndMatchRuntimeDiscount::PercentCheapest(Percentage::from(0.5)),
+            application_limit: None,
+            monetary_limit_minor: None,
+        };
+
+        let mut state = ILPState::new(pb, Expression::default());
+        let mut observer = RecordingObserver::default();
+
+        vars.add_constraints(PromotionKey::default(), &mut state, &mut observer);
+
+        let (_pb, _cost, _presence, constraints) = state.into_parts_with_constraints();
+
+        assert!(constraints.is_empty());
+        assert!(observer.promotion_constraints.is_empty());
+    }
+
+    #[test]
+    fn add_constraints_fixed_arity_has_expected_constraint_lhs_values() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(150, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(200, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["snack"]),
+            2,
+            Some(2),
+        )];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::PercentCheapest(Percentage::from(0.50)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut observer = RecordingObserver::default();
+        let mut state = ILPState::with_presence_variables_and_observer(&item_group, &mut observer)?;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        vars.add_constraints(promo.key(), &mut state, &mut observer);
+
+        let slot0_var = vars.slot_vars[0][0].1;
+        let slot1_var = vars.slot_vars[0][1].1;
+        let slot2_var = vars.slot_vars[0][2].1;
+        let y_bundle = vars.y_bundle.ok_or("Expected y_bundle")?;
+        let target0 = vars.target_vars[0].ok_or("Expected target var for item 0")?;
+        let target1 = vars.target_vars[1].ok_or("Expected target var for item 1")?;
+        let target2 = vars.target_vars[2].ok_or("Expected target var for item 2")?;
+
+        let solution = MapSolution::with(&[
+            (slot0_var, 1.0),
+            (slot1_var, 1.0),
+            (slot2_var, 0.0),
+            (y_bundle, 1.0),
+            (target0, 1.0),
+            (target1, 0.0),
+            (target2, 0.0),
+        ]);
+
+        assert_eq!(
+            observed_lhs_values_for_type(&observer, "slot min", &solution),
+            vec![0.0]
+        );
+        assert_eq!(
+            observed_lhs_values_for_type(&observer, "slot max", &solution),
+            vec![0.0]
+        );
+        assert_eq!(
+            observed_lhs_values_for_type(&observer, "cheapest prefix", &solution),
+            vec![1.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            observed_lhs_values_for_type(&observer, "target count", &solution),
+            vec![0.0]
+        );
+
+        let target_implies =
+            observed_lhs_values_for_type(&observer, "target implies selected", &solution);
+
+        assert_eq!(target_implies, vec![0.0, -1.0, 0.0]);
+
+        let (_pb, _cost, _presence, constraints) = state.into_parts_with_constraints();
+
+        assert_eq!(
+            state_lhs_values_for_relation(&constraints, ConstraintRelation::Geq, &solution),
+            vec![0.0, 0.0, 0.0, 1.0]
+        );
+        assert_eq!(
+            state_lhs_values_for_relation(&constraints, ConstraintRelation::Leq, &solution),
+            vec![-1.0, 0.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            state_lhs_values_for_relation(&constraints, ConstraintRelation::Eq, &solution),
+            vec![0.0]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn add_constraints_variable_arity_has_expected_constraint_lhs_values() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(150, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(200, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["snack"]),
+            2,
+            Some(3),
+        )];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut observer = RecordingObserver::default();
+        let mut state = ILPState::with_presence_variables_and_observer(&item_group, &mut observer)?;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        vars.add_constraints(promo.key(), &mut state, &mut observer);
+
+        let slot0_var = vars.slot_vars[0][0].1;
+        let slot1_var = vars.slot_vars[0][1].1;
+        let slot2_var = vars.slot_vars[0][2].1;
+        let bundle_formed = vars.bundle_formed.ok_or("Expected bundle_formed")?;
+
+        let solution = MapSolution::with(&[
+            (slot0_var, 1.0),
+            (slot1_var, 1.0),
+            (slot2_var, 0.0),
+            (bundle_formed, 1.0),
+        ]);
+
+        assert_eq!(
+            observed_lhs_values_for_type(&observer, "slot min (formed)", &solution),
+            vec![0.0]
+        );
+        assert_eq!(
+            observed_lhs_values_for_type(&observer, "slot max (formed)", &solution),
+            vec![-1.0]
+        );
+        assert_eq!(
+            observed_lhs_values_for_type(&observer, "bundle formed", &solution),
+            vec![0.0]
+        );
+
+        let (_pb, _cost, _presence, constraints) = state.into_parts_with_constraints();
+
+        assert_eq!(
+            state_lhs_values_for_relation(&constraints, ConstraintRelation::Geq, &solution),
+            vec![0.0]
+        );
+        assert_eq!(
+            state_lhs_values_for_relation(&constraints, ConstraintRelation::Leq, &solution),
+            vec![-1.0, 0.0]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn add_budget_constraints_variable_arity_only_blocks_when_limit_is_zero() -> TestResult {
+        let empty_group = item_group_from_prices(&[]);
+
+        let mut pb_zero = ProblemVariables::new();
+
+        let bundle_formed_zero = pb_zero.add(variable().binary());
+
+        let vars_zero = MixAndMatchVars {
+            promotion_key: PromotionKey::default(),
+            slot_vars: Vec::new(),
+            y_bundle: None,
+            bundle_formed: Some(bundle_formed_zero),
+            target_vars: Vec::new(),
+            slot_bounds: Vec::new(),
+            bundle_size: 0,
+            sorted_items: SmallVec::new(),
+            runtime_discount: MixAndMatchRuntimeDiscount::PercentAllItems(Percentage::from(0.25)),
+            application_limit: Some(0),
+            monetary_limit_minor: None,
+        };
+
+        let mut state_zero = ILPState::new(pb_zero, Expression::default());
+        let mut observer_zero = RecordingObserver::default();
+
+        vars_zero.add_budget_constraints(&empty_group, &mut state_zero, &mut observer_zero)?;
+
+        let (_pb0, _cost0, _presence0, constraints_zero) = state_zero.into_parts_with_constraints();
+
+        assert_eq!(constraints_zero.len(), 1);
+        assert_eq!(
+            observer_zero
+                .promotion_constraints
+                .iter()
+                .map(|c| c.constraint_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["application count budget (no bundles)"]
+        );
+
+        let mut pb_one = ProblemVariables::new();
+
+        let bundle_formed_one = pb_one.add(variable().binary());
+
+        let vars_one = MixAndMatchVars {
+            promotion_key: PromotionKey::default(),
+            slot_vars: Vec::new(),
+            y_bundle: None,
+            bundle_formed: Some(bundle_formed_one),
+            target_vars: Vec::new(),
+            slot_bounds: Vec::new(),
+            bundle_size: 0,
+            sorted_items: SmallVec::new(),
+            runtime_discount: MixAndMatchRuntimeDiscount::PercentAllItems(Percentage::from(0.25)),
+            application_limit: Some(1),
+            monetary_limit_minor: None,
+        };
+
+        let mut state_one = ILPState::new(pb_one, Expression::default());
+        let mut observer_one = RecordingObserver::default();
+
+        vars_one.add_budget_constraints(&empty_group, &mut state_one, &mut observer_one)?;
+
+        let (_pb1, _cost1, _presence1, constraints_one) = state_one.into_parts_with_constraints();
+
+        assert!(constraints_one.is_empty());
+        assert!(observer_one.promotion_constraints.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn add_variables_sets_bundle_counter_upper_bound_from_floor_division() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["main"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["main"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["main"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["main"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(50, GBP),
+                StringTagCollection::from_strs(&["drink"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(50, GBP),
+                StringTagCollection::from_strs(&["drink"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(50, GBP),
+                StringTagCollection::from_strs(&["drink"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![
+            slot(
+                &mut slot_keys,
+                StringTagCollection::from_strs(&["main"]),
+                2,
+                Some(2),
+            ),
+            slot(
+                &mut slot_keys,
+                StringTagCollection::from_strs(&["drink"]),
+                3,
+                Some(3),
+            ),
+        ];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::FixedTotal(Money::from_minor(0, GBP)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut state = ILPState::with_presence_variables(&item_group)?;
+        let mut observer = NoopObserver;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        let y_bundle = vars
+            .y_bundle
+            .ok_or("Expected fixed-arity bundle counter variable")?;
+
+        // Incentivize y_bundle to reach its upper bound without adding promotion constraints.
+        state.add_to_objective(y_bundle, -1.0);
+
+        let (pb, cost, _presence, constraints) = state.into_parts_with_constraints();
+
+        assert!(constraints.is_empty());
+
+        let model = pb.minimise(cost).using(test_solver);
+        let solution = model.solve()?;
+
+        // max_bundles = min(4/2, 3/3) = 1
+        assert!((solution.value(y_bundle).round() - 1.0).abs() < f64::EPSILON);
+
+        Ok(())
+    }
+
+    #[test]
+    fn add_variables_percent_all_items_adds_discounted_slot_objective_terms() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(400, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(200, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["snack"]),
+            1,
+            Some(1),
+        )];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut observer = RecordingObserver::default();
+        let mut state = ILPState::with_presence_variables_and_observer(&item_group, &mut observer)?;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        let objective_terms: FxHashMap<Variable, f64> =
+            observer.objective_terms.into_iter().collect();
+
+        for slot in &vars.slot_vars {
+            for &(item_idx, var) in slot {
+                let expected = match item_idx {
+                    0 => 300.0, // 400 with 25% off
+                    1 => 150.0, // 200 with 25% off
+                    _ => panic!("Unexpected item index"),
+                };
+
+                assert_eq!(objective_terms.get(&var), Some(&expected));
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn add_variables_fixed_cheapest_target_terms_use_discount_delta() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(400, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(200, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["snack"]),
+            1,
+            Some(1),
+        )];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::FixedCheapest(Money::from_minor(50, GBP)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut observer = RecordingObserver::default();
+        let mut state = ILPState::with_presence_variables_and_observer(&item_group, &mut observer)?;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        let objective_terms: FxHashMap<Variable, f64> =
+            observer.objective_terms.into_iter().collect();
+
+        let item_0_target = vars.target_vars[0].ok_or("Missing item 0 target")?;
+        let item_1_target = vars.target_vars[1].ok_or("Missing item 1 target")?;
+
+        assert_eq!(objective_terms.get(&item_0_target), Some(&-350.0));
+        assert_eq!(objective_terms.get(&item_1_target), Some(&-150.0));
+
+        Ok(())
+    }
+
+    #[test]
+    fn calculate_discounted_minor_for_budget_handles_all_discount_types() -> TestResult {
+        let percent = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::PercentAllItems(Percentage::from(0.25)),
+        )?;
+
+        assert_eq!(percent, 150);
+
+        let fixed_total = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::FixedTotal(120),
+        )?;
+
+        assert_eq!(fixed_total, 0);
+
+        let fixed_cheapest = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::FixedCheapest(50),
+        )?;
+
+        assert_eq!(fixed_cheapest, 50);
+
+        let fixed_cheapest_negative = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::FixedCheapest(-50),
+        )?;
+
+        assert_eq!(fixed_cheapest_negative, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn proportional_alloc_rounds_half_up_with_odd_denominator() {
+        // (1*3 + 5/2) / 5 = (3+2)/5 = 1
+        assert_eq!(proportional_alloc(1, 3, 5), 1);
+    }
+
+    #[test]
+    fn build_bundles_strides_by_slot_min_for_each_bundle() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(110, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(120, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(130, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["snack"]),
+            2,
+            Some(2),
+        )];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::FixedTotal(Money::from_minor(200, GBP)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut state = ILPState::with_presence_variables(&item_group)?;
+        let mut observer = NoopObserver;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        let mut values = Vec::new();
+
+        for &(_idx, var) in &vars.slot_vars[0] {
+            values.push((var, 1.0));
+        }
+
+        if let Some(y_bundle) = vars.y_bundle {
+            values.push((y_bundle, 2.0));
+        }
+
+        let solution = MapSolution::with(&values);
+        let bundles = build_bundles(&solution, vars);
+
+        assert_eq!(bundles, vec![vec![0, 1], vec![2, 3]]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn build_bundles_variable_arity_skips_empty_bundle() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["snack"]),
+            2,
+            None,
+        )];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut state = ILPState::with_presence_variables(&item_group)?;
+        let mut observer = NoopObserver;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        let bundle_formed = vars
+            .bundle_formed
+            .ok_or("Expected bundle_formed for variable arity")?;
+
+        let solution = MapSolution::with(&[(bundle_formed, 1.0)]);
+
+        let bundles = build_bundles(&solution, vars);
+
+        assert!(bundles.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn bundle_count_uses_binary_threshold_for_bundle_formed() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["snack"]),
+            2,
+            None,
+        )];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut state = ILPState::with_presence_variables(&item_group)?;
+        let mut observer = NoopObserver;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        let bundle_formed = vars
+            .bundle_formed
+            .ok_or("Expected bundle_formed for variable arity")?;
+
+        let true_solution = MapSolution::with(&[(bundle_formed, 1.0)]);
+        let false_solution = MapSolution::with(&[(bundle_formed, 0.0)]);
+
+        assert_eq!(vars.bundle_count(&true_solution), 1);
+        assert_eq!(vars.bundle_count(&false_solution), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn is_item_participating_requires_matching_index_and_active_var() {
+        let mut pb = ProblemVariables::new();
+        let v0 = pb.add(variable().binary());
+        let v1 = pb.add(variable().binary());
+
+        let vars = MixAndMatchVars {
+            promotion_key: PromotionKey::default(),
+            slot_vars: vec![smallvec![(0, v0), (1, v1)]],
+            y_bundle: None,
+            bundle_formed: None,
+            target_vars: vec![None, None],
+            slot_bounds: vec![(1, Some(1))],
+            bundle_size: 1,
+            sorted_items: SmallVec::new(),
+            runtime_discount: MixAndMatchRuntimeDiscount::PercentAllItems(Percentage::from(0.0)),
+            application_limit: None,
+            monetary_limit_minor: None,
+        };
+
+        let solution = MapSolution::with(&[(v0, 0.0), (v1, 1.0)]);
+
+        assert!(!vars.is_item_participating(&solution, 0));
+        assert!(vars.is_item_participating(&solution, 1));
+    }
+
+    #[test]
+    fn add_constraints_variable_arity_satisfies_recorded_constraints() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(150, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(200, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["snack"]),
+            2,
+            Some(3),
+        )];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::PercentCheapest(Percentage::from(0.50)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut observer = RecordingObserver::default();
+        let mut state = ILPState::with_presence_variables_and_observer(&item_group, &mut observer)?;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        vars.add_constraints(promo.key(), &mut state, &mut observer);
+
+        let slot0_var = vars.slot_vars[0][0].1;
+        let slot1_var = vars.slot_vars[0][1].1;
+        let slot2_var = vars.slot_vars[0][2].1;
+
+        let bundle_formed = vars.bundle_formed.ok_or("Expected bundle_formed")?;
+
+        let target0 = vars.target_vars[0].ok_or("Expected target var for item 0")?;
+        let target1 = vars.target_vars[1].ok_or("Expected target var for item 1")?;
+        let target2 = vars.target_vars[2].ok_or("Expected target var for item 2")?;
+
+        let solution = MapSolution::with(&[
+            (slot0_var, 1.0),
+            (slot1_var, 1.0),
+            (slot2_var, 0.0),
+            (bundle_formed, 1.0),
+            (target0, 1.0),
+            (target1, 0.0),
+            (target2, 0.0),
+        ]);
+
+        for record in &observer.promotion_constraints {
+            let lhs = solution.eval(&record.expr);
+            assert_relation_holds(lhs, &record.relation, record.rhs);
+        }
+
+        let (_pb, _cost, _presence, constraints) = state.into_parts_with_constraints();
+
+        assert_state_constraints_hold(&constraints, &solution);
+
+        Ok(())
+    }
+
+    #[test]
+    fn add_constraints_fixed_arity_emits_and_satisfies_cheapest_prefix_constraints() -> TestResult {
+        let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(150, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(200, GBP),
+                StringTagCollection::from_strs(&["snack"]),
+            ),
+        ]);
+
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
+        let slots = vec![slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["snack"]),
+            2,
+            Some(2),
+        )];
+
+        let promo = MixAndMatchPromotion::new(
+            PromotionKey::default(),
+            slots,
+            MixAndMatchDiscount::PercentCheapest(Percentage::from(0.50)),
+            PromotionBudget::unlimited(),
+        );
+
+        let mut observer = RecordingObserver::default();
+        let mut state = ILPState::with_presence_variables_and_observer(&item_group, &mut observer)?;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
+            .expect("Expected mix-and-match vars");
+
+        vars.add_constraints(promo.key(), &mut state, &mut observer);
+
+        let cheapest_prefix_count = observer
+            .promotion_constraints
+            .iter()
+            .filter(|record| record.constraint_type == "cheapest prefix")
+            .count();
+
+        assert_eq!(cheapest_prefix_count, vars.sorted_items.len());
+
+        let slot0_var = vars.slot_vars[0][0].1;
+        let slot1_var = vars.slot_vars[0][1].1;
+        let slot2_var = vars.slot_vars[0][2].1;
+
+        let y_bundle = vars.y_bundle.ok_or("Expected y_bundle")?;
+
+        let target0 = vars.target_vars[0].ok_or("Expected target var for item 0")?;
+        let target1 = vars.target_vars[1].ok_or("Expected target var for item 1")?;
+        let target2 = vars.target_vars[2].ok_or("Expected target var for item 2")?;
+
+        let solution = MapSolution::with(&[
+            (slot0_var, 1.0),
+            (slot1_var, 1.0),
+            (slot2_var, 0.0),
+            (y_bundle, 1.0),
+            (target0, 1.0),
+            (target1, 0.0),
+            (target2, 0.0),
+        ]);
+
+        for record in &observer.promotion_constraints {
+            let lhs = solution.eval(&record.expr);
+
+            assert_relation_holds(lhs, &record.relation, record.rhs);
+        }
+
+        let (_pb, _cost, _presence, constraints) = state.into_parts_with_constraints();
+
+        assert_state_constraints_hold(&constraints, &solution);
+
+        Ok(())
+    }
+
+    #[test]
     fn add_variables_works_with_percent_cheapest() -> TestResult {
         let items: SmallVec<[Item<'_>; 10]> = SmallVec::from_vec(vec![
             Item::with_tags(
@@ -1808,7 +2698,9 @@ mod tests {
         ]);
 
         let item_group = ItemGroup::new(items, GBP);
+
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![
             slot(
                 &mut slot_keys,
@@ -1839,6 +2731,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1846,8 +2739,10 @@ mod tests {
 
         // Should have slot vars for all three slots
         assert_eq!(vars.slot_vars.len(), 3);
+
         // Should have target vars for cheapest detection
         assert_eq!(vars.target_vars.len(), 3);
+
         // Should use bundle counter (fixed arity)
         assert!(vars.y_bundle.is_some());
 
@@ -1878,6 +2773,7 @@ mod tests {
 
         // Variable arity: min=2, no max
         let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+
         let slots = vec![slot(
             &mut slot_keys,
             StringTagCollection::from_strs(&["snack"]),
@@ -1894,6 +2790,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
@@ -1907,5 +2804,29 @@ mod tests {
         assert!(vars.y_bundle.is_none());
 
         Ok(())
+    }
+
+    #[test]
+    fn proportional_alloc_distributes_correctly() {
+        // Test proportional allocation helper
+        let result = proportional_alloc(150, 200, 300);
+        assert_eq!(result, 100); // 150 * 200 / 300 = 100
+
+        // Test with rounding
+        let result = proportional_alloc(100, 1, 3);
+        assert_eq!(result, 33); // (100*1 + 3/2) / 3 = 33
+
+        // Test zero denominator
+        let result = proportional_alloc(100, 50, 0);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn i32_from_usize_handles_overflow() {
+        let result = i32_from_usize(100);
+        assert_eq!(result, 100);
+
+        let result = i32_from_usize(usize::MAX);
+        assert_eq!(result, i32::MAX);
     }
 }

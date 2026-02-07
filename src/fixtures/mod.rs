@@ -126,6 +126,7 @@ pub struct Fixture<'a> {
 
 impl<'a> Fixture<'a> {
     /// Create a new empty fixture with default base path
+    #[must_use]
     pub fn new() -> Self {
         Self::with_base_path("./fixtures")
     }
@@ -323,11 +324,13 @@ impl<'a> Fixture<'a> {
     }
 
     /// Get all items
+    #[must_use]
     pub fn items(&self) -> &[Item<'a>] {
         &self.items
     }
 
     /// Get all promotions
+    #[must_use]
     pub fn promotions(&self) -> &[Promotion<'a>] {
         &self.promotions
     }
@@ -399,11 +402,13 @@ impl<'a> Fixture<'a> {
     }
 
     /// Get the product metadata `SlotMap`
+    #[must_use]
     pub fn product_meta_map(&self) -> &SlotMap<ProductKey, Product<'a>> {
         &self.product_meta
     }
 
     /// Get the promotion metadata `SlotMap`
+    #[must_use]
     pub fn promotion_meta_map(&self) -> &SlotMap<PromotionKey, PromotionMeta> {
         &self.promotion_meta
     }

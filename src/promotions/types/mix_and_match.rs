@@ -87,6 +87,7 @@ pub struct MixAndMatchPromotion<'a, T: TagCollection = StringTagCollection> {
 
 impl<'a, T: TagCollection> MixAndMatchPromotion<'a, T> {
     /// Create a new mix-and-match promotion.
+    #[must_use]
     pub fn new(
         key: PromotionKey,
         slots: Vec<MixAndMatchSlot<T>>,
@@ -102,26 +103,31 @@ impl<'a, T: TagCollection> MixAndMatchPromotion<'a, T> {
     }
 
     /// Promotion key.
+    #[must_use]
     pub fn key(&self) -> PromotionKey {
         self.key
     }
 
     /// Slots.
+    #[must_use]
     pub fn slots(&self) -> &[MixAndMatchSlot<T>] {
         &self.slots
     }
 
     /// Discount.
+    #[must_use]
     pub fn discount(&self) -> &MixAndMatchDiscount<'a> {
         &self.discount
     }
 
     /// Return the budget
+    #[must_use]
     pub const fn budget(&self) -> &PromotionBudget<'a> {
         &self.budget
     }
 
     /// True if all slots have fixed arity (min == max).
+    #[must_use]
     pub fn has_fixed_arity(&self) -> bool {
         self.slots
             .iter()
@@ -129,6 +135,7 @@ impl<'a, T: TagCollection> MixAndMatchPromotion<'a, T> {
     }
 
     /// Total bundle size when all slots have fixed arity.
+    #[must_use]
     pub fn bundle_size(&self) -> usize {
         self.slots.iter().map(|slot| slot.min).sum()
     }

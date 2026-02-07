@@ -291,7 +291,7 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
 
 #[cfg(test)]
 mod tests {
-    use good_lp::{Expression, ProblemVariables, Solution, SolutionStatus, Variable};
+    use good_lp::{Expression, ProblemVariables};
     use rusty_money::{
         Money,
         iso::{self, GBP},
@@ -306,44 +306,15 @@ mod tests {
         promotions::{PromotionKey, budget::PromotionBudget},
         solvers::{
             SolverError,
-            ilp::{NoopObserver, promotions::ILPPromotion},
+            ilp::{
+                NoopObserver,
+                promotions::{ILPPromotion, test_support},
+            },
         },
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
     use super::*;
-
-    fn item_group_from_items<const N: usize>(items: [Item<'_>; N]) -> ItemGroup<'_> {
-        let currency = items.first().map_or(GBP, |item| item.price().currency());
-
-        ItemGroup::new(items.into_iter().collect(), currency)
-    }
-
-    #[derive(Debug)]
-    struct SelectAllSolution;
-
-    impl Solution for SelectAllSolution {
-        fn status(&self) -> SolutionStatus {
-            SolutionStatus::Optimal
-        }
-
-        fn value(&self, _variable: Variable) -> f64 {
-            1.0
-        }
-    }
-
-    #[derive(Debug)]
-    struct SelectNoneSolution;
-
-    impl Solution for SelectNoneSolution {
-        fn status(&self) -> SolutionStatus {
-            SolutionStatus::Optimal
-        }
-
-        fn value(&self, _variable: Variable) -> f64 {
-            0.0
-        }
-    }
 
     #[test]
     fn is_applicable_returns_false_for_empty_items() {
@@ -366,7 +337,7 @@ mod tests {
             Money::from_minor(100, GBP),
         )];
 
-        let item_group = item_group_from_items(items);
+        let item_group = test_support::item_group_from_items(items);
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
@@ -390,7 +361,7 @@ mod tests {
             Money::from_minor(100, GBP),
         )];
 
-        let item_group = item_group_from_items(items);
+        let item_group = test_support::item_group_from_items(items);
 
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
@@ -418,7 +389,7 @@ mod tests {
             Money::from_minor(100, GBP),
         )];
 
-        let item_group = item_group_from_items(items);
+        let item_group = test_support::item_group_from_items(items);
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
@@ -437,7 +408,7 @@ mod tests {
 
         let discounts = vars
             .as_ref()
-            .calculate_item_discounts(&SelectAllSolution, &item_group)?;
+            .calculate_item_discounts(&test_support::SelectAllSolution, &item_group)?;
         assert_eq!(discounts.get(&0), Some(&(100, 50)));
 
         Ok(())
@@ -450,7 +421,7 @@ mod tests {
             Money::from_minor(100, GBP),
         )];
 
-        let item_group = item_group_from_items(items);
+        let item_group = test_support::item_group_from_items(items);
 
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
@@ -467,7 +438,7 @@ mod tests {
 
         let discounts = vars
             .as_ref()
-            .calculate_item_discounts(&SelectNoneSolution, &item_group)?;
+            .calculate_item_discounts(&test_support::SelectNoneSolution, &item_group)?;
 
         assert!(discounts.is_empty());
 
@@ -481,7 +452,7 @@ mod tests {
             Money::from_minor(100, GBP),
         )];
 
-        let item_group = item_group_from_items(items);
+        let item_group = test_support::item_group_from_items(items);
 
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
@@ -498,7 +469,7 @@ mod tests {
 
         let discounts = vars
             .as_ref()
-            .calculate_item_discounts(&SelectAllSolution, &item_group)?;
+            .calculate_item_discounts(&test_support::SelectAllSolution, &item_group)?;
 
         assert_eq!(discounts.get(&0), Some(&(100, 50)));
 
@@ -512,7 +483,7 @@ mod tests {
             Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
         ];
 
-        let item_group = item_group_from_items(items);
+        let item_group = test_support::item_group_from_items(items);
 
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
@@ -530,7 +501,7 @@ mod tests {
 
         let apps = vars.as_ref().calculate_item_applications(
             PromotionKey::default(),
-            &SelectAllSolution,
+            &test_support::SelectAllSolution,
             &item_group,
             &mut next_bundle_id,
         )?;
@@ -573,7 +544,7 @@ mod tests {
             Money::from_minor(100, GBP),
         )];
 
-        let item_group = item_group_from_items(items);
+        let item_group = test_support::item_group_from_items(items);
 
         let mut next_bundle_id = 0_usize;
         let pb = ProblemVariables::new();
@@ -593,7 +564,7 @@ mod tests {
 
         let apps = vars.as_ref().calculate_item_applications(
             PromotionKey::default(),
-            &SelectAllSolution,
+            &test_support::SelectAllSolution,
             &item_group,
             &mut next_bundle_id,
         )?;
@@ -614,7 +585,7 @@ mod tests {
             Money::from_minor(100, GBP),
         )];
 
-        let item_group = item_group_from_items(items);
+        let item_group = test_support::item_group_from_items(items);
 
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
@@ -634,7 +605,7 @@ mod tests {
 
         let apps = vars.as_ref().calculate_item_applications(
             PromotionKey::default(),
-            &SelectAllSolution,
+            &test_support::SelectAllSolution,
             &item_group,
             &mut next_bundle_id,
         )?;

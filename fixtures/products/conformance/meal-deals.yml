@@ -1,0 +1,30 @@
+products:
+  mars-duo:
+    name: Mars Duo Chocolate Bar 69g
+    tags: [snack]
+    price: 1.45 GBP
+
+  lucozade-sport:
+    name: Lucozade Sport Drink Orange 500ml
+    tags: [drink]
+    price: 1.69 GBP
+
+  hula-hoops:
+    name: Hula Hoops Big Hoops Crisps - Barbecue Beef 45g
+    tags: [snack]
+    price: 1.25 GBP
+
+  cheese-and-onion:
+    name: Tesco Cheese & Onion Sandwich
+    tags: [main]
+    price: 1.50 GBP
+
+  red-bull:
+    name: Red Bull Energy Drink 473ml
+    tags: [drink]
+    price: 2.85 GBP
+
+  chicken-triple:
+    name: Tesco Chicken Triple Sandwich
+    tags: [main]
+    price: 3.25 GBP

@@ -141,6 +141,7 @@ pub struct PromotionVariable {
 
 impl ILPFormulation {
     /// Create a new empty formulation.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             presence_vars: FxHashMap::default(),
@@ -182,6 +183,7 @@ pub struct TypstRenderer {
 
 impl TypstRenderer {
     /// Create a new Typst renderer.
+    #[must_use]
     pub fn new(output_path: PathBuf) -> Self {
         Self {
             formulation: Arc::new(Mutex::new(ILPFormulation::new())),
@@ -192,6 +194,7 @@ impl TypstRenderer {
     }
 
     /// Create a renderer and attach product/promotion metadata for naming.
+    #[must_use]
     pub fn new_with_metadata<'a>(
         output_path: PathBuf,
         item_group: &ItemGroup<'a>,
@@ -221,6 +224,7 @@ impl TypstRenderer {
     }
 
     /// Get a reference to the captured formulation.
+    #[must_use]
     pub fn formulation(&self) -> ILPFormulation {
         self.formulation.lock().map_or_else(
             |poisoned| poisoned.into_inner().clone(),
@@ -229,11 +233,13 @@ impl TypstRenderer {
     }
 
     /// Get the output path.
+    #[must_use]
     pub fn output_path(&self) -> &PathBuf {
         &self.output_path
     }
 
     /// Render the captured ILP formulation to Typst syntax.
+    #[must_use]
     pub fn render(&self) -> String {
         let mut output = String::new();
         let mut formulation = self.formulation();
@@ -975,6 +981,7 @@ pub struct MultiLayerRenderer {
 
 impl MultiLayerRenderer {
     /// Create new multi-layer renderer
+    #[must_use]
     pub fn new(output_path: PathBuf) -> Self {
         Self {
             layers: Arc::new(Mutex::new(Vec::new())),
@@ -988,6 +995,7 @@ impl MultiLayerRenderer {
     }
 
     /// Create with product/promotion metadata for better rendering
+    #[must_use]
     pub fn new_with_metadata<'a>(
         output_path: PathBuf,
         item_group: &ItemGroup<'a>,
@@ -1029,6 +1037,7 @@ impl MultiLayerRenderer {
     }
 
     /// Get the output path
+    #[must_use]
     pub fn output_path(&self) -> &Path {
         &self.output_path
     }

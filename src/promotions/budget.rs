@@ -14,6 +14,7 @@ pub struct PromotionBudget<'a> {
 
 impl<'a> PromotionBudget<'a> {
     /// Create a budget with no constraints
+    #[must_use]
     pub const fn unlimited() -> Self {
         Self {
             application_limit: None,
@@ -22,6 +23,7 @@ impl<'a> PromotionBudget<'a> {
     }
 
     /// Create a budget with application limit only
+    #[must_use]
     pub const fn with_application_limit(limit: u32) -> Self {
         Self {
             application_limit: Some(limit),
@@ -30,6 +32,7 @@ impl<'a> PromotionBudget<'a> {
     }
 
     /// Create a budget with monetary limit only
+    #[must_use]
     pub const fn with_monetary_limit(limit: Money<'a, Currency>) -> Self {
         Self {
             application_limit: None,
@@ -38,6 +41,7 @@ impl<'a> PromotionBudget<'a> {
     }
 
     /// Create a budget with both limits
+    #[must_use]
     pub const fn with_both_limits(instance: u32, monetary: Money<'a, Currency>) -> Self {
         Self {
             application_limit: Some(instance),
@@ -46,6 +50,7 @@ impl<'a> PromotionBudget<'a> {
     }
 
     /// Check if this budget has any constraints
+    #[must_use]
     pub const fn has_constraints(&self) -> bool {
         self.application_limit.is_some() || self.monetary_limit.is_some()
     }
