@@ -5,6 +5,8 @@
 //! Items flow between layers with updated prices, allowing discounts to stack
 //! across layers.
 
+use std::sync::Arc;
+
 use petgraph::{graph::NodeIndex, stable_graph::StableDiGraph};
 use rustc_hash::FxHashMap;
 use rusty_money::Money;
@@ -12,16 +14,16 @@ use smallvec::SmallVec;
 
 use crate::{
     graph::{
-        builder::PromotionGraphBuilder,
+        builder::{DynamicPromotionGraphBuilder, PromotionGraphBuilder},
         edge::LayerEdge,
         error::GraphError,
-        evaluation::{TrackedItem, evaluate_node},
-        node::{LayerNode, OutputMode},
+        evaluation::{TrackedItem, evaluate_node, evaluate_node_dyn},
+        node::{DynamicLayerNode, LayerNode, OutputMode},
         result::LayeredSolverResult,
     },
     items::groups::ItemGroup,
     promotions::Promotion,
-    solvers::ilp::observer::ILPObserver,
+    solvers::ilp::{observer::ILPObserver, promotions::ILPPromotion},
 };
 
 pub mod builder;
@@ -159,8 +161,125 @@ impl<'a> PromotionGraph<'a> {
     }
 }
 
+/// A validated dynamic promotion graph ready for evaluation.
+///
+/// This variant stores promotions as trait objects, enabling extension from
+/// external crates.
+#[derive(Debug)]
+pub struct DynamicPromotionGraph<'a> {
+    graph: StableDiGraph<DynamicLayerNode<'a>, LayerEdge>,
+    root: NodeIndex,
+}
+
+impl<'a> DynamicPromotionGraph<'a> {
+    /// Create a dynamic promotion graph from a dynamic builder.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`GraphError`] if the graph fails validation.
+    pub fn from_builder(builder: DynamicPromotionGraphBuilder<'a>) -> Result<Self, GraphError> {
+        let (graph, root) = builder.build()?;
+
+        Ok(Self { graph, root })
+    }
+
+    /// Create a single-layer dynamic graph equivalent to the flat dynamic solver.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`GraphError`] if any promotion key is duplicated.
+    pub fn single_layer(
+        promotions: impl IntoIterator<Item = Arc<dyn ILPPromotion + 'a>>,
+    ) -> Result<Self, GraphError> {
+        let mut builder = DynamicPromotionGraphBuilder::new();
+        let root = builder.add_layer("Default", promotions, OutputMode::PassThrough)?;
+
+        builder.set_root(root);
+
+        Self::from_builder(builder)
+    }
+
+    /// Evaluate the dynamic promotion graph against an item group.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`GraphError`] if any layer's solver fails or if item group
+    /// construction fails.
+    pub fn evaluate<'b>(
+        &self,
+        item_group: &ItemGroup<'b>,
+    ) -> Result<LayeredSolverResult<'b>, GraphError> {
+        self.evaluate_with_observer(item_group, None)
+    }
+
+    /// Evaluate the dynamic promotion graph with an observer.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`GraphError`] if any layer's solver fails or if item group
+    /// construction fails.
+    pub fn evaluate_with_observer<'b>(
+        &self,
+        item_group: &ItemGroup<'b>,
+        observer: Option<&mut dyn ILPObserver>,
+    ) -> Result<LayeredSolverResult<'b>, GraphError> {
+        let currency = item_group.currency();
+
+        let mut tracked_items: SmallVec<[TrackedItem<'b>; 8]> =
+            SmallVec::with_capacity(item_group.len());
+
+        for idx in 0..item_group.len() {
+            let item = item_group.get_item(idx)?;
+
+            tracked_items.push(TrackedItem {
+                original_basket_idx: idx,
+                item: item.clone(),
+                applications: SmallVec::new(),
+            });
+        }
+
+        let mut next_bundle_id: usize = 0;
+
+        let final_items = evaluate_node_dyn(
+            &self.graph,
+            self.root,
+            tracked_items,
+            currency,
+            &mut next_bundle_id,
+            observer,
+        )?;
+
+        let mut total = Money::from_minor(0, currency);
+
+        let mut item_applications: FxHashMap<
+            usize,
+            SmallVec<[crate::promotions::applications::PromotionApplication<'b>; 3]>,
+        > = FxHashMap::default();
+
+        let mut full_price_items: SmallVec<[usize; 10]> = SmallVec::new();
+
+        for tracked in &final_items {
+            total = total.add(*tracked.item.price())?;
+
+            if tracked.applications.is_empty() {
+                full_price_items.push(tracked.original_basket_idx);
+            } else {
+                item_applications.insert(tracked.original_basket_idx, tracked.applications.clone());
+            }
+        }
+
+        Ok(LayeredSolverResult {
+            total,
+            item_applications,
+            full_price_items,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use decimal_percentage::Percentage;
     use rusty_money::iso::GBP;
     use smallvec::smallvec;
@@ -229,6 +348,34 @@ mod tests {
             flat_result.total.to_minor_units(),
             graph_result.total.to_minor_units(),
             "single layer graph should match flat solver total"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn dynamic_single_layer_matches_flat_dynamic_solver() -> TestResult {
+        let items = tagged_items();
+        let item_group = ItemGroup::new(items, GBP);
+
+        let mut keys = slotmap::SlotMap::<PromotionKey, ()>::with_key();
+        let k1 = keys.insert(());
+
+        let promo = make_promo(k1, &["food"], 0.20);
+        let dynamic_promotions: [&dyn crate::solvers::ilp::promotions::ILPPromotion; 1] = [&promo];
+
+        // Flat dynamic solver
+        let flat_result = ILPSolver::solve_dyn(&dynamic_promotions, &item_group)?;
+
+        // Dynamic graph solver (single layer)
+        let dynamic_promo: Arc<dyn crate::solvers::ilp::promotions::ILPPromotion> = Arc::new(promo);
+        let graph = DynamicPromotionGraph::single_layer([dynamic_promo])?;
+        let graph_result = graph.evaluate(&item_group)?;
+
+        assert_eq!(
+            flat_result.total.to_minor_units(),
+            graph_result.total.to_minor_units(),
+            "dynamic single layer graph should match flat dynamic solver total"
         );
 
         Ok(())
