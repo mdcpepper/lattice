@@ -1,6 +1,6 @@
 //! ILP Promotions
 
-use std::{any::Any, fmt::Debug};
+use std::{any::Any, fmt::Debug, sync::Arc};
 
 use good_lp::{Expression, Solution};
 use num_traits::ToPrimitive;
@@ -9,7 +9,7 @@ use smallvec::SmallVec;
 
 use crate::{
     items::groups::ItemGroup,
-    promotions::{Promotion, PromotionKey, applications::PromotionApplication},
+    promotions::{PromotionKey, applications::PromotionApplication},
     solvers::{
         SolverError,
         ilp::{ILPObserver, state::ILPState},
@@ -46,6 +46,7 @@ impl<'a> PromotionInstances<'a> {
 
         for &promotion in promotions {
             let instance = PromotionInstance::new(promotion, item_group, state, observer)?;
+
             instances.push(instance);
         }
 
@@ -365,13 +366,13 @@ pub trait ILPPromotion: Debug + Send + Sync {
     ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError>;
 }
 
-impl ILPPromotion for Promotion<'_> {
+impl ILPPromotion for Arc<dyn ILPPromotion + '_> {
     fn key(&self) -> PromotionKey {
-        Promotion::key(self)
+        self.as_ref().key()
     }
 
     fn is_applicable(&self, item_group: &ItemGroup<'_>) -> bool {
-        Promotion::is_applicable(self, item_group)
+        self.as_ref().is_applicable(item_group)
     }
 
     fn add_variables(
@@ -380,13 +381,7 @@ impl ILPPromotion for Promotion<'_> {
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<PromotionVars, SolverError> {
-        match self {
-            Promotion::DirectDiscount(promo) => promo.add_variables(item_group, state, observer),
-            Promotion::MixAndMatch(promo) => promo.add_variables(item_group, state, observer),
-            Promotion::PositionalDiscount(promo) => {
-                promo.add_variables(item_group, state, observer)
-            }
-        }
+        self.as_ref().add_variables(item_group, state, observer)
     }
 
     fn add_constraints(
@@ -396,17 +391,8 @@ impl ILPPromotion for Promotion<'_> {
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<(), SolverError> {
-        match self {
-            Promotion::DirectDiscount(promo) => {
-                promo.add_constraints(vars, item_group, state, observer)
-            }
-            Promotion::MixAndMatch(promo) => {
-                promo.add_constraints(vars, item_group, state, observer)
-            }
-            Promotion::PositionalDiscount(promo) => {
-                promo.add_constraints(vars, item_group, state, observer)
-            }
-        }
+        self.as_ref()
+            .add_constraints(vars, item_group, state, observer)
     }
 
     fn calculate_item_discounts(
@@ -415,17 +401,8 @@ impl ILPPromotion for Promotion<'_> {
         vars: &PromotionVars,
         item_group: &ItemGroup<'_>,
     ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
-        match self {
-            Promotion::DirectDiscount(promo) => {
-                promo.calculate_item_discounts(solution, vars, item_group)
-            }
-            Promotion::MixAndMatch(promo) => {
-                promo.calculate_item_discounts(solution, vars, item_group)
-            }
-            Promotion::PositionalDiscount(promo) => {
-                promo.calculate_item_discounts(solution, vars, item_group)
-            }
-        }
+        self.as_ref()
+            .calculate_item_discounts(solution, vars, item_group)
     }
 
     fn calculate_item_applications<'b>(
@@ -436,29 +413,13 @@ impl ILPPromotion for Promotion<'_> {
         item_group: &ItemGroup<'b>,
         next_bundle_id: &mut usize,
     ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
-        match self {
-            Promotion::DirectDiscount(promo) => promo.calculate_item_applications(
-                promotion_key,
-                solution,
-                vars,
-                item_group,
-                next_bundle_id,
-            ),
-            Promotion::MixAndMatch(promo) => promo.calculate_item_applications(
-                promotion_key,
-                solution,
-                vars,
-                item_group,
-                next_bundle_id,
-            ),
-            Promotion::PositionalDiscount(promo) => promo.calculate_item_applications(
-                promotion_key,
-                solution,
-                vars,
-                item_group,
-                next_bundle_id,
-            ),
-        }
+        self.as_ref().calculate_item_applications(
+            promotion_key,
+            solution,
+            vars,
+            item_group,
+            next_bundle_id,
+        )
     }
 }
 
@@ -483,7 +444,7 @@ mod tests {
         items::{Item, groups::ItemGroup},
         products::ProductKey,
         promotions::{
-            Promotion, PromotionKey, PromotionSlotKey,
+            PromotionKey, PromotionSlotKey,
             budget::PromotionBudget,
             types::{
                 DirectDiscountPromotion, MixAndMatchDiscount, MixAndMatchPromotion,
@@ -525,7 +486,7 @@ mod tests {
         )];
         let item_group = item_group_from_items(items);
 
-        let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotion = crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
@@ -555,7 +516,7 @@ mod tests {
         ];
         let item_group = item_group_from_items(items);
 
-        let promo = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+        let promo = crate::promotions::promotion(PositionalDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
             2,
@@ -685,7 +646,7 @@ mod tests {
             ),
         ];
 
-        let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+        let promotion = crate::promotions::promotion(MixAndMatchPromotion::new(
             PromotionKey::default(),
             slots,
             MixAndMatchDiscount::PercentAllItems(decimal_percentage::Percentage::from(0.25)),

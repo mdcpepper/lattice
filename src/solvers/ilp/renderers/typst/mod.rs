@@ -1301,8 +1301,7 @@ mod tests {
         items::{Item, groups::ItemGroup},
         products::{Product, ProductKey},
         promotions::{
-            Promotion, PromotionKey, PromotionMeta, budget::PromotionBudget,
-            types::DirectDiscountPromotion,
+            PromotionKey, PromotionMeta, budget::PromotionBudget, types::DirectDiscountPromotion,
         },
         solvers::ilp::{
             ensure_presence_vars_len,
@@ -1667,7 +1666,7 @@ mod tests {
         let item_group = ItemGroup::new(items, GBP);
 
         // Create a promotion
-        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["fruit"]),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),

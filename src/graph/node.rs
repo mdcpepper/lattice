@@ -1,12 +1,10 @@
 //! Graph node weights
 
-use std::sync::Arc;
-
 use serde::Deserialize;
 use slotmap::new_key_type;
 use smallvec::SmallVec;
 
-use crate::{promotions::Promotion, solvers::ilp::promotions::ILPPromotion};
+use crate::promotions::Promotion;
 
 /// How items are routed to successor nodes after solving a layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -37,19 +35,6 @@ pub struct LayerNode<'a> {
 
     /// Promotions that compete within this layer (solved by a single ILP call)
     pub promotions: SmallVec<[Promotion<'a>; 5]>,
-
-    /// How items are routed to successor nodes
-    pub output_mode: OutputMode,
-}
-
-/// A node in the dynamic promotion graph representing a layer of competing promotions.
-#[derive(Debug, Clone)]
-pub struct DynamicLayerNode<'a> {
-    /// Key for the human-readable name for this layer
-    pub key: PromotionLayerKey,
-
-    /// Promotions that compete within this layer (solved by a single ILP call)
-    pub promotions: SmallVec<[Arc<dyn ILPPromotion + 'a>; 5]>,
 
     /// How items are routed to successor nodes
     pub output_mode: OutputMode,

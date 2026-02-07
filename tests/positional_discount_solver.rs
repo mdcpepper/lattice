@@ -9,9 +9,7 @@ use dante::{
     discounts::SimpleDiscount,
     items::{Item, groups::ItemGroup},
     products::ProductKey,
-    promotions::{
-        Promotion, PromotionKey, budget::PromotionBudget, types::PositionalDiscountPromotion,
-    },
+    promotions::{PromotionKey, budget::PromotionBudget, types::PositionalDiscountPromotion},
     solvers::{Solver, ilp::ILPSolver},
     tags::string::StringTagCollection,
 };
@@ -35,7 +33,7 @@ fn solver_handles_buy_one_get_one_free() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // BOGOF: size=2, discount position 1 (second item) at 100% off
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["fruit"]),
         2,
@@ -77,7 +75,7 @@ fn solver_handles_three_for_two() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // 3-for-2: size=3, discount position 2 (third item) at 100% off
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["snack"]),
         3,
@@ -119,7 +117,7 @@ fn solver_handles_buy_two_get_one_half_off() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // Buy 2 get 1 half off: size=3, discount position 2 at 50% off
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["book"]),
         3,
@@ -166,7 +164,7 @@ fn solver_handles_multiple_discount_positions() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // Size=4, discount positions 1 and 3 (2nd and 4th items) at 50% off
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["item"]),
         4,
@@ -203,7 +201,7 @@ fn solver_handles_insufficient_items_for_bundle() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // Requires 3 items but only 1 matches
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["fruit"]),
         3,
@@ -250,7 +248,7 @@ fn solver_handles_multiple_bundles() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // BOGOF - can form 2 bundles
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["snack"]),
         2,
@@ -287,7 +285,7 @@ fn solver_handles_fixed_price_discount() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // BOGOF with fixed price override
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["premium"]),
         2,
@@ -330,7 +328,7 @@ fn solver_handles_mixed_prices_in_bundle() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // 3-for-2 (cheapest item free)
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["item"]),
         3,
@@ -367,7 +365,7 @@ fn solver_handles_no_matching_tags() -> TestResult {
     let basket = Basket::with_items(items, GBP)?;
     let item_group = ItemGroup::from(&basket);
 
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["snack"]),
         2,
@@ -404,7 +402,7 @@ fn solver_handles_amount_off_in_bundle() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     // BOGOF with 30 off instead of free
-    let promotion = Promotion::PositionalDiscount(PositionalDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["candy"]),
         2,

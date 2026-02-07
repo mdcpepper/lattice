@@ -11,7 +11,7 @@ use dante::{
     items::{Item, groups::ItemGroup},
     products::ProductKey,
     promotions::{
-        Promotion, PromotionKey, applications::PromotionApplication, budget::PromotionBudget,
+        PromotionKey, applications::PromotionApplication, budget::PromotionBudget,
         types::DirectDiscountPromotion,
     },
     solvers::{
@@ -174,7 +174,7 @@ impl ILPPromotion for ExternalCustomPromotion {
 }
 
 #[test]
-fn solve_dyn_supports_external_custom_promotion_types() -> TestResult {
+fn solve_supports_external_custom_promotion_types() -> TestResult {
     let items = [
         Item::new(ProductKey::default(), Money::from_minor(100, GBP)),
         Item::new(ProductKey::default(), Money::from_minor(200, GBP)),
@@ -182,14 +182,13 @@ fn solve_dyn_supports_external_custom_promotion_types() -> TestResult {
     ];
     let item_group = ItemGroup::new(items.into_iter().collect(), GBP);
 
-    let promotion = ExternalCustomPromotion {
+    let promotion = dante::promotions::promotion(ExternalCustomPromotion {
         key: PromotionKey::default(),
         final_minor: 1,
-    };
+    });
+    let promotions = [promotion];
 
-    let promotions: [&dyn ILPPromotion; 1] = [&promotion];
-
-    let result = ILPSolver::solve_dyn(&promotions, &item_group)?;
+    let result = ILPSolver::solve(&promotions, &item_group)?;
 
     assert_eq!(result.total.to_minor_units(), 301);
     assert_eq!(result.affected_items.as_slice(), &[2]);
@@ -205,7 +204,7 @@ fn solve_dyn_supports_external_custom_promotion_types() -> TestResult {
 }
 
 #[test]
-fn solve_dyn_matches_enum_solver_for_builtin_promotions() -> TestResult {
+fn solve_handles_builtin_and_external_promotions() -> TestResult {
     let items = [
         Item::with_tags(
             ProductKey::default(),
@@ -221,24 +220,25 @@ fn solve_dyn_matches_enum_solver_for_builtin_promotions() -> TestResult {
 
     let item_group = ItemGroup::new(items.into_iter().collect(), GBP);
 
-    let promotion = Promotion::DirectDiscount(DirectDiscountPromotion::new(
+    let promotion = dante::promotions::promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
         StringTagCollection::from_strs(&["fruit"]),
         SimpleDiscount::AmountOverride(Money::from_minor(10, GBP)),
         PromotionBudget::unlimited(),
     ));
 
-    let expected = ILPSolver::solve(&[promotion.clone()], &item_group)?;
-    let dyn_promotions: [&dyn ILPPromotion; 1] = [&promotion];
-    let actual = ILPSolver::solve_dyn(&dyn_promotions, &item_group)?;
+    let external = dante::promotions::promotion(ExternalCustomPromotion {
+        key: PromotionKey::default(),
+        final_minor: 1,
+    });
+    let result = ILPSolver::solve(&[promotion, external], &item_group)?;
 
-    assert_eq!(actual.total, expected.total);
-    assert_eq!(actual.affected_items, expected.affected_items);
-    assert_eq!(actual.unaffected_items, expected.unaffected_items);
-    assert_eq!(
-        actual.promotion_applications.len(),
-        expected.promotion_applications.len()
-    );
+    // External promotion should win on the highest-priced item (200 -> 1),
+    // while the built-in direct discount should still apply to "fruit" (100 -> 10).
+    assert_eq!(result.total.to_minor_units(), 11);
+    assert_eq!(result.affected_items.len(), 2);
+    assert!(result.unaffected_items.is_empty());
+    assert_eq!(result.promotion_applications.len(), 2);
 
     Ok(())
 }

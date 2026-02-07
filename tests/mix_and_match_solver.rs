@@ -10,7 +10,7 @@ use dante::{
     items::{Item, groups::ItemGroup},
     products::ProductKey,
     promotions::{
-        Promotion, PromotionKey, PromotionSlotKey,
+        PromotionKey, PromotionSlotKey,
         budget::PromotionBudget,
         types::{MixAndMatchDiscount, MixAndMatchPromotion},
     },
@@ -53,7 +53,7 @@ fn solver_handles_percent_all_items() -> TestResult {
         ),
     ];
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
@@ -113,7 +113,7 @@ fn solver_handles_percent_cheapest() -> TestResult {
         ),
     ];
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::PercentCheapest(Percentage::from(0.50)),
@@ -164,7 +164,7 @@ fn solver_handles_fixed_total() -> TestResult {
         ),
     ];
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::FixedTotal(Money::from_minor(500, GBP)),
@@ -213,7 +213,7 @@ fn solver_handles_fixed_cheapest() -> TestResult {
         ),
     ];
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::FixedCheapest(Money::from_minor(50, GBP)),
@@ -261,7 +261,7 @@ fn solver_handles_variable_arity_bundles() -> TestResult {
         None, // Variable arity
     )];
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
@@ -313,7 +313,7 @@ fn solver_handles_variable_arity_with_max() -> TestResult {
         Some(2), // Variable arity with max
     )];
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::PercentCheapest(Percentage::from(0.50)),
@@ -377,7 +377,7 @@ fn solver_handles_multiple_bundles() -> TestResult {
         ),
     ];
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::FixedTotal(Money::from_minor(350, GBP)),
@@ -433,7 +433,7 @@ fn solver_skips_infeasible_mix_and_match() -> TestResult {
         ),
     ];
 
-    let promotion = Promotion::MixAndMatch(MixAndMatchPromotion::new(
+    let promotion = dante::promotions::promotion(MixAndMatchPromotion::new(
         PromotionKey::default(),
         slots,
         MixAndMatchDiscount::FixedTotal(Money::from_minor(300, GBP)),

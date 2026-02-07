@@ -79,34 +79,10 @@ impl ILPSolver {
         item_group: &ItemGroup<'b>,
         observer: &mut dyn ILPObserver,
     ) -> Result<SolverResult<'b>, SolverError> {
-        let promotion_refs: SmallVec<[&dyn ILPPromotion; 5]> = promotions
-            .iter()
-            .map(|promotion| promotion as &dyn ILPPromotion)
-            .collect();
+        let promotion_refs: SmallVec<[&dyn ILPPromotion; 5]> =
+            promotions.iter().map(AsRef::as_ref).collect();
 
         Self::solve_internal(&promotion_refs, item_group, observer)
-    }
-
-    /// Solve with an observer using dynamic promotion trait objects.
-    ///
-    /// This is the extensible API for integrating promotion implementations
-    /// defined outside this crate.
-    pub fn solve_with_observer_dyn<'b>(
-        promotions: &[&dyn ILPPromotion],
-        item_group: &ItemGroup<'b>,
-        observer: &mut dyn ILPObserver,
-    ) -> Result<SolverResult<'b>, SolverError> {
-        Self::solve_internal(promotions, item_group, observer)
-    }
-
-    /// Solve using dynamic promotion trait objects.
-    pub fn solve_dyn<'b>(
-        promotions: &[&dyn ILPPromotion],
-        item_group: &ItemGroup<'b>,
-    ) -> Result<SolverResult<'b>, SolverError> {
-        let mut observer = NoopObserver;
-
-        Self::solve_internal(promotions, item_group, &mut observer)
     }
 
     /// Internal solve implementation that supports an observer.
@@ -215,10 +191,9 @@ impl Solver for ILPSolver {
         item_group: &ItemGroup<'b>,
     ) -> Result<SolverResult<'b>, SolverError> {
         let mut observer = NoopObserver;
-        let promotion_refs: SmallVec<[&dyn ILPPromotion; 5]> = promotions
-            .iter()
-            .map(|promotion| promotion as &dyn ILPPromotion)
-            .collect();
+
+        let promotion_refs: SmallVec<[&dyn ILPPromotion; 5]> =
+            promotions.iter().map(AsRef::as_ref).collect();
 
         Self::solve_internal(&promotion_refs, item_group, &mut observer)
     }
@@ -405,7 +380,7 @@ mod tests {
         items::{Item, groups::ItemGroup},
         products::ProductKey,
         promotions::{
-            Promotion, PromotionKey, applications::PromotionApplication, budget::PromotionBudget,
+            PromotionKey, applications::PromotionApplication, budget::PromotionBudget,
             types::DirectDiscountPromotion,
         },
         solvers::ilp::promotions::{ILPPromotion, ILPPromotionVars, PromotionVars},
@@ -677,7 +652,7 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["a"]),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
@@ -704,7 +679,7 @@ mod tests {
         let items = test_items();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
@@ -729,7 +704,7 @@ mod tests {
         let items = test_items();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["missing"]),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
@@ -753,7 +728,7 @@ mod tests {
         let items = test_items();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::empty(),
             SimpleDiscount::AmountOverride(Money::from_minor(400, GBP)),
@@ -777,7 +752,7 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["a"]),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
@@ -940,7 +915,7 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["a"]),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
@@ -967,16 +942,16 @@ mod tests {
     }
 
     #[test]
-    fn solve_dyn_accepts_custom_promotion_trait_objects() -> TestResult {
+    fn solve_accepts_custom_promotion_trait_objects() -> TestResult {
         let items = test_items();
         let item_group = item_group_from_items(items);
-        let promotion = TestCustomPromotion {
+        let promotion = crate::promotions::promotion(TestCustomPromotion {
             key: PromotionKey::default(),
             final_minor: 1,
-        };
-        let promotions: [&dyn ILPPromotion; 1] = [&promotion];
+        });
+        let promotions = [promotion];
 
-        let result = ILPSolver::solve_dyn(&promotions, &item_group)?;
+        let result = ILPSolver::solve(&promotions, &item_group)?;
 
         assert_eq!(result.total.to_minor_units(), 301);
         assert_eq!(result.affected_items.as_slice(), &[2]);
@@ -1052,7 +1027,7 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["a"]),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
@@ -1132,7 +1107,7 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["a"]),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),

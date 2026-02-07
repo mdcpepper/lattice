@@ -10,13 +10,13 @@ use crate::{
     graph::{
         edge::LayerEdge,
         error::GraphError,
-        node::{DynamicLayerNode, LayerNode, OutputMode},
+        node::{LayerNode, OutputMode},
     },
     items::{Item, groups::ItemGroup},
     promotions::applications::PromotionApplication,
     solvers::{
         Solver,
-        ilp::{ILPSolver, observer::ILPObserver, promotions::ILPPromotion},
+        ilp::{ILPSolver, observer::ILPObserver},
     },
 };
 
@@ -142,102 +142,6 @@ pub fn evaluate_node<'b>(
     )
 }
 
-/// Evaluate a single node in the dynamic promotion graph.
-///
-/// Solves the ILP for the node's promotions, then routes items to successors
-/// based on the node's output mode.
-///
-/// # Errors
-///
-/// Returns a [`GraphError`] if the solver fails or if item group construction fails.
-pub fn evaluate_node_dyn<'b>(
-    graph: &StableDiGraph<DynamicLayerNode<'_>, LayerEdge>,
-    node_idx: NodeIndex,
-    tracked_items: TrackedItems<'b>,
-    currency: &'b Currency,
-    next_bundle_id: &mut usize,
-    mut observer: Option<&mut dyn ILPObserver>,
-) -> Result<TrackedItems<'b>, GraphError> {
-    if tracked_items.is_empty() {
-        return Ok(TrackedItems::new());
-    }
-
-    let Some(node) = graph.node_weight(node_idx) else {
-        return Ok(tracked_items);
-    };
-
-    if node.promotions.is_empty() {
-        return route_to_successors_dyn(
-            graph,
-            node_idx,
-            node.output_mode,
-            tracked_items,
-            currency,
-            next_bundle_id,
-            observer,
-        );
-    }
-
-    let temp_items: SmallVec<[Item<'b, _>; 10]> =
-        tracked_items.iter().map(|ti| ti.item.clone()).collect();
-
-    let temp_group = ItemGroup::new(temp_items, currency);
-
-    if let Some(obs) = observer.as_deref_mut() {
-        obs.on_layer_begin(node.key, node_idx);
-    }
-
-    let applications = solve_layer_dyn(node, &temp_group, observer.as_deref_mut())?;
-
-    if let Some(obs) = observer.as_deref_mut() {
-        obs.on_layer_end();
-    }
-
-    let mut updated_items = tracked_items;
-
-    let bundle_id_offset = *next_bundle_id;
-
-    let mut max_bundle: Option<usize> = None;
-
-    for app in applications {
-        max_bundle = Some(max_bundle.map_or(app.bundle_id, |max| max.max(app.bundle_id)));
-        let local_idx = app.item_idx;
-        let final_price_minor = app.final_price.to_minor_units();
-
-        let Some(tracked) = updated_items.get_mut(local_idx) else {
-            continue;
-        };
-
-        tracked.item = Item::with_tags(
-            tracked.item.product(),
-            Money::from_minor(final_price_minor, currency),
-            tracked.item.tags().clone(),
-        );
-
-        tracked.applications.push(PromotionApplication {
-            promotion_key: app.promotion_key,
-            item_idx: tracked.original_basket_idx,
-            bundle_id: app.bundle_id.saturating_add(bundle_id_offset),
-            original_price: app.original_price,
-            final_price: app.final_price,
-        });
-    }
-
-    if let Some(max) = max_bundle {
-        *next_bundle_id = bundle_id_offset.saturating_add(max).saturating_add(1);
-    }
-
-    route_to_successors_dyn(
-        graph,
-        node_idx,
-        node.output_mode,
-        updated_items,
-        currency,
-        next_bundle_id,
-        observer,
-    )
-}
-
 /// Solve the ILP for a layer.
 fn solve_layer<'b>(
     node: &LayerNode<'_>,
@@ -247,30 +151,6 @@ fn solve_layer<'b>(
     let result = match observer {
         Some(obs) => ILPSolver::solve_with_observer(&node.promotions, temp_group, obs),
         None => ILPSolver::solve(&node.promotions, temp_group),
-    }
-    .map_err(|source| GraphError::Solver {
-        layer_key: node.key,
-        source,
-    })?;
-
-    Ok(result.promotion_applications)
-}
-
-/// Solve the ILP for a dynamic layer.
-fn solve_layer_dyn<'b>(
-    node: &DynamicLayerNode<'_>,
-    temp_group: &ItemGroup<'b>,
-    observer: Option<&mut dyn ILPObserver>,
-) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, GraphError> {
-    let promotion_refs: SmallVec<[&dyn ILPPromotion; 5]> = node
-        .promotions
-        .iter()
-        .map(|promotion| promotion.as_ref())
-        .collect();
-
-    let result = match observer {
-        Some(obs) => ILPSolver::solve_with_observer_dyn(&promotion_refs, temp_group, obs),
-        None => ILPSolver::solve_dyn(&promotion_refs, temp_group),
     }
     .map_err(|source| GraphError::Solver {
         layer_key: node.key,
@@ -374,100 +254,6 @@ fn route_to_successors<'b>(
     }
 }
 
-/// Route items to successor nodes based on output mode for a dynamic graph.
-fn route_to_successors_dyn<'b>(
-    graph: &StableDiGraph<DynamicLayerNode<'_>, LayerEdge>,
-    node_idx: NodeIndex,
-    output_mode: OutputMode,
-    updated_items: TrackedItems<'b>,
-    currency: &'b Currency,
-    next_bundle_id: &mut usize,
-    mut observer: Option<&mut dyn ILPObserver>,
-) -> Result<TrackedItems<'b>, GraphError> {
-    let edges: SmallVec<[(NodeIndex, LayerEdge); 2]> = graph
-        .edges(node_idx)
-        .map(|e| (e.target(), *e.weight()))
-        .collect();
-
-    match output_mode {
-        OutputMode::PassThrough => {
-            let successor = edges.iter().find(|(_, w)| *w == LayerEdge::All);
-
-            match successor {
-                Some((target, _)) => evaluate_node_dyn(
-                    graph,
-                    *target,
-                    updated_items,
-                    currency,
-                    next_bundle_id,
-                    observer.as_deref_mut(),
-                ),
-                None => Ok(updated_items),
-            }
-        }
-        OutputMode::Split => {
-            let mut promoted_items: TrackedItems<'b> = TrackedItems::new();
-            let mut unpromoted_items: TrackedItems<'b> = TrackedItems::new();
-
-            for item in updated_items {
-                let was_discounted = !item.applications.is_empty();
-
-                if was_discounted {
-                    promoted_items.push(item);
-                } else {
-                    unpromoted_items.push(item);
-                }
-            }
-
-            let promoted_target = edges
-                .iter()
-                .find(|(_, w)| *w == LayerEdge::Participating)
-                .map(|(t, _)| *t);
-
-            let unpromoted_target = edges
-                .iter()
-                .find(|(_, w)| *w == LayerEdge::NonParticipating)
-                .map(|(t, _)| *t);
-
-            let mut final_items: TrackedItems<'b> = TrackedItems::new();
-
-            if let Some(target) = promoted_target
-                && !promoted_items.is_empty()
-            {
-                let result_items = evaluate_node_dyn(
-                    graph,
-                    target,
-                    promoted_items,
-                    currency,
-                    next_bundle_id,
-                    observer.as_deref_mut(),
-                )?;
-                final_items.extend(result_items);
-            } else {
-                final_items.extend(promoted_items);
-            }
-
-            if let Some(target) = unpromoted_target
-                && !unpromoted_items.is_empty()
-            {
-                let result_items = evaluate_node_dyn(
-                    graph,
-                    target,
-                    unpromoted_items,
-                    currency,
-                    next_bundle_id,
-                    observer,
-                )?;
-                final_items.extend(result_items);
-            } else {
-                final_items.extend(unpromoted_items);
-            }
-
-            Ok(final_items)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use good_lp::{Expression, Variable};
@@ -541,7 +327,7 @@ mod tests {
     }
 
     fn direct_discount_promotion() -> Promotion<'static> {
-        Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        crate::promotions::promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&[]),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),

@@ -1,7 +1,6 @@
 //! Builder for constructing validated promotion graphs.
 
 use std::collections::hash_map::RandomState;
-use std::sync::Arc;
 
 use petgraph::{
     algo::{is_cyclic_directed, simple_paths::all_simple_paths},
@@ -17,10 +16,9 @@ use crate::{
     graph::{
         edge::LayerEdge,
         error::GraphError,
-        node::{DynamicLayerNode, LayerNode, OutputMode, PromotionLayerKey},
+        node::{LayerNode, OutputMode, PromotionLayerKey},
     },
     promotions::Promotion,
-    solvers::ilp::promotions::ILPPromotion,
 };
 
 /// Builder for constructing a validated [`super::PromotionGraph`].
@@ -272,257 +270,6 @@ impl<'a> PromotionGraphBuilder<'a> {
     }
 }
 
-/// Builder for constructing validated dynamic promotion graphs.
-///
-/// This variant accepts trait-object promotions (`Arc<dyn ILPPromotion>`),
-/// allowing external crates to provide custom promotion implementations.
-#[derive(Debug)]
-pub struct DynamicPromotionGraphBuilder<'a> {
-    graph: StableDiGraph<DynamicLayerNode<'a>, LayerEdge>,
-    root: Option<NodeIndex>,
-    layer_keys: SlotMap<PromotionLayerKey, ()>,
-}
-
-impl<'a> DynamicPromotionGraphBuilder<'a> {
-    /// Create a new empty builder.
-    pub fn new() -> Self {
-        Self {
-            graph: StableDiGraph::new(),
-            root: None,
-            layer_keys: SlotMap::with_key(),
-        }
-    }
-
-    /// Add a layer node to the graph.
-    ///
-    /// Promotion key uniqueness is validated per-path during [`Self::build`].
-    ///
-    /// # Errors
-    ///
-    /// Currently this method does not return errors, but returns `Result`
-    /// for future extensibility.
-    pub fn add_layer(
-        &mut self,
-        _label: impl Into<String>,
-        promotions: impl IntoIterator<Item = Arc<dyn ILPPromotion + 'a>>,
-        output_mode: OutputMode,
-    ) -> Result<NodeIndex, GraphError> {
-        let layer_key = self.layer_keys.insert(());
-
-        self.add_layer_with_key(layer_key, promotions, output_mode)
-    }
-
-    /// Add a layer node to the graph with an explicit layer key.
-    ///
-    /// Promotion key uniqueness is validated per-path during [`Self::build`].
-    ///
-    /// # Errors
-    ///
-    /// Currently this method does not return errors, but returns `Result`
-    /// for future extensibility.
-    pub fn add_layer_with_key(
-        &mut self,
-        key: PromotionLayerKey,
-        promotions: impl IntoIterator<Item = Arc<dyn ILPPromotion + 'a>>,
-        output_mode: OutputMode,
-    ) -> Result<NodeIndex, GraphError> {
-        let promotions: SmallVec<[Arc<dyn ILPPromotion + 'a>; 5]> =
-            promotions.into_iter().collect();
-
-        let node = DynamicLayerNode {
-            key,
-            promotions,
-            output_mode,
-        };
-
-        Ok(self.graph.add_node(node))
-    }
-
-    /// Set the root node of the graph (evaluation starts here).
-    pub fn set_root(&mut self, node: NodeIndex) {
-        self.root = Some(node);
-    }
-
-    /// Connect a `PassThrough` node to its single successor via an `All` edge.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the source node already has an outgoing edge.
-    pub fn connect_pass_through(
-        &mut self,
-        from: NodeIndex,
-        to: NodeIndex,
-    ) -> Result<(), GraphError> {
-        let existing_count = self.graph.edges(from).count();
-
-        if existing_count > 0 {
-            return Err(GraphError::PassThroughMultipleSuccessors(from.index()));
-        }
-
-        self.graph.add_edge(from, to, LayerEdge::All);
-
-        Ok(())
-    }
-
-    /// Connect a `Split` node to its two successors: participating items flow to
-    /// `participating_to`, non-participating items flow to `non_participating_to`.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the source node already has outgoing edges.
-    pub fn connect_split(
-        &mut self,
-        from: NodeIndex,
-        participating_to: NodeIndex,
-        non_participating_to: NodeIndex,
-    ) -> Result<(), GraphError> {
-        let existing_count = self.graph.edges(from).count();
-
-        if existing_count > 0 {
-            return Err(GraphError::SplitSuccessorMismatch);
-        }
-
-        self.graph
-            .add_edge(from, participating_to, LayerEdge::Participating);
-
-        self.graph
-            .add_edge(from, non_participating_to, LayerEdge::NonParticipating);
-
-        Ok(())
-    }
-
-    /// Connect a `Split` node with only a participating items target.
-    /// Non-participating items will stop at this layer.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the source node already has outgoing edges.
-    pub fn connect_split_participating_only(
-        &mut self,
-        from: NodeIndex,
-        participating_to: NodeIndex,
-    ) -> Result<(), GraphError> {
-        let existing_count = self.graph.edges(from).count();
-
-        if existing_count > 0 {
-            return Err(GraphError::SplitSuccessorMismatch);
-        }
-
-        self.graph
-            .add_edge(from, participating_to, LayerEdge::Participating);
-
-        Ok(())
-    }
-
-    /// Connect a `Split` node with only an non-participating items target.
-    /// Participating items will stop at this layer.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the source node already has outgoing edges.
-    pub fn connect_split_non_participating_only(
-        &mut self,
-        from: NodeIndex,
-        non_participating_to: NodeIndex,
-    ) -> Result<(), GraphError> {
-        let existing_count = self.graph.edges(from).count();
-
-        if existing_count > 0 {
-            return Err(GraphError::SplitSuccessorMismatch);
-        }
-
-        self.graph
-            .add_edge(from, non_participating_to, LayerEdge::NonParticipating);
-
-        Ok(())
-    }
-
-    /// Build and validate the dynamic promotion graph.
-    ///
-    /// # Validation rules
-    ///
-    /// 1. A root node must be set
-    /// 2. The graph must not contain cycles
-    /// 3. All nodes must be reachable from the root
-    /// 4. `PassThrough` nodes must have 0 or 1 outgoing `All` edges
-    /// 5. `Split` nodes must have 1 or 2 edges: at least one of `Participating` or `NonParticipating`
-    /// 6. No promotion key appears more than once in any single root-to-leaf path
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`GraphError`] if any validation rule is violated.
-    pub fn build(
-        self,
-    ) -> Result<(StableDiGraph<DynamicLayerNode<'a>, LayerEdge>, NodeIndex), GraphError> {
-        // 1. Root must be set
-        let root = self.root.ok_or(GraphError::NoRoot)?;
-
-        // 2. No cycles
-        if is_cyclic_directed(&self.graph) {
-            return Err(GraphError::CycleDetected);
-        }
-
-        // 3. All nodes reachable from root
-        let mut dfs = Dfs::new(&self.graph, root);
-        let mut reachable_count = 0_usize;
-
-        while dfs.next(&self.graph).is_some() {
-            reachable_count = reachable_count.saturating_add(1);
-        }
-
-        if reachable_count != self.graph.node_count() {
-            return Err(GraphError::UnreachableNode);
-        }
-
-        // 4 & 5. Validate output mode vs edges for each node
-        for node_idx in self.graph.node_indices() {
-            let Some(node) = self.graph.node_weight(node_idx) else {
-                continue;
-            };
-
-            let edges: SmallVec<[&LayerEdge; 3]> =
-                self.graph.edges(node_idx).map(|e| e.weight()).collect();
-
-            match node.output_mode {
-                OutputMode::PassThrough => {
-                    if edges.len() > 1 {
-                        return Err(GraphError::PassThroughMultipleSuccessors(node_idx.index()));
-                    }
-
-                    if edges.len() == 1 && edges.first() != Some(&&LayerEdge::All) {
-                        return Err(GraphError::PassThroughMultipleSuccessors(node_idx.index()));
-                    }
-                }
-                OutputMode::Split => {
-                    let has_participating = edges.iter().any(|e| **e == LayerEdge::Participating);
-                    let has_non_participating =
-                        edges.iter().any(|e| **e == LayerEdge::NonParticipating);
-
-                    if edges.is_empty()
-                        || edges.len() > 2
-                        || (!has_participating && !has_non_participating)
-                    {
-                        return Err(GraphError::SplitSuccessorMismatch);
-                    }
-
-                    for edge in &edges {
-                        if **edge != LayerEdge::Participating
-                            && **edge != LayerEdge::NonParticipating
-                        {
-                            return Err(GraphError::SplitSuccessorMismatch);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 6. Per-path promotion uniqueness
-        validate_dynamic_path_promotion_uniqueness(&self.graph, root)?;
-
-        Ok((self.graph, root))
-    }
-}
-
 /// Validate that no promotion key appears more than once in any single path.
 fn validate_path_promotion_uniqueness(
     graph: &StableDiGraph<LayerNode<'_>, LayerEdge>,
@@ -607,94 +354,7 @@ fn validate_single_node(
     Ok(())
 }
 
-/// Validate that no promotion key appears more than once in any single path.
-fn validate_dynamic_path_promotion_uniqueness(
-    graph: &StableDiGraph<DynamicLayerNode<'_>, LayerEdge>,
-    root: NodeIndex,
-) -> Result<(), GraphError> {
-    let leaf_nodes: SmallVec<[NodeIndex; 10]> = graph
-        .node_indices()
-        .filter(|&node_idx| graph.edges(node_idx).count() == 0)
-        .collect();
-
-    if leaf_nodes.is_empty() || (leaf_nodes.len() == 1 && leaf_nodes.first().copied() == Some(root))
-    {
-        return validate_dynamic_single_node(graph, root);
-    }
-
-    for leaf in &leaf_nodes {
-        let paths = all_simple_paths::<Vec<NodeIndex>, _, RandomState>(graph, root, *leaf, 0, None);
-
-        for path in paths {
-            validate_dynamic_path(&path, graph)?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Validate promotion uniqueness for a single path in the dynamic graph.
-fn validate_dynamic_path(
-    path: &[NodeIndex],
-    graph: &StableDiGraph<DynamicLayerNode<'_>, LayerEdge>,
-) -> Result<(), GraphError> {
-    let mut seen_in_path = FxHashSet::default();
-    let mut path_keys: SmallVec<[PromotionLayerKey; 5]> = SmallVec::new();
-
-    for &node_idx in path {
-        let Some(node) = graph.node_weight(node_idx) else {
-            continue;
-        };
-
-        path_keys.push(node.key);
-
-        for promo in &node.promotions {
-            let key = promo.key();
-
-            if !seen_in_path.insert(key) {
-                return Err(GraphError::DuplicatePromotionInPath {
-                    key,
-                    path: path_keys.into_vec(),
-                });
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Validate a single-node dynamic graph (root is leaf).
-fn validate_dynamic_single_node(
-    graph: &StableDiGraph<DynamicLayerNode<'_>, LayerEdge>,
-    root: NodeIndex,
-) -> Result<(), GraphError> {
-    let Some(node) = graph.node_weight(root) else {
-        return Ok(());
-    };
-
-    let mut seen = FxHashSet::default();
-
-    for promo in &node.promotions {
-        let key = promo.key();
-
-        if !seen.insert(key) {
-            return Err(GraphError::DuplicatePromotionInPath {
-                key,
-                path: vec![node.key],
-            });
-        }
-    }
-
-    Ok(())
-}
-
 impl Default for PromotionGraphBuilder<'_> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Default for DynamicPromotionGraphBuilder<'_> {
     fn default() -> Self {
         Self::new()
     }
@@ -715,7 +375,7 @@ mod tests {
     use super::*;
 
     fn test_promotion(key: PromotionKey) -> Promotion<'static> {
-        Promotion::DirectDiscount(DirectDiscountPromotion::new(
+        crate::promotions::promotion(DirectDiscountPromotion::new(
             key,
             StringTagCollection::from_strs(&["a"]),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
