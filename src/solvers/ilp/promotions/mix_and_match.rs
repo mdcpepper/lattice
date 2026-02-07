@@ -12,7 +12,7 @@ use rusty_money::Money;
 
 use crate::{
     discounts::percent_of_minor,
-    items::{Item, groups::ItemGroup},
+    items::groups::ItemGroup,
     promotions::{
         PromotionKey,
         applications::PromotionApplication,
@@ -29,9 +29,20 @@ use crate::{
     tags::collection::TagCollection,
 };
 
+#[derive(Debug, Clone, Copy)]
+enum MixAndMatchRuntimeDiscount {
+    PercentAllItems(Percentage),
+    PercentCheapest(Percentage),
+    FixedCheapest(i64),
+    FixedTotal(i64),
+}
+
 /// Solver variables for a mix-and-match promotion.
 #[derive(Debug)]
 pub struct MixAndMatchVars {
+    /// Promotion key for observer metadata.
+    promotion_key: PromotionKey,
+
     /// Per-slot item selection variables.
     slot_vars: Vec<SmallVec<[(usize, Variable); 10]>>,
 
@@ -52,6 +63,15 @@ pub struct MixAndMatchVars {
 
     /// Eligible items sorted by price asc, then index asc (for cheapest targeting).
     sorted_items: SmallVec<[(usize, i64); 10]>,
+
+    /// Runtime discount mode captured during variable creation.
+    runtime_discount: MixAndMatchRuntimeDiscount,
+
+    /// Budget: optional max applications.
+    application_limit: Option<u32>,
+
+    /// Budget: optional max total discount value in minor units.
+    monetary_limit_minor: Option<i64>,
 }
 
 impl MixAndMatchVars {
@@ -259,16 +279,12 @@ impl MixAndMatchVars {
     /// Add budget constraints for mix-and-match promotions
     pub fn add_budget_constraints(
         &self,
-        promotion: &MixAndMatchPromotion<'_>,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<(), SolverError> {
-        let promotion_key = promotion.key();
-        let budget = promotion.budget();
-
         // Application limit: For mix-and-match, this limits bundles
-        if let Some(application_limit) = budget.application_limit {
+        if let Some(application_limit) = self.application_limit {
             // Use bundle counter variable if available
             if let Some(y_bundle) = self.y_bundle {
                 let limit_f64 = i64_to_f64_exact(i64::from(application_limit)).ok_or(
@@ -278,7 +294,7 @@ impl MixAndMatchVars {
                 let expr = Expression::from(y_bundle);
 
                 observer.on_promotion_constraint(
-                    promotion_key,
+                    self.promotion_key,
                     "application count budget (bundle limit)",
                     &expr,
                     "<=",
@@ -293,7 +309,7 @@ impl MixAndMatchVars {
                     let expr = Expression::from(bundle_formed);
 
                     observer.on_promotion_constraint(
-                        promotion_key,
+                        self.promotion_key,
                         "application count budget (no bundles)",
                         &expr,
                         "=",
@@ -307,24 +323,16 @@ impl MixAndMatchVars {
         }
 
         // Monetary limit: sum(discount_amount * participation_var) <= limit
-        if let Some(monetary_limit) = budget.monetary_limit {
+        if let Some(limit_minor) = self.monetary_limit_minor {
             let mut discount_expr = Expression::default();
 
             // Iterate over all slot variables to compute total discount
             for slot in &self.slot_vars {
                 for &(item_idx, var) in slot {
                     let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
-
                     let full_minor = item.price().to_minor_units();
-
-                    // Calculate discounted price based on discount type
-                    let discounted_minor = calculate_discounted_price_for_item(
-                        item,
-                        promotion.discount(),
-                        item_group,
-                        &self.sorted_items,
-                    )?
-                    .to_minor_units();
+                    let discounted_minor =
+                        calculate_discounted_minor_for_budget(full_minor, self.runtime_discount)?;
 
                     let discount_amount = full_minor.saturating_sub(discounted_minor);
                     let coeff = i64_to_f64_exact(discount_amount)
@@ -334,12 +342,11 @@ impl MixAndMatchVars {
                 }
             }
 
-            let limit_minor = monetary_limit.to_minor_units();
             let limit_f64 = i64_to_f64_exact(limit_minor)
                 .ok_or(SolverError::MinorUnitsNotRepresentable(limit_minor))?;
 
             observer.on_promotion_constraint(
-                promotion_key,
+                self.promotion_key,
                 "monetary value budget",
                 &discount_expr,
                 "<=",
@@ -378,6 +385,75 @@ impl ILPPromotionVars for MixAndMatchVars {
         MixAndMatchVars::is_item_priced_by_promotion(self, solution, item_idx)
     }
 
+    fn owns_runtime_behavior(&self) -> bool {
+        true
+    }
+
+    fn runtime_kind(&self) -> &'static str {
+        "mix_and_match"
+    }
+
+    fn add_constraints(
+        &self,
+        promotion_key: PromotionKey,
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        MixAndMatchVars::add_constraints(self, promotion_key, state, observer);
+        self.add_budget_constraints(item_group, state, observer)
+    }
+
+    fn calculate_item_discounts(
+        &self,
+        solution: &dyn Solution,
+        item_group: &ItemGroup<'_>,
+    ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
+        calculate_discounts_for_vars(solution, self, item_group)
+    }
+
+    fn calculate_item_applications<'b>(
+        &self,
+        promotion_key: PromotionKey,
+        solution: &dyn Solution,
+        item_group: &ItemGroup<'b>,
+        next_bundle_id: &mut usize,
+    ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
+        let bundles = build_bundles(solution, self);
+
+        if bundles.is_empty() {
+            return Ok(SmallVec::new());
+        }
+
+        let discounts = calculate_discounts_for_vars(solution, self, item_group)?;
+        let currency = item_group.currency();
+        let mut applications = SmallVec::new();
+
+        for bundle in bundles {
+            let bundle_id = *next_bundle_id;
+            *next_bundle_id += 1;
+
+            for item_idx in bundle {
+                let item = item_group.get_item(item_idx)?;
+                let original_minor = item.price().to_minor_units();
+
+                let final_minor = discounts
+                    .get(&item_idx)
+                    .map_or(original_minor, |(_, final_minor)| *final_minor);
+
+                applications.push(PromotionApplication {
+                    promotion_key,
+                    item_idx,
+                    bundle_id,
+                    original_price: *item.price(),
+                    final_price: Money::from_minor(final_minor, currency),
+                });
+            }
+        }
+
+        Ok(applications)
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -393,47 +469,42 @@ fn i32_from_usize(value: usize) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
-/// Calculate discounted price for a single item in mix-and-match context
-fn calculate_discounted_price_for_item<'a>(
-    item: &Item<'_>,
-    discount: &MixAndMatchDiscount<'_>,
-    item_group: &ItemGroup<'a>,
-    _sorted_items: &[(usize, i64)],
-) -> Result<Money<'a, rusty_money::iso::Currency>, SolverError> {
-    let full_minor = item.price().to_minor_units();
-
-    let discounted_minor = match discount {
+fn runtime_discount_from_config(discount: &MixAndMatchDiscount<'_>) -> MixAndMatchRuntimeDiscount {
+    match discount {
         MixAndMatchDiscount::PercentAllItems(pct) => {
-            let discount_amount =
-                percent_of_minor(pct, full_minor).map_err(SolverError::Discount)?;
-
-            full_minor.saturating_sub(discount_amount)
+            MixAndMatchRuntimeDiscount::PercentAllItems(*pct)
         }
         MixAndMatchDiscount::PercentCheapest(pct) => {
-            // For cheapest-only discounts, worst case is full discount on this item
-            // For budget calculation purposes, assume it could be the cheapest
-            // This is conservative but ensures budget isn't violated
+            MixAndMatchRuntimeDiscount::PercentCheapest(*pct)
+        }
+        MixAndMatchDiscount::FixedCheapest(amount) => {
+            MixAndMatchRuntimeDiscount::FixedCheapest(amount.to_minor_units())
+        }
+        MixAndMatchDiscount::FixedTotal(amount) => {
+            MixAndMatchRuntimeDiscount::FixedTotal(amount.to_minor_units())
+        }
+    }
+}
+
+fn calculate_discounted_minor_for_budget(
+    full_minor: i64,
+    discount: MixAndMatchRuntimeDiscount,
+) -> Result<i64, SolverError> {
+    let discounted_minor = match discount {
+        MixAndMatchRuntimeDiscount::PercentAllItems(pct)
+        | MixAndMatchRuntimeDiscount::PercentCheapest(pct) => {
             let discount_amount =
-                percent_of_minor(pct, full_minor).map_err(SolverError::Discount)?;
+                percent_of_minor(&pct, full_minor).map_err(SolverError::Discount)?;
 
             full_minor.saturating_sub(discount_amount)
         }
-        MixAndMatchDiscount::FixedTotal(_total) => {
-            // For fixed total, distribute evenly across bundle
-            // Conservative approximation: assume zero price (max discount)
-            0
-        }
-        MixAndMatchDiscount::FixedCheapest(fixed_price) => {
-            // Cheapest item gets fixed price, others full price
-            // Conservative: assume this item could be cheapest
-            fixed_price.to_minor_units()
-        }
+        // Conservative approximation for budgeting fixed-total bundles:
+        // assume the item could be fully discounted.
+        MixAndMatchRuntimeDiscount::FixedTotal(_) => 0,
+        MixAndMatchRuntimeDiscount::FixedCheapest(fixed_minor) => fixed_minor,
     };
 
-    Ok(Money::from_minor(
-        discounted_minor.max(0),
-        item_group.currency(),
-    ))
+    Ok(discounted_minor.max(0))
 }
 
 fn proportional_alloc(total: i64, part: i64, denom: i64) -> i64 {
@@ -451,11 +522,7 @@ fn proportional_alloc(total: i64, part: i64, denom: i64) -> i64 {
     i64::try_from(value).unwrap_or(0)
 }
 
-fn build_bundles(
-    promotion: &MixAndMatchPromotion<'_>,
-    solution: &dyn Solution,
-    vars: &MixAndMatchVars,
-) -> Vec<Vec<usize>> {
+fn build_bundles(solution: &dyn Solution, vars: &MixAndMatchVars) -> Vec<Vec<usize>> {
     let bundles_applied = vars.bundle_count(solution);
 
     if bundles_applied == 0 {
@@ -483,8 +550,7 @@ fn build_bundles(
         for bundle_idx in 0..bundles_applied {
             let mut bundle_items = Vec::new();
 
-            for (slot_idx, slot) in promotion.slots().iter().enumerate() {
-                let min = slot.min();
+            for (slot_idx, (min, _max)) in vars.slot_bounds.iter().copied().enumerate() {
                 let items: &[usize] = slot_items.get(slot_idx).map_or(&[], |v| v.as_slice());
                 let start = bundle_idx * min;
 
@@ -519,27 +585,26 @@ fn build_bundles(
 }
 
 fn calculate_discounts_for_vars(
-    promotion: &MixAndMatchPromotion<'_>,
     solution: &dyn Solution,
     vars: &MixAndMatchVars,
     item_group: &ItemGroup<'_>,
 ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
     let mut discounts = FxHashMap::default();
 
-    match promotion.discount() {
-        MixAndMatchDiscount::PercentAllItems(pct) => {
+    match vars.runtime_discount {
+        MixAndMatchRuntimeDiscount::PercentAllItems(pct) => {
             for (item_idx, item) in item_group.iter().enumerate() {
                 if !vars.is_item_participating(solution, item_idx) {
                     continue;
                 }
 
                 let original_minor = item.price().to_minor_units();
-                let discounted_minor = discounted_minor_percent(pct, original_minor)?;
+                let discounted_minor = discounted_minor_percent(&pct, original_minor)?;
 
                 discounts.insert(item_idx, (original_minor, discounted_minor));
             }
         }
-        MixAndMatchDiscount::PercentCheapest(pct) => {
+        MixAndMatchRuntimeDiscount::PercentCheapest(pct) => {
             for (item_idx, item) in item_group.iter().enumerate() {
                 if !vars.is_item_participating(solution, item_idx) {
                     continue;
@@ -550,14 +615,14 @@ fn calculate_discounts_for_vars(
                 discounts.insert(item_idx, (original_minor, original_minor));
 
                 if vars.is_item_priced_by_promotion(solution, item_idx) {
-                    let discounted_minor = discounted_minor_percent(pct, original_minor)?;
+                    let discounted_minor = discounted_minor_percent(&pct, original_minor)?;
 
                     discounts.insert(item_idx, (original_minor, discounted_minor));
                 }
             }
         }
-        MixAndMatchDiscount::FixedCheapest(amount) => {
-            let fixed_minor = amount.to_minor_units().max(0);
+        MixAndMatchRuntimeDiscount::FixedCheapest(fixed_minor) => {
+            let fixed_minor = fixed_minor.max(0);
 
             for (item_idx, item) in item_group.iter().enumerate() {
                 if !vars.is_item_participating(solution, item_idx) {
@@ -575,9 +640,8 @@ fn calculate_discounts_for_vars(
                 discounts.insert(item_idx, (original_minor, final_minor));
             }
         }
-        MixAndMatchDiscount::FixedTotal(amount) => {
-            let bundle_price = amount.to_minor_units();
-            let bundles = build_bundles(promotion, solution, vars);
+        MixAndMatchRuntimeDiscount::FixedTotal(bundle_price) => {
+            let bundles = build_bundles(solution, vars);
 
             for bundle_items in bundles {
                 if bundle_items.is_empty() {
@@ -652,9 +716,16 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         observer: &mut dyn ILPObserver,
     ) -> Result<PromotionVars, SolverError> {
         let promotion_key = self.key();
+        let runtime_discount = runtime_discount_from_config(self.discount());
+        let application_limit = self.budget().application_limit;
+        let monetary_limit_minor = self
+            .budget()
+            .monetary_limit
+            .map(|value| value.to_minor_units());
 
         if item_group.is_empty() {
             return Ok(Box::new(MixAndMatchVars {
+                promotion_key,
                 slot_vars: Vec::new(),
                 y_bundle: None,
                 bundle_formed: None,
@@ -662,6 +733,9 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
                 slot_bounds: Vec::new(),
                 bundle_size: 0,
                 sorted_items: SmallVec::new(),
+                runtime_discount,
+                application_limit,
+                monetary_limit_minor,
             }));
         }
 
@@ -690,6 +764,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
 
         if !feasible {
             return Ok(Box::new(MixAndMatchVars {
+                promotion_key,
                 slot_vars: Vec::new(),
                 y_bundle: None,
                 bundle_formed: None,
@@ -697,6 +772,9 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
                 slot_bounds: Vec::new(),
                 bundle_size: 0,
                 sorted_items: SmallVec::new(),
+                runtime_discount,
+                application_limit,
+                monetary_limit_minor,
             }));
         }
 
@@ -848,6 +926,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         }
 
         Ok(Box::new(MixAndMatchVars {
+            promotion_key,
             slot_vars,
             y_bundle,
             bundle_formed,
@@ -855,6 +934,9 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
             slot_bounds,
             bundle_size,
             sorted_items,
+            runtime_discount,
+            application_limit,
+            monetary_limit_minor,
         }))
     }
 
@@ -865,14 +947,13 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<(), SolverError> {
-        let Some(vars) = vars.as_any().downcast_ref::<MixAndMatchVars>() else {
-            return Err(SolverError::InvariantViolation {
+        if vars.owns_runtime_behavior() && vars.runtime_kind() == "mix_and_match" {
+            vars.add_constraints(self.key(), item_group, state, observer)
+        } else {
+            Err(SolverError::InvariantViolation {
                 message: "promotion type mismatch with vars",
-            });
-        };
-
-        vars.add_constraints(self.key(), state, observer);
-        vars.add_budget_constraints(self, item_group, state, observer)
+            })
+        }
     }
 
     fn calculate_item_discounts(
@@ -881,13 +962,13 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
     ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
-        let Some(vars) = vars.as_any().downcast_ref::<MixAndMatchVars>() else {
-            return Err(SolverError::InvariantViolation {
+        if vars.owns_runtime_behavior() && vars.runtime_kind() == "mix_and_match" {
+            vars.calculate_item_discounts(solution, item_group)
+        } else {
+            Err(SolverError::InvariantViolation {
                 message: "promotion type mismatch with vars",
-            });
-        };
-
-        calculate_discounts_for_vars(self, solution, vars, item_group)
+            })
+        }
     }
 
     fn calculate_item_applications<'b>(
@@ -898,45 +979,13 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         item_group: &ItemGroup<'b>,
         next_bundle_id: &mut usize,
     ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
-        let Some(vars) = vars.as_any().downcast_ref::<MixAndMatchVars>() else {
-            return Err(SolverError::InvariantViolation {
+        if vars.owns_runtime_behavior() && vars.runtime_kind() == "mix_and_match" {
+            vars.calculate_item_applications(promotion_key, solution, item_group, next_bundle_id)
+        } else {
+            Err(SolverError::InvariantViolation {
                 message: "promotion type mismatch with vars",
-            });
-        };
-
-        let bundles = build_bundles(self, solution, vars);
-
-        if bundles.is_empty() {
-            return Ok(SmallVec::new());
+            })
         }
-
-        let discounts = calculate_discounts_for_vars(self, solution, vars, item_group)?;
-        let currency = item_group.currency();
-        let mut applications = SmallVec::new();
-
-        for bundle in bundles {
-            let bundle_id = *next_bundle_id;
-            *next_bundle_id += 1;
-
-            for item_idx in bundle {
-                let item = item_group.get_item(item_idx)?;
-                let original_minor = item.price().to_minor_units();
-
-                let final_minor = discounts
-                    .get(&item_idx)
-                    .map_or(original_minor, |(_, final_minor)| *final_minor);
-
-                applications.push(PromotionApplication {
-                    promotion_key,
-                    item_idx,
-                    bundle_id,
-                    original_price: *item.price(),
-                    final_price: Money::from_minor(final_minor, currency),
-                });
-            }
-        }
-
-        Ok(applications)
     }
 }
 
@@ -1817,6 +1866,7 @@ mod tests {
     #[test]
     fn is_item_priced_by_promotion_without_target() {
         let vars = MixAndMatchVars {
+            promotion_key: PromotionKey::default(),
             slot_vars: vec![SmallVec::new()],
             y_bundle: None,
             bundle_formed: None,
@@ -1824,6 +1874,9 @@ mod tests {
             slot_bounds: Vec::new(),
             bundle_size: 0,
             sorted_items: SmallVec::new(),
+            runtime_discount: MixAndMatchRuntimeDiscount::PercentAllItems(Percentage::from(0.0)),
+            application_limit: None,
+            monetary_limit_minor: None,
         };
 
         let solution = MapSolution::default();

@@ -210,6 +210,14 @@ pub trait ILPPromotionVars: Debug + Send + Sync {
         false
     }
 
+    /// Stable identifier for vars runtime ownership.
+    ///
+    /// Built-in promotion types should override this with a unique value so
+    /// promotion methods can reject mismatched vars at runtime.
+    fn runtime_kind(&self) -> &'static str {
+        "unknown"
+    }
+
     /// Emit vars-owned constraints into the ILP state.
     ///
     /// Default: no vars-owned behavior; caller should use promotion fallback.

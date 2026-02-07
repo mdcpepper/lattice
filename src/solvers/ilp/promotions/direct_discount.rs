@@ -202,6 +202,10 @@ impl ILPPromotionVars for DirectDiscountPromotionVars {
         true
     }
 
+    fn runtime_kind(&self) -> &'static str {
+        "direct_discount"
+    }
+
     fn add_constraints(
         &self,
         _promotion_key: PromotionKey,
@@ -335,7 +339,7 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<(), SolverError> {
-        if vars.owns_runtime_behavior() {
+        if vars.owns_runtime_behavior() && vars.runtime_kind() == "direct_discount" {
             vars.add_constraints(self.key(), item_group, state, observer)
         } else {
             Err(SolverError::InvariantViolation {
@@ -350,7 +354,7 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
         vars: &dyn ILPPromotionVars,
         item_group: &ItemGroup<'_>,
     ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
-        if vars.owns_runtime_behavior() {
+        if vars.owns_runtime_behavior() && vars.runtime_kind() == "direct_discount" {
             vars.calculate_item_discounts(solution, item_group)
         } else {
             Err(SolverError::InvariantViolation {
@@ -367,7 +371,7 @@ impl ILPPromotion for DirectDiscountPromotion<'_> {
         item_group: &ItemGroup<'b>,
         next_bundle_id: &mut usize,
     ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
-        if vars.owns_runtime_behavior() {
+        if vars.owns_runtime_behavior() && vars.runtime_kind() == "direct_discount" {
             vars.calculate_item_applications(promotion_key, solution, item_group, next_bundle_id)
         } else {
             Err(SolverError::InvariantViolation {
