@@ -1,7 +1,9 @@
 //! Mix-and-Match Bundle Promotions ILP
 
+use std::any::Any;
+
 use decimal_percentage::Percentage;
-use good_lp::{Expression, Solution, SolverModel, Variable, variable};
+use good_lp::{Expression, Solution, Variable, variable};
 use num_traits::ToPrimitive;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
@@ -20,7 +22,7 @@ use crate::{
         SolverError,
         ilp::{
             BINARY_THRESHOLD, ILPObserver, i64_to_f64_exact,
-            promotions::{ILPPromotion, PromotionVars},
+            promotions::{ILPPromotion, ILPPromotionVars, PromotionVars},
             state::ILPState,
         },
     },
@@ -101,14 +103,14 @@ impl MixAndMatchVars {
         clippy::too_many_lines,
         reason = "Constraint assembly is verbose by design."
     )]
-    pub fn add_constraints<S: SolverModel, O: ILPObserver + ?Sized>(
+    pub fn add_constraints(
         &self,
-        mut model: S,
         promotion_key: PromotionKey,
-        observer: &mut O,
-    ) -> S {
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         if self.slot_vars.is_empty() || (self.y_bundle.is_none() && self.bundle_formed.is_none()) {
-            return model;
+            return;
         }
 
         // Slot constraints
@@ -122,7 +124,7 @@ impl MixAndMatchVars {
 
                 observer.on_promotion_constraint(promotion_key, "slot min", &expr, ">=", 0.0);
 
-                model = model.with(slot_sum.clone() >> (min_i32 * y_bundle));
+                state.add_geq_constraint(slot_sum.clone() - min_i32 * y_bundle, 0.0);
 
                 if let Some(max) = max {
                     let max_i32 = i32_from_usize(max);
@@ -130,7 +132,7 @@ impl MixAndMatchVars {
 
                     observer.on_promotion_constraint(promotion_key, "slot max", &expr, "<=", 0.0);
 
-                    model = model.with(slot_sum.clone() << (max_i32 * y_bundle));
+                    state.add_leq_constraint(slot_sum.clone() - max_i32 * y_bundle, 0.0);
                 }
             } else if let Some(bundle_formed) = self.bundle_formed {
                 let expr = slot_sum.clone() - min_i32 * bundle_formed;
@@ -143,7 +145,7 @@ impl MixAndMatchVars {
                     0.0,
                 );
 
-                model = model.with(slot_sum.clone() >> (min_i32 * bundle_formed));
+                state.add_geq_constraint(slot_sum.clone() - min_i32 * bundle_formed, 0.0);
 
                 if let Some(max) = max {
                     let max_i32 = i32_from_usize(max);
@@ -157,7 +159,7 @@ impl MixAndMatchVars {
                         0.0,
                     );
 
-                    model = model.with(slot_sum.clone() << (max_i32 * bundle_formed));
+                    state.add_leq_constraint(slot_sum.clone() - max_i32 * bundle_formed, 0.0);
                 }
 
                 // If slot has enough items, bundle can be formed.
@@ -165,7 +167,7 @@ impl MixAndMatchVars {
 
                 observer.on_promotion_constraint(promotion_key, "bundle formed", &expr, "<=", 0.0);
 
-                model = model.with(bundle_formed << (slot_sum / min_i32));
+                state.add_leq_constraint(Expression::from(bundle_formed) - slot_sum / min_i32, 0.0);
             }
         }
 
@@ -173,7 +175,7 @@ impl MixAndMatchVars {
         let needs_target = self.target_vars.iter().any(Option::is_some);
 
         if !needs_target {
-            return model;
+            return;
         }
 
         let selected_exprs = self.selected_exprs();
@@ -196,7 +198,7 @@ impl MixAndMatchVars {
                 0.0,
             );
 
-            model = model.with(target_var << selected_expr);
+            state.add_leq_constraint(Expression::from(target_var) - selected_expr, 0.0);
             target_sum += target_var;
         }
 
@@ -226,9 +228,10 @@ impl MixAndMatchVars {
                         0.0,
                     );
 
-                    model = model.with(
+                    state.add_geq_constraint(
                         prefix_targets.clone()
-                            >> (prefix_selected.clone() - (k_total - 1) * y_bundle),
+                            - (prefix_selected.clone() - (k_total - 1) * y_bundle),
+                        0.0,
                     );
                 }
             }
@@ -237,7 +240,7 @@ impl MixAndMatchVars {
 
             observer.on_promotion_constraint(promotion_key, "target count", &expr, "=", 0.0);
 
-            model = model.with(target_sum.eq(y_bundle));
+            state.add_eq_constraint(target_sum - y_bundle, 0.0);
         } else if let Some(bundle_formed) = self.bundle_formed {
             let expr = target_sum.clone() - bundle_formed;
 
@@ -249,25 +252,19 @@ impl MixAndMatchVars {
                 0.0,
             );
 
-            model = model.with(target_sum.eq(bundle_formed));
+            state.add_eq_constraint(target_sum - bundle_formed, 0.0);
         }
-
-        model
     }
 
     /// Add budget constraints for mix-and-match promotions
-    pub fn add_budget_constraints<S, O: ILPObserver + ?Sized>(
+    pub fn add_budget_constraints(
         &self,
-        model: S,
         promotion: &MixAndMatchPromotion<'_>,
         item_group: &ItemGroup<'_>,
-        promotion_key: PromotionKey,
-        observer: &mut O,
-    ) -> Result<S, SolverError>
-    where
-        S: SolverModel,
-    {
-        let mut model = model;
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        let promotion_key = promotion.key();
         let budget = promotion.budget();
 
         // Application limit: For mix-and-match, this limits bundles
@@ -288,7 +285,7 @@ impl MixAndMatchVars {
                     limit_f64,
                 );
 
-                model = model.with(expr.leq(limit_f64));
+                state.add_leq_constraint(expr, limit_f64);
             } else if let Some(bundle_formed) = self.bundle_formed {
                 // Variable-arity bundles: bundle_formed is binary (0 or 1)
                 // application_limit only makes sense if >= 1
@@ -303,7 +300,7 @@ impl MixAndMatchVars {
                         0.0,
                     );
 
-                    model = model.with(expr.eq(0));
+                    state.add_eq_constraint(expr, 0.0);
                 }
                 // If application_limit >= 1, no constraint needed (bundle_formed is already <= 1)
             }
@@ -349,10 +346,10 @@ impl MixAndMatchVars {
                 limit_f64,
             );
 
-            model = model.with(discount_expr.leq(limit_f64));
+            state.add_leq_constraint(discount_expr, limit_f64);
         }
 
-        Ok(model)
+        Ok(())
     }
 
     fn bundle_count(&self, solution: &dyn Solution) -> usize {
@@ -365,6 +362,24 @@ impl MixAndMatchVars {
         } else {
             0
         }
+    }
+}
+
+impl ILPPromotionVars for MixAndMatchVars {
+    fn add_item_participation_term(&self, expr: Expression, item_idx: usize) -> Expression {
+        MixAndMatchVars::add_item_participation_term(self, expr, item_idx)
+    }
+
+    fn is_item_participating(&self, solution: &dyn Solution, item_idx: usize) -> bool {
+        MixAndMatchVars::is_item_participating(self, solution, item_idx)
+    }
+
+    fn is_item_priced_by_promotion(&self, solution: &dyn Solution, item_idx: usize) -> bool {
+        MixAndMatchVars::is_item_priced_by_promotion(self, solution, item_idx)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -603,6 +618,10 @@ fn calculate_discounts_for_vars(
 }
 
 impl ILPPromotion for MixAndMatchPromotion<'_> {
+    fn key(&self) -> PromotionKey {
+        MixAndMatchPromotion::key(self)
+    }
+
     fn is_applicable(&self, item_group: &ItemGroup<'_>) -> bool {
         if item_group.is_empty() {
             return false;
@@ -626,13 +645,14 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         clippy::too_many_lines,
         reason = "Complexity due to multiple discount types"
     )]
-    fn add_variables<O: ILPObserver + ?Sized>(
+    fn add_variables(
         &self,
-        promotion_key: PromotionKey,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
-        observer: &mut O,
+        observer: &mut dyn ILPObserver,
     ) -> Result<PromotionVars, SolverError> {
+        let promotion_key = self.key();
+
         if item_group.is_empty() {
             return Ok(PromotionVars::MixAndMatch(Box::new(MixAndMatchVars {
                 slot_vars: Vec::new(),
@@ -838,6 +858,25 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         })))
     }
 
+    fn add_constraints(
+        &self,
+        vars: &PromotionVars,
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        match vars {
+            PromotionVars::Noop => Ok(()),
+            PromotionVars::MixAndMatch(vars) => {
+                vars.add_constraints(self.key(), state, observer);
+                vars.add_budget_constraints(self, item_group, state, observer)
+            }
+            _ => Err(SolverError::InvariantViolation {
+                message: "promotion type mismatch with vars",
+            }),
+        }
+    }
+
     fn calculate_item_discounts(
         &self,
         solution: &dyn Solution,
@@ -909,11 +948,6 @@ mod tests {
     use slotmap::SlotMap;
     use smallvec::SmallVec;
     use testresult::TestResult;
-
-    #[cfg(feature = "solver-highs")]
-    use good_lp::solvers::highs::highs as default_solver;
-    #[cfg(all(not(feature = "solver-highs"), feature = "solver-microlp"))]
-    use good_lp::solvers::microlp::microlp as default_solver;
 
     use crate::{
         items::{Item, groups::ItemGroup},
@@ -1025,15 +1059,13 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
-        let (pb, cost, _presence) = state.into_parts();
-        let model = pb.minimise(cost).using(default_solver);
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
         };
 
-        let _model = vars.add_constraints(model, promo.key(), &mut observer);
+        vars.add_constraints(promo.key(), &mut state, &mut observer);
 
         Ok(())
     }
@@ -1079,7 +1111,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1151,7 +1183,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1228,7 +1260,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1310,7 +1342,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1393,7 +1425,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1447,7 +1479,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1536,7 +1568,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1597,7 +1629,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1646,7 +1678,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1698,9 +1730,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
-        let (pb, cost, _presence) = state.into_parts();
-        let model = pb.minimise(cost).using(default_solver);
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1709,7 +1739,7 @@ mod tests {
         // Should use bundle_formed for variable arity
         assert!(vars.bundle_formed.is_some());
 
-        let _model = vars.add_constraints(model, promo.key(), &mut observer);
+        vars.add_constraints(promo.key(), &mut state, &mut observer);
 
         Ok(())
     }
@@ -1764,7 +1794,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1856,7 +1886,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");
@@ -1912,7 +1942,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
-        let vars = promo.add_variables(promo.key(), &item_group, &mut state, &mut observer)?;
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let PromotionVars::MixAndMatch(vars) = vars else {
             panic!("Expected mix-and-match vars");

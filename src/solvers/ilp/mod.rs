@@ -17,8 +17,8 @@ use crate::{
         Solver, SolverError, SolverResult,
         ilp::{
             observer::{ILPObserver, NoopObserver},
-            promotions::PromotionInstances,
-            state::ILPState,
+            promotions::{ILPPromotion, PromotionInstances},
+            state::{ConstraintRelation, ILPConstraint, ILPState},
         },
     },
 };
@@ -79,14 +79,41 @@ impl ILPSolver {
         item_group: &ItemGroup<'b>,
         observer: &mut dyn ILPObserver,
     ) -> Result<SolverResult<'b>, SolverError> {
+        let promotion_refs: SmallVec<[&dyn ILPPromotion; 5]> = promotions
+            .iter()
+            .map(|promotion| promotion as &dyn ILPPromotion)
+            .collect();
+
+        Self::solve_internal(&promotion_refs, item_group, observer)
+    }
+
+    /// Solve with an observer using dynamic promotion trait objects.
+    ///
+    /// This is the extensible API for integrating promotion implementations
+    /// defined outside this crate.
+    pub fn solve_with_observer_dyn<'b>(
+        promotions: &[&dyn ILPPromotion],
+        item_group: &ItemGroup<'b>,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<SolverResult<'b>, SolverError> {
         Self::solve_internal(promotions, item_group, observer)
     }
 
-    /// Internal solve implementation that supports an observer.
-    fn solve_internal<'b, O: ILPObserver + ?Sized>(
-        promotions: &[Promotion<'_>],
+    /// Solve using dynamic promotion trait objects.
+    pub fn solve_dyn<'b>(
+        promotions: &[&dyn ILPPromotion],
         item_group: &ItemGroup<'b>,
-        observer: &mut O,
+    ) -> Result<SolverResult<'b>, SolverError> {
+        let mut observer = NoopObserver;
+
+        Self::solve_internal(promotions, item_group, &mut observer)
+    }
+
+    /// Internal solve implementation that supports an observer.
+    fn solve_internal<'b>(
+        promotions: &[&dyn ILPPromotion],
+        item_group: &ItemGroup<'b>,
+        observer: &mut dyn ILPObserver,
     ) -> Result<SolverResult<'b>, SolverError> {
         // Return early if the item group is empty
         if item_group.is_empty() {
@@ -117,7 +144,7 @@ impl ILPSolver {
             PromotionInstances::from_promotions(promotions, item_group, &mut state, observer)?;
 
         // Extract state for model creation
-        let (pb, cost, item_presence) = state.into_parts();
+        let (pb, cost, item_presence, constraints) = state.into_parts_with_constraints();
 
         // Create the solver model
         let mut model = pb.minimise(cost).using(default_solver);
@@ -142,8 +169,8 @@ impl ILPSolver {
             model = model.with(constraint_expr.eq(1));
         }
 
-        // Add constraints for all promotions
-        model = promotion_instances.add_constraints(model, item_group, observer)?;
+        // Add all recorded promotion constraints.
+        model = apply_recorded_constraints(model, constraints);
 
         let solution = model.solve()?;
 
@@ -188,9 +215,25 @@ impl Solver for ILPSolver {
         item_group: &ItemGroup<'b>,
     ) -> Result<SolverResult<'b>, SolverError> {
         let mut observer = NoopObserver;
+        let promotion_refs: SmallVec<[&dyn ILPPromotion; 5]> = promotions
+            .iter()
+            .map(|promotion| promotion as &dyn ILPPromotion)
+            .collect();
 
-        Self::solve_internal(promotions, item_group, &mut observer)
+        Self::solve_internal(&promotion_refs, item_group, &mut observer)
     }
+}
+
+fn apply_recorded_constraints<S: SolverModel>(mut model: S, constraints: Vec<ILPConstraint>) -> S {
+    for constraint in constraints {
+        model = match constraint.relation {
+            ConstraintRelation::Eq => model.with(constraint.lhs.eq(constraint.rhs)),
+            ConstraintRelation::Leq => model.with(constraint.lhs.leq(constraint.rhs)),
+            ConstraintRelation::Geq => model.with(constraint.lhs.geq(constraint.rhs)),
+        };
+    }
+
+    model
 }
 
 /// Ensure that the number of presence variables matches the number of selected items.
@@ -352,8 +395,9 @@ mod tests {
     use std::collections::HashMap;
 
     use decimal_percentage::Percentage;
+    use rustc_hash::FxHashMap;
     use rusty_money::iso::GBP;
-    use smallvec::SmallVec;
+    use smallvec::{SmallVec, smallvec};
     use testresult::TestResult;
 
     use crate::{
@@ -364,6 +408,7 @@ mod tests {
             Promotion, PromotionKey, applications::PromotionApplication, budget::PromotionBudget,
             types::DirectDiscountPromotion,
         },
+        solvers::ilp::promotions::{ILPPromotion, ILPPromotionVars, PromotionVars},
         tags::{collection::TagCollection, string::StringTagCollection},
     };
 
@@ -401,6 +446,154 @@ mod tests {
         let currency = items.first().map_or(GBP, |item| item.price().currency());
 
         ItemGroup::new(items.into_iter().collect(), currency)
+    }
+
+    #[derive(Debug)]
+    struct TestCustomPromotion {
+        key: PromotionKey,
+        final_minor: i64,
+    }
+
+    #[derive(Debug)]
+    struct TestCustomPromotionVars {
+        item_participation: SmallVec<[(usize, Variable); 10]>,
+    }
+
+    impl ILPPromotionVars for TestCustomPromotionVars {
+        fn add_item_participation_term(&self, expr: Expression, item_idx: usize) -> Expression {
+            let mut updated = expr;
+
+            for &(idx, var) in &self.item_participation {
+                if idx == item_idx {
+                    updated += var;
+                }
+            }
+
+            updated
+        }
+
+        fn is_item_participating(&self, solution: &dyn Solution, item_idx: usize) -> bool {
+            self.item_participation
+                .iter()
+                .any(|&(idx, var)| idx == item_idx && solution.value(var) > BINARY_THRESHOLD)
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    impl ILPPromotion for TestCustomPromotion {
+        fn key(&self) -> PromotionKey {
+            self.key
+        }
+
+        fn is_applicable(&self, item_group: &ItemGroup<'_>) -> bool {
+            !item_group.is_empty()
+        }
+
+        fn add_variables(
+            &self,
+            item_group: &ItemGroup<'_>,
+            state: &mut ILPState,
+            observer: &mut dyn ILPObserver,
+        ) -> Result<PromotionVars, SolverError> {
+            let mut item_participation = SmallVec::new();
+            let coeff = i64_to_f64_exact(self.final_minor)
+                .ok_or(SolverError::MinorUnitsNotRepresentable(self.final_minor))?;
+
+            for (item_idx, _item) in item_group.iter().enumerate() {
+                let var = state.problem_variables_mut().add(variable().binary());
+                item_participation.push((item_idx, var));
+                state.add_to_objective(var, coeff);
+                observer.on_promotion_variable(
+                    self.key,
+                    item_idx,
+                    var,
+                    self.final_minor,
+                    Some("test"),
+                );
+                observer.on_objective_term(var, coeff);
+            }
+
+            Ok(PromotionVars::Custom(Box::new(TestCustomPromotionVars {
+                item_participation,
+            })))
+        }
+
+        fn add_constraints(
+            &self,
+            vars: &PromotionVars,
+            _item_group: &ItemGroup<'_>,
+            state: &mut ILPState,
+            observer: &mut dyn ILPObserver,
+        ) -> Result<(), SolverError> {
+            let vars = vars
+                .as_custom()
+                .and_then(|vars| vars.as_any().downcast_ref::<TestCustomPromotionVars>())
+                .ok_or(SolverError::InvariantViolation {
+                    message: "promotion type mismatch with vars",
+                })?;
+
+            let expr: Expression = vars.item_participation.iter().map(|(_, var)| *var).sum();
+            observer.on_promotion_constraint(self.key, "test custom limit", &expr, "<=", 1.0);
+            state.add_leq_constraint(expr, 1.0);
+
+            Ok(())
+        }
+
+        fn calculate_item_discounts(
+            &self,
+            solution: &dyn Solution,
+            vars: &PromotionVars,
+            item_group: &ItemGroup<'_>,
+        ) -> Result<FxHashMap<usize, (i64, i64)>, SolverError> {
+            let mut discounts = FxHashMap::default();
+
+            for (item_idx, item) in item_group.iter().enumerate() {
+                if vars.is_item_participating(solution, item_idx) {
+                    discounts.insert(
+                        item_idx,
+                        (item.price().to_minor_units(), self.final_minor.max(0)),
+                    );
+                }
+            }
+
+            Ok(discounts)
+        }
+
+        fn calculate_item_applications<'b>(
+            &self,
+            promotion_key: PromotionKey,
+            solution: &dyn Solution,
+            vars: &PromotionVars,
+            item_group: &ItemGroup<'b>,
+            next_bundle_id: &mut usize,
+        ) -> Result<SmallVec<[PromotionApplication<'b>; 10]>, SolverError> {
+            let mut applications = SmallVec::new();
+            let currency = item_group.currency();
+
+            for item_idx in 0..item_group.len() {
+                let item = item_group.get_item(item_idx)?;
+
+                if !vars.is_item_participating(solution, item_idx) {
+                    continue;
+                }
+
+                let bundle_id = *next_bundle_id;
+                *next_bundle_id += 1;
+
+                applications.push(PromotionApplication {
+                    promotion_key,
+                    item_idx,
+                    bundle_id,
+                    original_price: *item.price(),
+                    final_price: Money::from_minor(self.final_minor.max(0), currency),
+                });
+            }
+
+            Ok(applications)
+        }
     }
 
     #[test]
@@ -768,6 +961,31 @@ mod tests {
         assert_eq!(
             result1.promotion_applications.len(),
             result2.promotion_applications.len()
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn solve_dyn_accepts_custom_promotion_trait_objects() -> TestResult {
+        let items = test_items();
+        let item_group = item_group_from_items(items);
+        let promotion = TestCustomPromotion {
+            key: PromotionKey::default(),
+            final_minor: 1,
+        };
+        let promotions: [&dyn ILPPromotion; 1] = [&promotion];
+
+        let result = ILPSolver::solve_dyn(&promotions, &item_group)?;
+
+        assert_eq!(result.total.to_minor_units(), 301);
+        assert_eq!(result.affected_items.as_slice(), &[2]);
+        assert_eq!(result.unaffected_items.as_slice(), &[0, 1]);
+        assert_eq!(result.promotion_applications.len(), 1);
+        assert_eq!(result.promotion_applications[0].item_idx, 2);
+        assert_eq!(
+            result.promotion_applications[0].final_price,
+            Money::from_minor(1, GBP)
         );
 
         Ok(())

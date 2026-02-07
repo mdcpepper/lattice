@@ -1304,7 +1304,11 @@ mod tests {
             Promotion, PromotionKey, PromotionMeta, budget::PromotionBudget,
             types::DirectDiscountPromotion,
         },
-        solvers::ilp::{ensure_presence_vars_len, promotions::PromotionInstances, state::ILPState},
+        solvers::ilp::{
+            ensure_presence_vars_len,
+            promotions::{ILPPromotion, PromotionInstances},
+            state::{ConstraintRelation, ILPState},
+        },
         tags::string::StringTagCollection,
     };
 
@@ -1676,15 +1680,17 @@ mod tests {
         // Manually run the solve with observer
         let mut state = ILPState::with_presence_variables_and_observer(&item_group, &mut renderer)?;
 
+        let promotion_refs: [&dyn ILPPromotion; 1] = [&promotions[0]];
+
         let promotion_instances = PromotionInstances::from_promotions(
-            &promotions,
+            &promotion_refs,
             &item_group,
             &mut state,
             &mut renderer,
         )?;
 
         // Extract state for model creation
-        let (pb, cost, item_presence) = state.into_parts();
+        let (pb, cost, item_presence, constraints) = state.into_parts_with_constraints();
 
         // Create the solver model
         let mut model = pb.minimise(cost).using(default_solver);
@@ -1701,7 +1707,15 @@ mod tests {
             model = model.with(constraint_expr.eq(1));
         }
 
-        let _model = promotion_instances.add_constraints(model, &item_group, &mut renderer)?;
+        for constraint in constraints {
+            model = match constraint.relation {
+                ConstraintRelation::Eq => model.with(constraint.lhs.eq(constraint.rhs)),
+                ConstraintRelation::Leq => model.with(constraint.lhs.leq(constraint.rhs)),
+                ConstraintRelation::Geq => model.with(constraint.lhs.geq(constraint.rhs)),
+            };
+        }
+
+        let _model = model;
 
         // Verify captures
         assert_eq!(
