@@ -5,7 +5,7 @@ use std::any::Any;
 use good_lp::{Expression, Variable};
 use petgraph::graph::NodeIndex;
 
-use crate::{graph::node::PromotionLayerKey, promotions::PromotionKey};
+use crate::{graph::PromotionLayerKey, promotions::PromotionKey};
 
 /// Observer trait for capturing ILP formulation as it's built.
 ///

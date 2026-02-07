@@ -36,7 +36,7 @@ use slotmap::SlotMap;
 use smallvec::SmallVec;
 
 use crate::{
-    graph::node::PromotionLayerKey,
+    graph::PromotionLayerKey,
     items::groups::ItemGroup,
     products::{Product, ProductKey},
     promotions::{PromotionKey, PromotionMeta},

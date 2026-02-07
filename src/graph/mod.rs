@@ -10,25 +10,24 @@ use rustc_hash::FxHashMap;
 use rusty_money::Money;
 use smallvec::SmallVec;
 
-use crate::{
-    graph::{
-        builder::PromotionGraphBuilder,
-        edge::LayerEdge,
-        error::GraphError,
-        evaluation::{TrackedItem, evaluate_node},
-        node::{LayerNode, OutputMode},
-        result::LayeredSolverResult,
-    },
-    items::groups::ItemGroup,
-    promotions::Promotion,
-    solvers::ilp::observer::ILPObserver,
+use self::{
+    edge::LayerEdge,
+    evaluation::{TrackedItem, evaluate_node},
+    node::LayerNode,
 };
+use crate::{items::groups::ItemGroup, promotions::Promotion, solvers::ilp::ILPObserver};
 
 pub mod builder;
-pub mod edge;
 pub mod error;
-pub mod node;
 pub mod result;
+
+pub(crate) mod edge;
+pub(crate) mod node;
+
+pub use builder::PromotionGraphBuilder;
+pub use error::GraphError;
+pub use node::{OutputMode, PromotionLayerKey};
+pub use result::LayeredSolverResult;
 
 mod evaluation;
 

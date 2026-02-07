@@ -4,7 +4,7 @@ use rusty_money::MoneyError;
 use thiserror::Error;
 
 use crate::{
-    graph::node::PromotionLayerKey, items::groups::ItemGroupError, promotions::PromotionKey,
+    graph::PromotionLayerKey, items::groups::ItemGroupError, promotions::PromotionKey,
     solvers::SolverError,
 };
 

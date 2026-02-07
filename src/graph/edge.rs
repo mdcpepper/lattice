@@ -2,7 +2,7 @@
 
 /// Edge weight in a promotion graph, describing which items flow along this edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LayerEdge {
+pub(crate) enum LayerEdge {
     /// All items (promoted and unpromoted) flow along this edge.
     /// Used with [`super::node::OutputMode::PassThrough`] nodes.
     All,

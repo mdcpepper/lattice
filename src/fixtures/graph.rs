@@ -306,7 +306,7 @@ mod tests {
     use super::{GraphFixture, GraphNodeFixture, build_graph_from_fixture};
     use crate::{
         fixtures::{Fixture, FixtureError},
-        graph::node::OutputMode,
+        graph::OutputMode,
     };
 
     #[test]

@@ -44,7 +44,7 @@ impl<'a> PromotionGraphBuilder<'a> {
 
     /// Add a layer node to the graph.
     ///
-    /// Promotion key uniqueness is validated per-path during [`Self::build`].
+    /// Promotion key uniqueness is validated per-path during graph finalization.
     ///
     /// # Errors
     ///
@@ -62,7 +62,7 @@ impl<'a> PromotionGraphBuilder<'a> {
 
     /// Add a layer node to the graph with an explicit layer key.
     ///
-    /// Promotion key uniqueness is validated per-path during [`Self::build`].
+    /// Promotion key uniqueness is validated per-path during graph finalization.
     ///
     /// # Errors
     ///
@@ -198,7 +198,9 @@ impl<'a> PromotionGraphBuilder<'a> {
     /// # Errors
     ///
     /// Returns a [`GraphError`] if any validation rule is violated.
-    pub fn build(self) -> Result<(StableDiGraph<LayerNode<'a>, LayerEdge>, NodeIndex), GraphError> {
+    pub(crate) fn build(
+        self,
+    ) -> Result<(StableDiGraph<LayerNode<'a>, LayerEdge>, NodeIndex), GraphError> {
         // 1. Root must be set
         let root = self.root.ok_or(GraphError::NoRoot)?;
 

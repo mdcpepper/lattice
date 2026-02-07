@@ -22,7 +22,7 @@ mod positional_discount;
 
 /// Collection of promotion instances for a solve operation
 #[derive(Debug)]
-pub struct PromotionInstances<'a> {
+pub(crate) struct PromotionInstances<'a> {
     instances: SmallVec<[PromotionInstance<'a>; 5]>,
 }
 
@@ -32,7 +32,7 @@ impl<'a> PromotionInstances<'a> {
     /// # Errors
     ///
     /// Returns [`SolverError`] if any applicable promotion fails to add variables.
-    pub fn from_promotions(
+    pub(crate) fn from_promotions(
         promotions: &[&'a dyn ILPPromotion],
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
@@ -50,7 +50,7 @@ impl<'a> PromotionInstances<'a> {
     }
 
     /// Iterate over instances
-    pub fn iter(&self) -> impl Iterator<Item = &PromotionInstance<'a>> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &PromotionInstance<'a>> {
         self.instances.iter()
     }
 
@@ -59,7 +59,7 @@ impl<'a> PromotionInstances<'a> {
     /// Contributes each promotion's decision variables for the given item to the
     /// presence/exclusivity constraint expression.
     #[must_use]
-    pub fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression {
+    pub(crate) fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression {
         let mut updated_expr = expr;
 
         for instance in &self.instances {
@@ -72,7 +72,7 @@ impl<'a> PromotionInstances<'a> {
 
 /// A promotion instance that pairs a promotion with its solver variables
 #[derive(Debug)]
-pub struct PromotionInstance<'a> {
+pub(crate) struct PromotionInstance<'a> {
     /// The promotion being solved
     promotion: &'a dyn ILPPromotion,
 
@@ -92,7 +92,7 @@ impl<'a> PromotionInstance<'a> {
     ///
     /// Returns [`SolverError`] if the promotion fails to add variables (for example, due to
     /// invalid indices, discount errors, or non-representable coefficients).
-    pub fn new(
+    pub(crate) fn new(
         promotion: &'a dyn ILPPromotion,
         item_group: &ItemGroup<'_>,
         state: &mut ILPState,
@@ -115,7 +115,7 @@ impl<'a> PromotionInstance<'a> {
     /// This is called while building the per-item presence/exclusivity constraint that
     /// enforces each item is either at full price or used by exactly one promotion.
     #[must_use]
-    pub fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression {
+    pub(crate) fn add_item_presence_term(&self, expr: Expression, item_idx: usize) -> Expression {
         match &self.vars {
             Some(vars) => vars.add_item_participation_term(expr, item_idx),
             None => expr,
@@ -131,7 +131,8 @@ impl<'a> PromotionInstance<'a> {
     ///
     /// Returns `SolverError` if a selected item index is invalid (missing from the item group),
     /// or if the discount for a selected item cannot be computed.
-    pub fn calculate_item_discounts(
+    #[cfg(test)]
+    pub(crate) fn calculate_item_discounts(
         &self,
         solution: &dyn Solution,
         item_group: &ItemGroup<'_>,
@@ -151,7 +152,7 @@ impl<'a> PromotionInstance<'a> {
     ///
     /// Returns [`SolverError`] if a selected item index is invalid (missing from the item group),
     /// or if the discount for a selected item cannot be computed.
-    pub fn calculate_item_applications<'b>(
+    pub(crate) fn calculate_item_applications<'b>(
         &self,
         solution: &dyn Solution,
         item_group: &ItemGroup<'b>,
@@ -250,8 +251,8 @@ pub type PromotionVars = Box<dyn ILPPromotionVars>;
 /// Notes:
 /// - Implementations should be deterministic for a given item group input; ILP
 ///   solutions are already sensitive to tiny numeric differences.
-/// - Inapplicable promotions are skipped by [`PromotionInstance::new`], so no vars bundle
-///   is created and they contribute nothing to the solve model.
+/// - Inapplicable promotions are skipped during solver instance creation, so no vars
+///   bundle is created and they contribute nothing to the solve model.
 pub trait ILPPromotion: Debug + Send + Sync {
     /// Return the promotion key.
     fn key(&self) -> PromotionKey;

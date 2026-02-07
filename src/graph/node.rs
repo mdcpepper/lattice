@@ -29,7 +29,7 @@ new_key_type! {
 
 /// A node in the promotion graph representing a layer of competing promotions.
 #[derive(Debug, Clone)]
-pub struct LayerNode<'a> {
+pub(crate) struct LayerNode<'a> {
     /// Key for the human-readable name for this layer
     pub key: PromotionLayerKey,
 

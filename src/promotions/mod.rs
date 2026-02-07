@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use slotmap::{SecondaryMap, new_key_type};
 
-use crate::{graph::node::PromotionLayerKey, solvers::ilp::promotions::ILPPromotion};
+use crate::{graph::PromotionLayerKey, solvers::ilp::ILPPromotion};
 
 pub mod applications;
 pub mod budget;
+pub mod prelude;
 pub mod types;
 
 new_key_type! {

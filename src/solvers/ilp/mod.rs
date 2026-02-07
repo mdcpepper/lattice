@@ -1,7 +1,6 @@
 //! ILP Solver
 
 use good_lp::{Expression, ProblemVariables, Solution, SolverModel, Variable, variable};
-use num_traits::ToPrimitive;
 use rusty_money::{Money, iso::Currency};
 use smallvec::{SmallVec, smallvec};
 
@@ -10,23 +9,21 @@ use good_lp::solvers::highs::highs as default_solver;
 #[cfg(all(not(feature = "solver-highs"), feature = "solver-microlp"))]
 use good_lp::solvers::microlp::microlp as default_solver;
 
+use crate::solvers::ilp::state::{ConstraintRelation, ILPConstraint};
 use crate::{
     items::groups::ItemGroup,
     promotions::{Promotion, applications::PromotionApplication},
-    solvers::{
-        Solver, SolverError, SolverResult,
-        ilp::{
-            observer::{ILPObserver, NoopObserver},
-            promotions::{ILPPromotion, PromotionInstances},
-            state::{ConstraintRelation, ILPConstraint, ILPState},
-        },
-    },
+    solvers::{Solver, SolverError, SolverResult, ilp::promotions::PromotionInstances},
 };
 
 pub mod observer;
-pub mod promotions;
+pub(crate) mod promotions;
 pub mod renderers;
-pub mod state;
+pub(crate) mod state;
+
+pub use observer::{ILPObserver, NoopObserver};
+pub use promotions::{ILPPromotion, ILPPromotionVars, PromotionVars, i64_to_f64_exact};
+pub use state::ILPState;
 
 /// Binary threshold for determining truthiness
 pub const BINARY_THRESHOLD: f64 = 0.5;
@@ -356,13 +353,6 @@ fn apply_promotion_applications<'b>(
     }
 
     Ok((affected_items, used_items, total))
-}
-
-/// Convert an `i64` to an `f64` if it can be represented exactly.
-fn i64_to_f64_exact(v: i64) -> Option<f64> {
-    let f = v.to_f64()?;
-
-    (f.to_i64() == Some(v)).then_some(f)
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@ pub mod discounts;
 pub mod fixtures;
 pub mod graph;
 pub mod items;
+pub mod prelude;
 pub mod pricing;
 pub mod products;
 pub mod promotions;

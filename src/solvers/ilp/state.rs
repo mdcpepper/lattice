@@ -5,20 +5,19 @@ use std::fmt;
 use good_lp::{Expression, ProblemVariables, Variable};
 use smallvec::SmallVec;
 
+#[cfg(test)]
+use crate::solvers::ilp::observer::NoopObserver;
 use crate::{
     items::groups::ItemGroup,
     solvers::{
         SolverError,
-        ilp::{
-            build_presence_variables_and_objective,
-            observer::{ILPObserver, NoopObserver},
-        },
+        ilp::{build_presence_variables_and_objective, observer::ILPObserver},
     },
 };
 
 /// Relation operator for a linear ILP constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConstraintRelation {
+pub(crate) enum ConstraintRelation {
     /// Equality (`lhs == rhs`)
     Eq,
 
@@ -31,15 +30,15 @@ pub enum ConstraintRelation {
 
 /// Recorded linear ILP constraint emitted during model construction.
 #[derive(Debug, Clone)]
-pub struct ILPConstraint {
+pub(crate) struct ILPConstraint {
     /// Left-hand side expression
-    pub lhs: Expression,
+    pub(crate) lhs: Expression,
 
     /// Relation operator
-    pub relation: ConstraintRelation,
+    pub(crate) relation: ConstraintRelation,
 
     /// Right-hand side scalar
-    pub rhs: f64,
+    pub(crate) rhs: f64,
 }
 
 /// Builder state for ILP problem variables and objective
@@ -69,7 +68,8 @@ impl fmt::Debug for ILPState {
 
 impl ILPState {
     /// Create a new ILP state from problem variables and cost expression
-    pub fn new(pb: ProblemVariables, cost: Expression) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(pb: ProblemVariables, cost: Expression) -> Self {
         Self {
             pb,
             cost,
@@ -88,7 +88,8 @@ impl ILPState {
     ///
     /// Returns [`SolverError`] if any item's price cannot be represented exactly as
     /// a solver coefficient.
-    pub fn with_presence_variables(item_group: &ItemGroup<'_>) -> Result<Self, SolverError> {
+    #[cfg(test)]
+    pub(crate) fn with_presence_variables(item_group: &ItemGroup<'_>) -> Result<Self, SolverError> {
         let mut observer = NoopObserver;
 
         Self::with_presence_variables_and_observer(item_group, &mut observer)
@@ -103,7 +104,7 @@ impl ILPState {
     ///
     /// Returns [`SolverError`] if any item's price cannot be represented exactly as
     /// a solver coefficient.
-    pub fn with_presence_variables_and_observer<O: ILPObserver + ?Sized>(
+    pub(crate) fn with_presence_variables_and_observer<O: ILPObserver + ?Sized>(
         item_group: &ItemGroup<'_>,
         observer: &mut O,
     ) -> Result<Self, SolverError> {
@@ -121,14 +122,9 @@ impl ILPState {
         })
     }
 
-    /// Extract the problem variables, cost expression, and item presence variables
-    pub fn into_parts(self) -> (ProblemVariables, Expression, SmallVec<[Variable; 10]>) {
-        (self.pb, self.cost, self.item_presence)
-    }
-
     /// Extract the problem variables, cost expression, item presence variables,
     /// and all recorded constraints.
-    pub fn into_parts_with_constraints(
+    pub(crate) fn into_parts_with_constraints(
         self,
     ) -> (
         ProblemVariables,
