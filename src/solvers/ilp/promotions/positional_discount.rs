@@ -84,6 +84,17 @@ struct PositionalDFAConstraintData {
 }
 
 impl PositionalDiscountVars {
+    fn add_model_constraints(
+        &self,
+        promotion_key: PromotionKey,
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        self.add_dfa_constraints(promotion_key, state, observer);
+        self.add_budget_constraints(item_group, state, observer)
+    }
+
     /// Check if an item is discounted based on the solution.
     pub fn is_item_discounted(&self, solution: &dyn Solution, item_idx: usize) -> bool {
         self.item_discounts
@@ -118,7 +129,6 @@ impl PositionalDiscountVars {
     ///
     /// See:
     /// - <https://en.wikipedia.org/wiki/Deterministic_finite_automaton>
-    #[expect(clippy::too_many_lines, reason = "Complex DFA constraint logic")]
     pub fn add_dfa_constraints(
         &self,
         promotion_key: PromotionKey,
@@ -135,7 +145,52 @@ impl PositionalDiscountVars {
         // The size of a single bundle (e.g. 3 for a "3-for-2" style promotion)
         let bundle_size = dfa_data.size as usize;
 
-        // Constraint 1: Exactly one state active at each position (including final)
+        Self::add_dfa_state_uniqueness_constraints(promotion_key, dfa_data, state, observer);
+
+        Self::add_dfa_boundary_constraints(promotion_key, dfa_data, state, observer);
+
+        Self::add_dfa_state_transition_constraints(
+            promotion_key,
+            dfa_data,
+            num_eligible,
+            bundle_size,
+            state,
+            observer,
+        );
+
+        self.add_dfa_participation_link_constraints(
+            promotion_key,
+            dfa_data,
+            num_eligible,
+            state,
+            observer,
+        );
+
+        self.add_dfa_discount_link_constraints(
+            promotion_key,
+            dfa_data,
+            num_eligible,
+            bundle_size,
+            state,
+            observer,
+        );
+
+        Self::add_dfa_transition_restrictions(
+            promotion_key,
+            dfa_data,
+            num_eligible,
+            bundle_size,
+            state,
+            observer,
+        );
+    }
+
+    fn add_dfa_state_uniqueness_constraints(
+        promotion_key: PromotionKey,
+        dfa_data: &PositionalDFAConstraintData,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         for states_at_pos in &dfa_data.state_vars {
             let state_sum: Expression = states_at_pos.iter().copied().sum();
 
@@ -149,14 +204,19 @@ impl PositionalDiscountVars {
 
             state.add_eq_constraint(state_sum, 1.0);
         }
+    }
 
-        // Constraint 2: Start and end in state 0 (complete bundles only)
+    fn add_dfa_boundary_constraints(
+        promotion_key: PromotionKey,
+        dfa_data: &PositionalDFAConstraintData,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         // state_vars[0] is the initial state, state_vars[num_eligible] is the final state
         if let Some(&first_var) = dfa_data.state_vars.first().and_then(|s| s.first()) {
             let expr = Expression::from(first_var);
 
             observer.on_promotion_constraint(promotion_key, "DFA initial state", &expr, "=", 1.0);
-
             state.add_eq_constraint(expr, 1.0);
         }
 
@@ -164,22 +224,22 @@ impl PositionalDiscountVars {
             let expr = Expression::from(last_var);
 
             observer.on_promotion_constraint(promotion_key, "DFA final state", &expr, "=", 1.0);
-
             state.add_eq_constraint(expr, 1.0);
         }
+    }
 
-        // Constraint 3: DFA state transitions
-        //
-        // As we move from one item to the next:
-        // - If the current item is taken as part of a bundle, we advance the
-        //   bundle progress to the next state.
-        // - If it is not taken, the state stays the same.
+    fn add_dfa_state_transition_constraints(
+        promotion_key: PromotionKey,
+        dfa_data: &PositionalDFAConstraintData,
+        num_eligible: usize,
+        bundle_size: usize,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         for pos in 0..num_eligible {
             for r in 0..bundle_size {
-                // Previous state in the bundle cycle (wrapping around).
                 let r_prev = if r == 0 { bundle_size - 1 } else { r - 1 };
 
-                // State at the next item position.
                 let Some(next_state) = dfa_data
                     .state_vars
                     .get(pos + 1)
@@ -188,20 +248,16 @@ impl PositionalDiscountVars {
                     continue;
                 };
 
-                // State at the current item position.
                 let Some(curr_state) = dfa_data.state_vars.get(pos).and_then(|s| s.get(r).copied())
                 else {
                     continue;
                 };
 
-                // Decision: take this item and advance _from_ state r.
                 let Some(take_curr) = dfa_data.take_vars.get(pos).and_then(|t| t.get(r).copied())
                 else {
                     continue;
                 };
 
-                // Decision: take this item and advance _into_ state r
-                // (ie coming from the previous state).
                 let Some(take_prev) = dfa_data
                     .take_vars
                     .get(pos)
@@ -210,10 +266,7 @@ impl PositionalDiscountVars {
                     continue;
                 };
 
-                // Maintain consistent bundle progress:
-                // next_state = current_state - leaving this state + entering from the previous state
                 let transition_expr = curr_state - take_curr + take_prev;
-
                 let expr = Expression::from(next_state) - transition_expr.clone();
 
                 observer.on_promotion_constraint(
@@ -227,8 +280,16 @@ impl PositionalDiscountVars {
                 state.add_eq_constraint(Expression::from(next_state) - transition_expr, 0.0);
             }
         }
+    }
 
-        // Constraint 4: Link participation to transitions
+    fn add_dfa_participation_link_constraints(
+        &self,
+        promotion_key: PromotionKey,
+        dfa_data: &PositionalDFAConstraintData,
+        num_eligible: usize,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         for eligible_idx in 0..num_eligible {
             let take_sum: Expression = dfa_data
                 .take_vars
@@ -236,11 +297,8 @@ impl PositionalDiscountVars {
                 .map(|takes| takes.iter().copied().sum())
                 .unwrap_or_default();
 
-            // An item participates in the promotion if and only if it is "taken"
-            // by the DFA in one of the bundle states.
             if let Some(&(_idx, participation_var)) = self.item_participation.get(eligible_idx) {
                 let expr = Expression::from(participation_var);
-
                 let observed_expr = Expression::from(participation_var) - take_sum.clone();
 
                 observer.on_promotion_constraint(
@@ -254,15 +312,22 @@ impl PositionalDiscountVars {
                 state.add_eq_constraint(expr - take_sum, 0.0);
             }
         }
+    }
 
-        // Constraint 5: Link discount to transitions
+    fn add_dfa_discount_link_constraints(
+        &self,
+        promotion_key: PromotionKey,
+        dfa_data: &PositionalDFAConstraintData,
+        num_eligible: usize,
+        bundle_size: usize,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         for eligible_idx in 0..num_eligible {
             let mut discount_sum = Expression::default();
 
             if let Some(takes) = dfa_data.take_vars.get(eligible_idx) {
                 for r in 0..bundle_size {
-                    // Only items that land in certain positions within the bundle
-                    // (e.g. "the third item") receive a discount.
                     #[expect(
                         clippy::cast_possible_truncation,
                         reason = "bundle_size is u16, and r < bundle_size"
@@ -277,7 +342,6 @@ impl PositionalDiscountVars {
 
             if let Some(&(_idx, discount_var)) = self.item_discounts.get(eligible_idx) {
                 let expr = Expression::from(discount_var);
-
                 let observed_expr = Expression::from(discount_var) - discount_sum.clone();
 
                 observer.on_promotion_constraint(
@@ -291,26 +355,22 @@ impl PositionalDiscountVars {
                 state.add_eq_constraint(expr - discount_sum, 0.0);
             }
         }
+    }
 
-        // Constraint 6: Restrict transitions to valid states
+    fn add_dfa_transition_restrictions(
+        promotion_key: PromotionKey,
+        dfa_data: &PositionalDFAConstraintData,
+        num_eligible: usize,
+        bundle_size: usize,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         for pos in 0..num_eligible {
             for r in 0..bundle_size {
-                // We can only take an item using a given bundle state if the DFA
-                // is actually in that state at this position.
                 if let (Some(take_var), Some(state_var)) = (
-                    // Look at all "take" decisions for this item.
                     dfa_data.take_vars.get(pos).and_then(|t| t.get(r).copied()),
-                    // Pick the one that corresponds to state `r`
                     dfa_data.state_vars.get(pos).and_then(|s| s.get(r).copied()),
                 ) {
-                    // We are only allowed to take an item in state `r` if the DFA is actually in state `r`:
-                    //
-                    // | take_var | state_var | Valid? | Why                                 |
-                    // | -------- | --------- | ------ | ----------------------------------- |
-                    // |        0 |         0 |    Y   | Not taking the item                 |
-                    // |        0 |         1 |    Y   | State active, item not taken        |
-                    // |        1 |         1 |    Y   | Taking item in active state         |
-                    // |        1 |         0 |    N   | Taking item in a state we're not in |
                     let expr = Expression::from(take_var) - state_var;
 
                     observer.on_promotion_constraint(
@@ -434,8 +494,7 @@ impl ILPPromotionVars for PositionalDiscountVars {
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<(), SolverError> {
-        self.add_dfa_constraints(promotion_key, state, observer);
-        self.add_budget_constraints(item_group, state, observer)
+        self.add_model_constraints(promotion_key, item_group, state, observer)
     }
 
     fn calculate_item_discounts(

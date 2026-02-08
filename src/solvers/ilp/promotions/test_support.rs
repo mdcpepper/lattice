@@ -35,6 +35,11 @@ pub(crate) struct CountingObserver {
 }
 
 #[derive(Debug, Default)]
+pub(crate) struct PromotionVarCaptureObserver {
+    pub(crate) discounted_by_item: Vec<(usize, i64, Option<String>)>,
+}
+
+#[derive(Debug, Default)]
 pub(crate) struct MapSolution {
     values: FxHashMap<Variable, f64>,
 }
@@ -168,6 +173,37 @@ impl ILPObserver for CountingObserver {
 
     fn on_objective_term(&mut self, _var: Variable, _coefficient: f64) {
         self.objective_terms += 1;
+    }
+}
+
+impl ILPObserver for PromotionVarCaptureObserver {
+    fn on_presence_variable(&mut self, _item_idx: usize, _var: Variable, _price_minor: i64) {}
+
+    fn on_promotion_variable(
+        &mut self,
+        _promotion_key: PromotionKey,
+        item_idx: usize,
+        _var: Variable,
+        discounted_price_minor: i64,
+        metadata: Option<&str>,
+    ) {
+        self.discounted_by_item.push((
+            item_idx,
+            discounted_price_minor,
+            metadata.map(str::to_string),
+        ));
+    }
+
+    fn on_exclusivity_constraint(&mut self, _item_idx: usize, _constraint_expr: &Expression) {}
+
+    fn on_promotion_constraint(
+        &mut self,
+        _promotion_key: PromotionKey,
+        _constraint_type: &str,
+        _constraint_expr: &Expression,
+        _relation: &str,
+        _rhs: f64,
+    ) {
     }
 }
 

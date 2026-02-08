@@ -1,0 +1,50 @@
+products:
+  ladder-item-01:
+    name: Ladder Item 01
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-02:
+    name: Ladder Item 02
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-03:
+    name: Ladder Item 03
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-04:
+    name: Ladder Item 04
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-05:
+    name: Ladder Item 05
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-06:
+    name: Ladder Item 06
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-07:
+    name: Ladder Item 07
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-08:
+    name: Ladder Item 08
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-09:
+    name: Ladder Item 09
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-10:
+    name: Ladder Item 10
+    tags: [ladder]
+    price: 10.00 GBP

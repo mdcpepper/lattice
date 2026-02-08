@@ -33,6 +33,9 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 enum MixAndMatchRuntimeDiscount {
     PercentAllItems(Percentage),
+    AmountOffEachItem(i64),
+    FixedPriceEachItem(i64),
+    AmountOffTotal(i64),
     PercentCheapest(Percentage),
     FixedCheapest(i64),
     FixedTotal(i64),
@@ -92,86 +95,133 @@ impl MixAndMatchVars {
         exprs
     }
 
-    /// Add mix-and-match constraints to the model.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "Constraint assembly is verbose by design."
-    )]
-    pub fn add_constraints(
+    fn add_model_constraints(
         &self,
         promotion_key: PromotionKey,
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) {
-        if self.slot_vars.is_empty() || (self.y_bundle.is_none() && self.bundle_formed.is_none()) {
+        if self.slot_vars.is_empty() || !self.has_bundle_control_vars() {
             return;
         }
 
-        // Slot constraints
+        self.add_slot_constraints(promotion_key, state, observer);
+
+        if self.needs_target_constraints() {
+            self.add_target_constraints(promotion_key, state, observer);
+        }
+    }
+
+    fn has_bundle_control_vars(&self) -> bool {
+        self.y_bundle.is_some() || self.bundle_formed.is_some()
+    }
+
+    fn needs_target_constraints(&self) -> bool {
+        self.target_vars.iter().any(Option::is_some)
+    }
+
+    fn add_slot_constraints(
+        &self,
+        promotion_key: PromotionKey,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         for (slot_idx, slot_vars) in self.slot_vars.iter().enumerate() {
             let slot_sum: Expression = slot_vars.iter().map(|(_, var)| *var).sum();
             let (min, max) = self.slot_bounds.get(slot_idx).copied().unwrap_or((0, None));
-            let min_i32 = i32_from_usize(min);
 
             if let Some(y_bundle) = self.y_bundle {
-                let expr = slot_sum.clone() - min_i32 * y_bundle;
-
-                observer.on_promotion_constraint(promotion_key, "slot min", &expr, ">=", 0.0);
-
-                state.add_geq_constraint(slot_sum.clone() - min_i32 * y_bundle, 0.0);
-
-                if let Some(max) = max {
-                    let max_i32 = i32_from_usize(max);
-                    let expr = slot_sum.clone() - max_i32 * y_bundle;
-
-                    observer.on_promotion_constraint(promotion_key, "slot max", &expr, "<=", 0.0);
-
-                    state.add_leq_constraint(slot_sum.clone() - max_i32 * y_bundle, 0.0);
-                }
-            } else if let Some(bundle_formed) = self.bundle_formed {
-                let expr = slot_sum.clone() - min_i32 * bundle_formed;
-
-                observer.on_promotion_constraint(
+                Self::add_fixed_arity_slot_constraints(
                     promotion_key,
-                    "slot min (formed)",
-                    &expr,
-                    ">=",
-                    0.0,
+                    state,
+                    observer,
+                    slot_sum,
+                    min,
+                    max,
+                    y_bundle,
                 );
-
-                state.add_geq_constraint(slot_sum.clone() - min_i32 * bundle_formed, 0.0);
-
-                if let Some(max) = max {
-                    let max_i32 = i32_from_usize(max);
-                    let expr = slot_sum.clone() - max_i32 * bundle_formed;
-
-                    observer.on_promotion_constraint(
-                        promotion_key,
-                        "slot max (formed)",
-                        &expr,
-                        "<=",
-                        0.0,
-                    );
-
-                    state.add_leq_constraint(slot_sum.clone() - max_i32 * bundle_formed, 0.0);
-                }
-
-                // If slot has enough items, bundle can be formed.
-                let expr = Expression::from(bundle_formed) - slot_sum.clone() / min_i32;
-
-                observer.on_promotion_constraint(promotion_key, "bundle formed", &expr, "<=", 0.0);
-
-                state.add_leq_constraint(Expression::from(bundle_formed) - slot_sum / min_i32, 0.0);
+            } else if let Some(bundle_formed) = self.bundle_formed {
+                Self::add_variable_arity_slot_constraints(
+                    promotion_key,
+                    state,
+                    observer,
+                    slot_sum,
+                    min,
+                    max,
+                    bundle_formed,
+                );
             }
         }
+    }
 
-        // Target constraints (cheapest item)
-        let needs_target = self.target_vars.iter().any(Option::is_some);
+    fn add_fixed_arity_slot_constraints(
+        promotion_key: PromotionKey,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+        slot_sum: Expression,
+        min: usize,
+        max: Option<usize>,
+        y_bundle: Variable,
+    ) {
+        let min_i32 = i32_from_usize(min);
+        let min_expr = slot_sum.clone() - min_i32 * y_bundle;
 
-        if !needs_target {
-            return;
+        observer.on_promotion_constraint(promotion_key, "slot min", &min_expr, ">=", 0.0);
+        state.add_geq_constraint(min_expr, 0.0);
+
+        if let Some(max) = max {
+            let max_i32 = i32_from_usize(max);
+            let max_expr = slot_sum - max_i32 * y_bundle;
+
+            observer.on_promotion_constraint(promotion_key, "slot max", &max_expr, "<=", 0.0);
+            state.add_leq_constraint(max_expr, 0.0);
+        }
+    }
+
+    fn add_variable_arity_slot_constraints(
+        promotion_key: PromotionKey,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+        slot_sum: Expression,
+        min: usize,
+        max: Option<usize>,
+        bundle_formed: Variable,
+    ) {
+        let min_i32 = i32_from_usize(min);
+        let min_expr = slot_sum.clone() - min_i32 * bundle_formed;
+
+        observer.on_promotion_constraint(promotion_key, "slot min (formed)", &min_expr, ">=", 0.0);
+        state.add_geq_constraint(min_expr, 0.0);
+
+        if let Some(max) = max {
+            let max_i32 = i32_from_usize(max);
+            let max_expr = slot_sum.clone() - max_i32 * bundle_formed;
+
+            observer.on_promotion_constraint(
+                promotion_key,
+                "slot max (formed)",
+                &max_expr,
+                "<=",
+                0.0,
+            );
+
+            state.add_leq_constraint(max_expr, 0.0);
         }
 
+        // If slot has enough items, bundle can be formed.
+        let formed_expr = Expression::from(bundle_formed) - slot_sum / min_i32;
+
+        observer.on_promotion_constraint(promotion_key, "bundle formed", &formed_expr, "<=", 0.0);
+
+        state.add_leq_constraint(formed_expr, 0.0);
+    }
+
+    fn add_target_constraints(
+        &self,
+        promotion_key: PromotionKey,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) {
         let selected_exprs = self.selected_exprs();
         let mut target_sum = Expression::default();
 
@@ -193,61 +243,97 @@ impl MixAndMatchVars {
             );
 
             state.add_leq_constraint(Expression::from(target_var) - selected_expr, 0.0);
+
             target_sum += target_var;
         }
 
         if let Some(y_bundle) = self.y_bundle {
-            let mut prefix_selected = Expression::default();
-            let mut prefix_targets = Expression::default();
-            let k_total = i32_from_usize(self.bundle_size);
-
-            if k_total > 0 {
-                for &(item_idx, _price) in &self.sorted_items {
-                    let selected_expr = selected_exprs.get(item_idx).cloned().unwrap_or_default();
-
-                    prefix_selected += selected_expr;
-
-                    if let Some(target_var) = self.target_vars.get(item_idx).and_then(|v| *v) {
-                        prefix_targets += target_var;
-                    }
-
-                    let expr = prefix_targets.clone()
-                        - (prefix_selected.clone() - (k_total - 1) * y_bundle);
-
-                    observer.on_promotion_constraint(
-                        promotion_key,
-                        "cheapest prefix",
-                        &expr,
-                        ">=",
-                        0.0,
-                    );
-
-                    state.add_geq_constraint(
-                        prefix_targets.clone()
-                            - (prefix_selected.clone() - (k_total - 1) * y_bundle),
-                        0.0,
-                    );
-                }
-            }
-
-            let expr = target_sum.clone() - y_bundle;
-
-            observer.on_promotion_constraint(promotion_key, "target count", &expr, "=", 0.0);
-
-            state.add_eq_constraint(target_sum - y_bundle, 0.0);
-        } else if let Some(bundle_formed) = self.bundle_formed {
-            let expr = target_sum.clone() - bundle_formed;
-
-            observer.on_promotion_constraint(
+            self.add_fixed_arity_target_constraints(
                 promotion_key,
-                "target count (formed)",
-                &expr,
-                "=",
-                0.0,
+                state,
+                observer,
+                &selected_exprs,
+                target_sum,
+                y_bundle,
             );
-
-            state.add_eq_constraint(target_sum - bundle_formed, 0.0);
+        } else if let Some(bundle_formed) = self.bundle_formed {
+            Self::add_variable_arity_target_constraints(
+                promotion_key,
+                state,
+                observer,
+                target_sum,
+                bundle_formed,
+            );
         }
+    }
+
+    fn add_fixed_arity_target_constraints(
+        &self,
+        promotion_key: PromotionKey,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+        selected_exprs: &[Expression],
+        target_sum: Expression,
+        y_bundle: Variable,
+    ) {
+        let mut prefix_selected = Expression::default();
+        let mut prefix_targets = Expression::default();
+
+        let k_total = i32_from_usize(self.bundle_size);
+
+        if k_total > 0 {
+            for &(item_idx, _price) in &self.sorted_items {
+                let selected_expr = selected_exprs.get(item_idx).cloned().unwrap_or_default();
+
+                prefix_selected += selected_expr;
+
+                if let Some(target_var) = self.target_vars.get(item_idx).and_then(|v| *v) {
+                    prefix_targets += target_var;
+                }
+
+                let expr =
+                    prefix_targets.clone() - (prefix_selected.clone() - (k_total - 1) * y_bundle);
+
+                observer.on_promotion_constraint(
+                    promotion_key,
+                    "cheapest prefix",
+                    &expr,
+                    ">=",
+                    0.0,
+                );
+
+                state.add_geq_constraint(
+                    prefix_targets.clone() - (prefix_selected.clone() - (k_total - 1) * y_bundle),
+                    0.0,
+                );
+            }
+        }
+
+        let target_count_expr = target_sum - y_bundle;
+
+        observer.on_promotion_constraint(
+            promotion_key,
+            "target count",
+            &target_count_expr,
+            "=",
+            0.0,
+        );
+
+        state.add_eq_constraint(target_count_expr, 0.0);
+    }
+
+    fn add_variable_arity_target_constraints(
+        promotion_key: PromotionKey,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+        target_sum: Expression,
+        bundle_formed: Variable,
+    ) {
+        let expr = target_sum - bundle_formed;
+
+        observer.on_promotion_constraint(promotion_key, "target count (formed)", &expr, "=", 0.0);
+
+        state.add_eq_constraint(expr, 0.0);
     }
 
     /// Add budget constraints for mix-and-match promotions
@@ -337,6 +423,7 @@ impl MixAndMatchVars {
         if let Some(y_bundle) = self.y_bundle {
             let count = solution.value(y_bundle).round();
             let count = count.to_i64().unwrap_or(0).max(0);
+
             usize::try_from(count).unwrap_or(0)
         } else if let Some(bundle_formed) = self.bundle_formed {
             usize::from(solution.value(bundle_formed) > BINARY_THRESHOLD)
@@ -383,7 +470,7 @@ impl ILPPromotionVars for MixAndMatchVars {
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<(), SolverError> {
-        self.add_constraints(promotion_key, state, observer);
+        self.add_model_constraints(promotion_key, state, observer);
         self.add_budget_constraints(item_group, state, observer)
     }
 
@@ -410,6 +497,7 @@ impl ILPPromotionVars for MixAndMatchVars {
 
         let discounts = calculate_discounts_for_vars(solution, self, item_group)?;
         let currency = item_group.currency();
+
         let mut applications = SmallVec::new();
 
         for bundle in bundles {
@@ -453,6 +541,15 @@ fn runtime_discount_from_config(discount: &MixAndMatchDiscount<'_>) -> MixAndMat
         MixAndMatchDiscount::PercentAllItems(pct) => {
             MixAndMatchRuntimeDiscount::PercentAllItems(*pct)
         }
+        MixAndMatchDiscount::AmountOffEachItem(amount) => {
+            MixAndMatchRuntimeDiscount::AmountOffEachItem(amount.to_minor_units())
+        }
+        MixAndMatchDiscount::FixedPriceEachItem(amount) => {
+            MixAndMatchRuntimeDiscount::FixedPriceEachItem(amount.to_minor_units())
+        }
+        MixAndMatchDiscount::AmountOffTotal(amount) => {
+            MixAndMatchRuntimeDiscount::AmountOffTotal(amount.to_minor_units())
+        }
         MixAndMatchDiscount::PercentCheapest(pct) => {
             MixAndMatchRuntimeDiscount::PercentCheapest(*pct)
         }
@@ -477,10 +574,15 @@ fn calculate_discounted_minor_for_budget(
 
             full_minor.saturating_sub(discount_amount)
         }
-        // Conservative approximation for budgeting fixed-total bundles:
-        // assume the item could be fully discounted.
-        MixAndMatchRuntimeDiscount::FixedTotal(_) => 0,
-        MixAndMatchRuntimeDiscount::FixedCheapest(fixed_minor) => fixed_minor,
+        MixAndMatchRuntimeDiscount::AmountOffEachItem(amount_off) => {
+            full_minor.saturating_sub(amount_off)
+        }
+        // Conservative approximation for budgeting bundle-total discounts:
+        // assume each selected item could be fully discounted.
+        MixAndMatchRuntimeDiscount::AmountOffTotal(_)
+        | MixAndMatchRuntimeDiscount::FixedTotal(_) => 0,
+        MixAndMatchRuntimeDiscount::FixedPriceEachItem(fixed_minor)
+        | MixAndMatchRuntimeDiscount::FixedCheapest(fixed_minor) => fixed_minor,
     };
 
     Ok(discounted_minor.max(0))
@@ -563,6 +665,7 @@ fn build_bundles(solution: &dyn Solution, vars: &MixAndMatchVars) -> Vec<Vec<usi
     bundles
 }
 
+#[expect(clippy::too_many_lines, reason = "Complex discount calculation logic")]
 fn calculate_discounts_for_vars(
     solution: &dyn Solution,
     vars: &MixAndMatchVars,
@@ -581,6 +684,29 @@ fn calculate_discounts_for_vars(
                 let discounted_minor = discounted_minor_percent(&pct, original_minor)?;
 
                 discounts.insert(item_idx, (original_minor, discounted_minor));
+            }
+        }
+        MixAndMatchRuntimeDiscount::AmountOffEachItem(amount_off) => {
+            for (item_idx, item) in item_group.iter().enumerate() {
+                if !vars.is_item_participating(solution, item_idx) {
+                    continue;
+                }
+
+                let original_minor = item.price().to_minor_units();
+                let discounted_minor = original_minor.saturating_sub(amount_off).max(0);
+
+                discounts.insert(item_idx, (original_minor, discounted_minor));
+            }
+        }
+        MixAndMatchRuntimeDiscount::FixedPriceEachItem(fixed_minor) => {
+            let fixed_minor = fixed_minor.max(0);
+
+            for (item_idx, item) in item_group.iter().enumerate() {
+                if !vars.is_item_participating(solution, item_idx) {
+                    continue;
+                }
+
+                discounts.insert(item_idx, (item.price().to_minor_units(), fixed_minor));
             }
         }
         MixAndMatchRuntimeDiscount::PercentCheapest(pct) => {
@@ -617,6 +743,43 @@ fn calculate_discounts_for_vars(
                 };
 
                 discounts.insert(item_idx, (original_minor, final_minor));
+            }
+        }
+        MixAndMatchRuntimeDiscount::AmountOffTotal(amount_off) => {
+            let bundles = build_bundles(solution, vars);
+
+            for bundle_items in bundles {
+                if bundle_items.is_empty() {
+                    continue;
+                }
+
+                let mut original_total = 0_i64;
+
+                for &item_idx in &bundle_items {
+                    let item = item_group.get_item(item_idx)?;
+
+                    original_total += item.price().to_minor_units();
+                }
+
+                let bundle_total = original_total.saturating_sub(amount_off).max(0);
+                let mut remaining = bundle_total;
+
+                for (i, &item_idx) in bundle_items.iter().enumerate() {
+                    let item = item_group.get_item(item_idx)?;
+                    let original_minor = item.price().to_minor_units();
+
+                    let final_minor = if i == bundle_items.len() - 1 {
+                        remaining
+                    } else if original_total == 0 {
+                        0
+                    } else {
+                        proportional_alloc(bundle_total, original_minor, original_total)
+                    };
+
+                    remaining -= final_minor;
+
+                    discounts.insert(item_idx, (original_minor, final_minor));
+                }
             }
         }
         MixAndMatchRuntimeDiscount::FixedTotal(bundle_price) => {
@@ -697,6 +860,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         let promotion_key = self.key();
         let runtime_discount = runtime_discount_from_config(self.discount());
         let application_limit = self.budget().application_limit;
+
         let monetary_limit_minor = self
             .budget()
             .monetary_limit
@@ -809,8 +973,15 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
                     MixAndMatchDiscount::PercentAllItems(pct) => {
                         discounted_minor_percent(pct, price_minor)?
                     }
+                    MixAndMatchDiscount::AmountOffEachItem(amount) => {
+                        price_minor.saturating_sub(amount.to_minor_units()).max(0)
+                    }
+                    MixAndMatchDiscount::FixedPriceEachItem(amount) => {
+                        amount.to_minor_units().max(0)
+                    }
                     MixAndMatchDiscount::FixedTotal(_) => 0,
-                    MixAndMatchDiscount::PercentCheapest(_)
+                    MixAndMatchDiscount::AmountOffTotal(_)
+                    | MixAndMatchDiscount::PercentCheapest(_)
                     | MixAndMatchDiscount::FixedCheapest(_) => price_minor,
                 };
 
@@ -901,6 +1072,21 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
             } else if let Some(bundle_formed) = bundle_formed {
                 state.add_to_objective(bundle_formed, coeff);
                 observer.on_objective_term(bundle_formed, coeff);
+            }
+        }
+
+        // Amount off total objective term (negative per bundle formed)
+        if let MixAndMatchDiscount::AmountOffTotal(amount) = self.discount() {
+            let amount_off = amount.to_minor_units();
+            let coeff = i64_to_f64_exact(amount_off)
+                .ok_or(SolverError::MinorUnitsNotRepresentable(amount_off))?;
+
+            if let Some(y_bundle) = y_bundle {
+                state.add_to_objective(y_bundle, -coeff);
+                observer.on_objective_term(y_bundle, -coeff);
+            } else if let Some(bundle_formed) = bundle_formed {
+                state.add_to_objective(bundle_formed, -coeff);
+                observer.on_objective_term(bundle_formed, -coeff);
             }
         }
 
@@ -1024,7 +1210,7 @@ mod tests {
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
             .expect("Expected mix-and-match vars");
 
-        vars.add_constraints(promo.key(), &mut state, &mut observer);
+        vars.add_model_constraints(promo.key(), &mut state, &mut observer);
 
         Ok(())
     }
@@ -1700,7 +1886,7 @@ mod tests {
         // Should use bundle_formed for variable arity
         assert!(vars.bundle_formed.is_some());
 
-        vars.add_constraints(promo.key(), &mut state, &mut observer);
+        vars.add_model_constraints(promo.key(), &mut state, &mut observer);
 
         Ok(())
     }
@@ -1799,7 +1985,7 @@ mod tests {
         let mut state = ILPState::new(pb, Expression::default());
         let mut observer = RecordingObserver::default();
 
-        vars.add_constraints(PromotionKey::default(), &mut state, &mut observer);
+        vars.add_model_constraints(PromotionKey::default(), &mut state, &mut observer);
 
         let (_pb, _cost, _presence, constraints) = state.into_parts_with_constraints();
 
@@ -1852,7 +2038,7 @@ mod tests {
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
             .expect("Expected mix-and-match vars");
 
-        vars.add_constraints(promo.key(), &mut state, &mut observer);
+        vars.add_model_constraints(promo.key(), &mut state, &mut observer);
 
         let slot0_var = vars.slot_vars[0][0].1;
         let slot1_var = vars.slot_vars[0][1].1;
@@ -1957,7 +2143,7 @@ mod tests {
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
             .expect("Expected mix-and-match vars");
 
-        vars.add_constraints(promo.key(), &mut state, &mut observer);
+        vars.add_model_constraints(promo.key(), &mut state, &mut observer);
 
         let slot0_var = vars.slot_vars[0][0].1;
         let slot1_var = vars.slot_vars[0][1].1;
@@ -2280,6 +2466,28 @@ mod tests {
 
         assert_eq!(percent, 150);
 
+        let amount_off_each = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::AmountOffEachItem(50),
+        )?;
+
+        assert_eq!(amount_off_each, 150);
+
+        let fixed_price_each = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::FixedPriceEachItem(90),
+        )?;
+
+        assert_eq!(fixed_price_each, 90);
+
+        let amount_off_total = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::AmountOffTotal(120),
+        )?;
+
+        // Conservative for bundle-total discounts in budget constraints.
+        assert_eq!(amount_off_total, 0);
+
         let fixed_total = calculate_discounted_minor_for_budget(
             200,
             MixAndMatchRuntimeDiscount::FixedTotal(120),
@@ -2555,7 +2763,7 @@ mod tests {
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
             .expect("Expected mix-and-match vars");
 
-        vars.add_constraints(promo.key(), &mut state, &mut observer);
+        vars.add_model_constraints(promo.key(), &mut state, &mut observer);
 
         let slot0_var = vars.slot_vars[0][0].1;
         let slot1_var = vars.slot_vars[0][1].1;
@@ -2634,7 +2842,7 @@ mod tests {
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<MixAndMatchVars>())
             .expect("Expected mix-and-match vars");
 
-        vars.add_constraints(promo.key(), &mut state, &mut observer);
+        vars.add_model_constraints(promo.key(), &mut state, &mut observer);
 
         let cheapest_prefix_count = observer
             .promotion_constraints

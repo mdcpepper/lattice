@@ -1,0 +1,35 @@
+root: all
+
+nodes:
+  all:
+    promotions: [tiered-threshold-ladder]
+    output: pass-through
+
+promotions:
+  tiered-threshold-ladder:
+    type: tiered_threshold
+    name: Tiered Threshold Ladder
+    tiers:
+      - lower_threshold:
+          monetary: "20.00 GBP"
+        contribution_tags: []
+        discount_tags: []
+        discount:
+          type: percent_each_item
+          amount: "10%"
+      - lower_threshold:
+          monetary: "40.00 GBP"
+        contribution_tags: []
+        discount_tags: []
+        discount:
+          type: percent_each_item
+          amount: "20%"
+      - lower_threshold:
+          monetary: "60.00 GBP"
+        upper_threshold:
+          monetary: "80.00 GBP"
+        contribution_tags: []
+        discount_tags: []
+        discount:
+          type: percent_each_item
+          amount: "30%"
