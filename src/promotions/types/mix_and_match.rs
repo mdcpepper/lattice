@@ -18,11 +18,20 @@ pub enum MixAndMatchDiscount<'a> {
     /// Percentage discount applied to all items in the bundle.
     PercentAllItems(Percentage),
 
-    /// Percentage discount applied only to the cheapest item in the bundle.
-    PercentCheapest(Percentage),
+    /// Fixed amount subtracted from each item's price in the bundle.
+    AmountOffEachItem(Money<'a, Currency>),
+
+    /// Each item in the bundle is overridden to a fixed price.
+    FixedPriceEachItem(Money<'a, Currency>),
+
+    /// Fixed amount subtracted from the bundle total.
+    AmountOffTotal(Money<'a, Currency>),
 
     /// Fixed total price for the whole bundle.
     FixedTotal(Money<'a, Currency>),
+
+    /// Percentage discount applied only to the cheapest item in the bundle.
+    PercentCheapest(Percentage),
 
     /// Fixed price applied only to the cheapest item in the bundle.
     FixedCheapest(Money<'a, Currency>),
@@ -184,6 +193,9 @@ mod tests {
         assert_eq!(promo.bundle_size(), 2);
 
         let _ = MixAndMatchDiscount::FixedTotal(Money::from_minor(500, GBP));
+        let _ = MixAndMatchDiscount::AmountOffEachItem(Money::from_minor(50, GBP));
+        let _ = MixAndMatchDiscount::FixedPriceEachItem(Money::from_minor(150, GBP));
+        let _ = MixAndMatchDiscount::AmountOffTotal(Money::from_minor(100, GBP));
     }
 
     #[test]

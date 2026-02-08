@@ -33,6 +33,9 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 enum MixAndMatchRuntimeDiscount {
     PercentAllItems(Percentage),
+    AmountOffEachItem(i64),
+    FixedPriceEachItem(i64),
+    AmountOffTotal(i64),
     PercentCheapest(Percentage),
     FixedCheapest(i64),
     FixedTotal(i64),
@@ -453,6 +456,15 @@ fn runtime_discount_from_config(discount: &MixAndMatchDiscount<'_>) -> MixAndMat
         MixAndMatchDiscount::PercentAllItems(pct) => {
             MixAndMatchRuntimeDiscount::PercentAllItems(*pct)
         }
+        MixAndMatchDiscount::AmountOffEachItem(amount) => {
+            MixAndMatchRuntimeDiscount::AmountOffEachItem(amount.to_minor_units())
+        }
+        MixAndMatchDiscount::FixedPriceEachItem(amount) => {
+            MixAndMatchRuntimeDiscount::FixedPriceEachItem(amount.to_minor_units())
+        }
+        MixAndMatchDiscount::AmountOffTotal(amount) => {
+            MixAndMatchRuntimeDiscount::AmountOffTotal(amount.to_minor_units())
+        }
         MixAndMatchDiscount::PercentCheapest(pct) => {
             MixAndMatchRuntimeDiscount::PercentCheapest(*pct)
         }
@@ -477,10 +489,15 @@ fn calculate_discounted_minor_for_budget(
 
             full_minor.saturating_sub(discount_amount)
         }
-        // Conservative approximation for budgeting fixed-total bundles:
-        // assume the item could be fully discounted.
-        MixAndMatchRuntimeDiscount::FixedTotal(_) => 0,
-        MixAndMatchRuntimeDiscount::FixedCheapest(fixed_minor) => fixed_minor,
+        MixAndMatchRuntimeDiscount::AmountOffEachItem(amount_off) => {
+            full_minor.saturating_sub(amount_off)
+        }
+        // Conservative approximation for budgeting bundle-total discounts:
+        // assume each selected item could be fully discounted.
+        MixAndMatchRuntimeDiscount::AmountOffTotal(_)
+        | MixAndMatchRuntimeDiscount::FixedTotal(_) => 0,
+        MixAndMatchRuntimeDiscount::FixedPriceEachItem(fixed_minor)
+        | MixAndMatchRuntimeDiscount::FixedCheapest(fixed_minor) => fixed_minor,
     };
 
     Ok(discounted_minor.max(0))
@@ -563,6 +580,7 @@ fn build_bundles(solution: &dyn Solution, vars: &MixAndMatchVars) -> Vec<Vec<usi
     bundles
 }
 
+#[expect(clippy::too_many_lines, reason = "Complex discount calculation logic")]
 fn calculate_discounts_for_vars(
     solution: &dyn Solution,
     vars: &MixAndMatchVars,
@@ -581,6 +599,30 @@ fn calculate_discounts_for_vars(
                 let discounted_minor = discounted_minor_percent(&pct, original_minor)?;
 
                 discounts.insert(item_idx, (original_minor, discounted_minor));
+            }
+        }
+        MixAndMatchRuntimeDiscount::AmountOffEachItem(amount_off) => {
+            for (item_idx, item) in item_group.iter().enumerate() {
+                if !vars.is_item_participating(solution, item_idx) {
+                    continue;
+                }
+
+                let original_minor = item.price().to_minor_units();
+                let discounted_minor = original_minor.saturating_sub(amount_off).max(0);
+
+                discounts.insert(item_idx, (original_minor, discounted_minor));
+            }
+        }
+        MixAndMatchRuntimeDiscount::FixedPriceEachItem(fixed_minor) => {
+            let fixed_minor = fixed_minor.max(0);
+
+            for (item_idx, item) in item_group.iter().enumerate() {
+                if !vars.is_item_participating(solution, item_idx) {
+                    continue;
+                }
+
+                let original_minor = item.price().to_minor_units();
+                discounts.insert(item_idx, (original_minor, fixed_minor));
             }
         }
         MixAndMatchRuntimeDiscount::PercentCheapest(pct) => {
@@ -617,6 +659,41 @@ fn calculate_discounts_for_vars(
                 };
 
                 discounts.insert(item_idx, (original_minor, final_minor));
+            }
+        }
+        MixAndMatchRuntimeDiscount::AmountOffTotal(amount_off) => {
+            let bundles = build_bundles(solution, vars);
+
+            for bundle_items in bundles {
+                if bundle_items.is_empty() {
+                    continue;
+                }
+
+                let mut original_total = 0_i64;
+
+                for &item_idx in &bundle_items {
+                    let item = item_group.get_item(item_idx)?;
+                    original_total += item.price().to_minor_units();
+                }
+
+                let bundle_total = original_total.saturating_sub(amount_off).max(0);
+                let mut remaining = bundle_total;
+
+                for (i, &item_idx) in bundle_items.iter().enumerate() {
+                    let item = item_group.get_item(item_idx)?;
+                    let original_minor = item.price().to_minor_units();
+
+                    let final_minor = if i == bundle_items.len() - 1 {
+                        remaining
+                    } else if original_total == 0 {
+                        0
+                    } else {
+                        proportional_alloc(bundle_total, original_minor, original_total)
+                    };
+
+                    remaining -= final_minor;
+                    discounts.insert(item_idx, (original_minor, final_minor));
+                }
             }
         }
         MixAndMatchRuntimeDiscount::FixedTotal(bundle_price) => {
@@ -809,8 +886,15 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
                     MixAndMatchDiscount::PercentAllItems(pct) => {
                         discounted_minor_percent(pct, price_minor)?
                     }
+                    MixAndMatchDiscount::AmountOffEachItem(amount) => {
+                        price_minor.saturating_sub(amount.to_minor_units()).max(0)
+                    }
+                    MixAndMatchDiscount::FixedPriceEachItem(amount) => {
+                        amount.to_minor_units().max(0)
+                    }
                     MixAndMatchDiscount::FixedTotal(_) => 0,
-                    MixAndMatchDiscount::PercentCheapest(_)
+                    MixAndMatchDiscount::AmountOffTotal(_)
+                    | MixAndMatchDiscount::PercentCheapest(_)
                     | MixAndMatchDiscount::FixedCheapest(_) => price_minor,
                 };
 
@@ -901,6 +985,21 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
             } else if let Some(bundle_formed) = bundle_formed {
                 state.add_to_objective(bundle_formed, coeff);
                 observer.on_objective_term(bundle_formed, coeff);
+            }
+        }
+
+        // Amount off total objective term (negative per bundle formed)
+        if let MixAndMatchDiscount::AmountOffTotal(amount) = self.discount() {
+            let amount_off = amount.to_minor_units();
+            let coeff = i64_to_f64_exact(amount_off)
+                .ok_or(SolverError::MinorUnitsNotRepresentable(amount_off))?;
+
+            if let Some(y_bundle) = y_bundle {
+                state.add_to_objective(y_bundle, -coeff);
+                observer.on_objective_term(y_bundle, -coeff);
+            } else if let Some(bundle_formed) = bundle_formed {
+                state.add_to_objective(bundle_formed, -coeff);
+                observer.on_objective_term(bundle_formed, -coeff);
             }
         }
 
@@ -2279,6 +2378,28 @@ mod tests {
         )?;
 
         assert_eq!(percent, 150);
+
+        let amount_off_each = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::AmountOffEachItem(50),
+        )?;
+
+        assert_eq!(amount_off_each, 150);
+
+        let fixed_price_each = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::FixedPriceEachItem(90),
+        )?;
+
+        assert_eq!(fixed_price_each, 90);
+
+        let amount_off_total = calculate_discounted_minor_for_budget(
+            200,
+            MixAndMatchRuntimeDiscount::AmountOffTotal(120),
+        )?;
+
+        // Conservative for bundle-total discounts in budget constraints.
+        assert_eq!(amount_off_total, 0);
 
         let fixed_total = calculate_discounted_minor_for_budget(
             200,

@@ -19,6 +19,7 @@ use crate::{
 mod direct_discount;
 mod mix_and_match;
 mod positional_discount;
+mod tiered_threshold;
 
 #[cfg(test)]
 pub(crate) mod test_support;

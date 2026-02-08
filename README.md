@@ -10,6 +10,7 @@ optimisation engine written in Rust.
   * [Direct Discount Promotions](#direct-discount-promotions)
   * [Positional Discount Promotions](#positional-discount-promotions)
   * [Mix and Match Promotions](#mix-and-match-promotions)
+  * [Tiered Threshold Promotions](#tiered-threshold-promotions)
 * [Stacking](#stacking)
 * [Budgets](#budgets)
   * [Application Budgets](#application-budgets)
@@ -173,6 +174,62 @@ cargo run --release --example basket -- -f mix-and-match -n 5
   Savings:   (35.24%) £3.70  
 
  89µs 965ns (0.000089965s)
+```
+
+### Tiered Threshold Promotions
+
+Tiered Threshold promotions define multiple spend thresholds, where each tier can use different contribution tags, discount tags, and discount types. If multiple tiers qualify, the solver selects the single tier that gives the cheapest final basket total.
+
+```yaml
+multi-tier-basket-discount:
+  type: tiered_threshold
+  name: Multi-Tier Basket Discount
+  tiers:
+    - threshold: "30.00 GBP"
+      contribution_tags: []
+      discount_tags: []
+      discount:
+        type: amount_off_each_item
+        amount: "0.50 GBP"
+    - threshold: "45.00 GBP"
+      contribution_tags: []
+      discount_tags: []
+      discount:
+        type: percent_each_item
+        amount: "10%"
+    - threshold: "60.00 GBP"
+      contribution_tags: []
+      discount_tags: []
+      discount:
+        type: fixed_price_each_item
+        amount: "1.00 GBP"
+```
+
+```bash
+cargo run --release --example basket -- -f tiered-threshold -n 6
+```
+
+```
+╭──────┬────────────┬────────┬────────────┬──────────────────┬─────────────────┬─────────────────────────────────╮
+│      │ Item       │ Tags   │ Base Price │ Discounted Price │         Savings │ Promotion                       │
+├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
+│ #1   │ Red Wine   │ wine   │     £12.00 │           £10.80 │ (10.00%) -£1.20 │ #1   Multi-Tier Basket Discount │
+├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
+│ #2   │ White Wine │ wine   │     £10.00 │            £9.00 │ (10.00%) -£1.00 │ #1   Multi-Tier Basket Discount │
+├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
+│ #3   │ Rose Wine  │ wine   │      £8.00 │            £7.20 │ (10.00%) -£0.80 │ #1   Multi-Tier Basket Discount │
+├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
+│ #4   │ Cheddar    │ cheese │      £5.00 │            £4.50 │ (10.00%) -£0.50 │ #1   Multi-Tier Basket Discount │
+├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
+│ #5   │ Brie       │ cheese │      £4.00 │            £3.60 │ (10.00%) -£0.40 │ #1   Multi-Tier Basket Discount │
+├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
+│ #6   │ Stilton    │ cheese │      £6.00 │            £5.40 │ (10.00%) -£0.60 │ #1   Multi-Tier Basket Discount │
+╰──────┴────────────┴────────┴────────────┴──────────────────┴─────────────────┴─────────────────────────────────╯
+ Subtotal:           £45.00  
+    Total:           £40.50  
+  Savings:   (10.00%) £4.50  
+
+ 267µs 958ns (0.000267958s)
 ```
 
 ### Stacking

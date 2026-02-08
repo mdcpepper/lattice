@@ -17,7 +17,8 @@ use dante::{
         promotion,
         types::{
             DirectDiscountPromotion, MixAndMatchDiscount, MixAndMatchPromotion,
-            PositionalDiscountPromotion,
+            PositionalDiscountPromotion, ThresholdDiscount, ThresholdTier,
+            TieredThresholdPromotion,
         },
     },
     solvers::{Solver, ilp::ILPSolver},
@@ -337,6 +338,111 @@ fn positional_discount_respects_monetary_limit() -> TestResult {
     // Normal would be 2 bundles saving 200, but limited to 75 savings
     // So total should be 400 - 75 = 325
     assert!(result.total.to_minor_units() >= 325);
+
+    Ok(())
+}
+
+#[test]
+fn tiered_threshold_application_limit_counts_tiers_not_items() -> TestResult {
+    let items = [
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(1200, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(1000, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(800, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(500, GBP),
+            StringTagCollection::from_strs(&["cheese"]),
+        ),
+    ];
+
+    let basket = Basket::with_items(items, GBP)?;
+    let item_group = ItemGroup::from(&basket);
+
+    let budget = PromotionBudget {
+        application_limit: Some(1),
+        monetary_limit: None,
+    };
+
+    let promotion = promotion(TieredThresholdPromotion::new(
+        PromotionKey::default(),
+        vec![ThresholdTier::new(
+            Money::from_minor(3000, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+            StringTagCollection::from_strs(&["cheese"]),
+            ThresholdDiscount::PercentEachItem(Percentage::from(1.0)),
+        )],
+        budget,
+    ));
+
+    let result = ILPSolver::solve(&[promotion], &item_group)?;
+
+    // One tier application is allowed, so all contributing/discounted items can participate.
+    assert_eq!(result.total.to_minor_units(), 3000);
+    assert_eq!(result.promotion_applications.len(), 4);
+
+    Ok(())
+}
+
+#[test]
+fn tiered_threshold_zero_application_limit_prevents_all_applications() -> TestResult {
+    let items = [
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(1200, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(1000, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(800, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(500, GBP),
+            StringTagCollection::from_strs(&["cheese"]),
+        ),
+    ];
+
+    let basket = Basket::with_items(items, GBP)?;
+    let item_group = ItemGroup::from(&basket);
+
+    let budget = PromotionBudget {
+        application_limit: Some(0),
+        monetary_limit: None,
+    };
+
+    let promotion = promotion(TieredThresholdPromotion::new(
+        PromotionKey::default(),
+        vec![ThresholdTier::new(
+            Money::from_minor(3000, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+            StringTagCollection::from_strs(&["cheese"]),
+            ThresholdDiscount::PercentEachItem(Percentage::from(1.0)),
+        )],
+        budget,
+    ));
+
+    let result = ILPSolver::solve(&[promotion], &item_group)?;
+
+    assert_eq!(result.total.to_minor_units(), 3500);
+    assert_eq!(result.promotion_applications.len(), 0);
 
     Ok(())
 }

@@ -1,0 +1,50 @@
+products:
+  red-wine:
+    name: Red Wine
+    tags: [wine]
+    price: 12.00 GBP
+
+  white-wine:
+    name: White Wine
+    tags: [wine]
+    price: 10.00 GBP
+
+  rose-wine:
+    name: Rose Wine
+    tags: [wine]
+    price: 8.00 GBP
+
+  cheddar:
+    name: Cheddar
+    tags: [cheese]
+    price: 5.00 GBP
+
+  brie:
+    name: Brie
+    tags: [cheese]
+    price: 4.00 GBP
+
+  stilton:
+    name: Stilton
+    tags: [cheese]
+    price: 6.00 GBP
+
+  shampoo:
+    name: Shampoo
+    tags: [toiletries]
+    price: 3.50 GBP
+
+  toothpaste:
+    name: Toothpaste
+    tags: [toiletries]
+    price: 2.50 GBP
+
+  bread:
+    name: Bread
+    tags: [general]
+    price: 1.50 GBP
+
+  milk:
+    name: Milk
+    tags: [general]
+    price: 1.20 GBP

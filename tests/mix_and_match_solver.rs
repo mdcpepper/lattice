@@ -70,6 +70,104 @@ fn solver_handles_percent_all_items() -> TestResult {
 }
 
 #[test]
+fn solver_handles_amount_off_each_item() -> TestResult {
+    let items = [
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(400, GBP),
+            StringTagCollection::from_strs(&["main"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(200, GBP),
+            StringTagCollection::from_strs(&["drink"]),
+        ),
+    ];
+
+    let basket = Basket::with_items(items, GBP)?;
+    let item_group = ItemGroup::from(&basket);
+
+    let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+    let slots = vec![
+        slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["main"]),
+            1,
+            Some(1),
+        ),
+        slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["drink"]),
+            1,
+            Some(1),
+        ),
+    ];
+
+    let promotion = promotion(MixAndMatchPromotion::new(
+        PromotionKey::default(),
+        slots,
+        MixAndMatchDiscount::AmountOffEachItem(Money::from_minor(50, GBP)),
+        PromotionBudget::unlimited(),
+    ));
+
+    let result = ILPSolver::solve(&[promotion], &item_group)?;
+
+    assert_eq!(result.total.to_minor_units(), 500);
+    assert_eq!(result.promotion_applications.len(), 2);
+
+    Ok(())
+}
+
+#[test]
+fn solver_handles_fixed_price_each_item() -> TestResult {
+    let items = [
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(400, GBP),
+            StringTagCollection::from_strs(&["main"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(200, GBP),
+            StringTagCollection::from_strs(&["drink"]),
+        ),
+    ];
+
+    let basket = Basket::with_items(items, GBP)?;
+    let item_group = ItemGroup::from(&basket);
+
+    let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+    let slots = vec![
+        slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["main"]),
+            1,
+            Some(1),
+        ),
+        slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["drink"]),
+            1,
+            Some(1),
+        ),
+    ];
+
+    let promotion = promotion(MixAndMatchPromotion::new(
+        PromotionKey::default(),
+        slots,
+        MixAndMatchDiscount::FixedPriceEachItem(Money::from_minor(100, GBP)),
+        PromotionBudget::unlimited(),
+    ));
+
+    let result = ILPSolver::solve(&[promotion], &item_group)?;
+
+    assert_eq!(result.total.to_minor_units(), 200);
+    assert_eq!(result.promotion_applications.len(), 2);
+
+    Ok(())
+}
+
+#[test]
 fn solver_handles_percent_cheapest() -> TestResult {
     let items = [
         Item::with_tags(
@@ -127,6 +225,55 @@ fn solver_handles_percent_cheapest() -> TestResult {
     // Total should be less than full price (1000)
     assert!(result.total.to_minor_units() < 1000);
     assert_eq!(result.promotion_applications.len(), 3);
+
+    Ok(())
+}
+
+#[test]
+fn solver_handles_amount_off_total() -> TestResult {
+    let items = [
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(400, GBP),
+            StringTagCollection::from_strs(&["main"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(200, GBP),
+            StringTagCollection::from_strs(&["drink"]),
+        ),
+    ];
+
+    let basket = Basket::with_items(items, GBP)?;
+    let item_group = ItemGroup::from(&basket);
+
+    let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+    let slots = vec![
+        slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["main"]),
+            1,
+            Some(1),
+        ),
+        slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["drink"]),
+            1,
+            Some(1),
+        ),
+    ];
+
+    let promotion = promotion(MixAndMatchPromotion::new(
+        PromotionKey::default(),
+        slots,
+        MixAndMatchDiscount::AmountOffTotal(Money::from_minor(100, GBP)),
+        PromotionBudget::unlimited(),
+    ));
+
+    let result = ILPSolver::solve(&[promotion], &item_group)?;
+
+    assert_eq!(result.total.to_minor_units(), 500);
+    assert_eq!(result.promotion_applications.len(), 2);
 
     Ok(())
 }
