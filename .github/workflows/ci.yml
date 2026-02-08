@@ -2,7 +2,7 @@ name: Build & Test
 
 env:
   CARGO_TERM_COLOR: always
-  TARPAULIN_VERSION: "0.31.2"
+  TARPAULIN_VERSION: "0.34.1"
   MSRV: "1.93.0"
 
 on:
