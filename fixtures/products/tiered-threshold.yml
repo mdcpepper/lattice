@@ -1,50 +1,50 @@
 products:
-  red-wine:
-    name: Red Wine
-    tags: [wine]
-    price: 12.00 GBP
-
-  white-wine:
-    name: White Wine
-    tags: [wine]
+  ladder-item-01:
+    name: Ladder Item 01
+    tags: [ladder]
     price: 10.00 GBP
 
-  rose-wine:
-    name: Rose Wine
-    tags: [wine]
-    price: 8.00 GBP
+  ladder-item-02:
+    name: Ladder Item 02
+    tags: [ladder]
+    price: 10.00 GBP
 
-  cheddar:
-    name: Cheddar
-    tags: [cheese]
-    price: 5.00 GBP
+  ladder-item-03:
+    name: Ladder Item 03
+    tags: [ladder]
+    price: 10.00 GBP
 
-  brie:
-    name: Brie
-    tags: [cheese]
-    price: 4.00 GBP
+  ladder-item-04:
+    name: Ladder Item 04
+    tags: [ladder]
+    price: 10.00 GBP
 
-  stilton:
-    name: Stilton
-    tags: [cheese]
-    price: 6.00 GBP
+  ladder-item-05:
+    name: Ladder Item 05
+    tags: [ladder]
+    price: 10.00 GBP
 
-  shampoo:
-    name: Shampoo
-    tags: [toiletries]
-    price: 3.50 GBP
+  ladder-item-06:
+    name: Ladder Item 06
+    tags: [ladder]
+    price: 10.00 GBP
 
-  toothpaste:
-    name: Toothpaste
-    tags: [toiletries]
-    price: 2.50 GBP
+  ladder-item-07:
+    name: Ladder Item 07
+    tags: [ladder]
+    price: 10.00 GBP
 
-  bread:
-    name: Bread
-    tags: [general]
-    price: 1.50 GBP
+  ladder-item-08:
+    name: Ladder Item 08
+    tags: [ladder]
+    price: 10.00 GBP
 
-  milk:
-    name: Milk
-    tags: [general]
-    price: 1.20 GBP
+  ladder-item-09:
+    name: Ladder Item 09
+    tags: [ladder]
+    price: 10.00 GBP
+
+  ladder-item-10:
+    name: Ladder Item 10
+    tags: [ladder]
+    price: 10.00 GBP

@@ -178,63 +178,185 @@ cargo run --release --example basket -- -f mix-and-match -n 5
 
 ### Tiered Threshold Promotions
 
-Tiered Threshold promotions define multiple spend thresholds, where each tier can use different contribution tags, discount tags, and discount types. Tiers define threshold requirements under `threshold`, with optional `monetary` and `items` fields. If multiple tiers qualify, the solver selects the single tier that gives the cheapest final basket total.
+Tiered Threshold promotions define multiple threshold tiers, where each tier can
+use different contribution tags, discount tags, and discount types.
+
+- `lower_threshold` (required) unlocks the tier.
+- `upper_threshold` (optional) caps contribution and discountable value per tier
+  instance without deactivating it.
+
+The `tiered-threshold` fixture demonstrates all three states as items are added:
+
+- Tier 1 activates.
+- Tier 2 overtakes Tier 1.
+- Tier 3 overtakes Tier 2.
+- Tier 3 stays active but is capped by its upper threshold.
 
 ```yaml
-multi-tier-basket-discount:
+tiered-threshold-ladder:
   type: tiered_threshold
-  name: Multi-Tier Basket Discount
+  name: Tiered Threshold Ladder
   tiers:
-    - threshold:
-        monetary: "30.00 GBP"
-      contribution_tags: []
-      discount_tags: []
-      discount:
-        type: amount_off_each_item
-        amount: "0.50 GBP"
-    - threshold:
-        monetary: "45.00 GBP"
-        items: 4
+    - lower_threshold:
+        monetary: "20.00 GBP"
       contribution_tags: []
       discount_tags: []
       discount:
         type: percent_each_item
         amount: "10%"
-    - threshold:
-        monetary: "60.00 GBP"
+    - lower_threshold:
+        monetary: "40.00 GBP"
       contribution_tags: []
       discount_tags: []
       discount:
-        type: fixed_price_each_item
-        amount: "1.00 GBP"
+        type: percent_each_item
+        amount: "20%"
+    - lower_threshold:
+        monetary: "60.00 GBP"
+      upper_threshold:
+        monetary: "80.00 GBP"
+      contribution_tags: []
+      discount_tags: []
+      discount:
+        type: percent_each_item
+        amount: "30%"
 ```
+
+```bash
+cargo run --release --example basket -- -f tiered-threshold -n 1
+```
+
+Increase `-n` to add each item and watch tiers activate, overtake each other,
+then cap.
+
+### 1 Item (No Tier Active Yet)
+
+```
+╭──────┬────────────────┬────────┬────────────┬──────────────────┬─────────┬───────────╮
+│      │ Item           │ Tags   │ Base Price │ Discounted Price │ Savings │ Promotion │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────┼───────────┤
+│ #1   │ Ladder Item 01 │ ladder │     £10.00 │                  │         │           │
+╰──────┴────────────────┴────────┴────────────┴──────────────────┴─────────┴───────────╯
+ Subtotal:          £10.00  
+    Total:          £10.00  
+  Savings:   (0.00%) £0.00  
+```
+
+The basket is below the first lower threshold (£20), so nothing applies.
+
+### 2 Items (Tier 1 Activates)
+
+```bash
+cargo run --release --example basket -- -f tiered-threshold -n 2
+```
+
+```
+╭──────┬────────────────┬────────┬────────────┬──────────────────┬─────────────────┬──────────────────────────────╮
+│      │ Item           │ Tags   │ Base Price │ Discounted Price │         Savings │ Promotion                    │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #1   │ Ladder Item 01 │ ladder │     £10.00 │            £9.00 │ (10.00%) -£1.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #2   │ Ladder Item 02 │ ladder │     £10.00 │            £9.00 │ (10.00%) -£1.00 │ #1   Tiered Threshold Ladder │
+╰──────┴────────────────┴────────┴────────────┴──────────────────┴─────────────────┴──────────────────────────────╯
+ Subtotal:           £20.00  
+    Total:           £18.00  
+  Savings:   (10.00%) £2.00  
+```
+
+Tier 1 unlocks at £20 and applies 10% off.
+
+### 4 Items (Tier 2 Takes Over)
+
+```bash
+cargo run --release --example basket -- -f tiered-threshold -n 4
+```
+
+```
+╭──────┬────────────────┬────────┬────────────┬──────────────────┬─────────────────┬──────────────────────────────╮
+│      │ Item           │ Tags   │ Base Price │ Discounted Price │         Savings │ Promotion                    │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #1   │ Ladder Item 01 │ ladder │     £10.00 │            £8.00 │ (20.00%) -£2.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #2   │ Ladder Item 02 │ ladder │     £10.00 │            £8.00 │ (20.00%) -£2.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #3   │ Ladder Item 03 │ ladder │     £10.00 │            £8.00 │ (20.00%) -£2.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #4   │ Ladder Item 04 │ ladder │     £10.00 │            £8.00 │ (20.00%) -£2.00 │ #1   Tiered Threshold Ladder │
+╰──────┴────────────────┴────────┴────────────┴──────────────────┴─────────────────┴──────────────────────────────╯
+ Subtotal:           £40.00  
+    Total:           £32.00  
+  Savings:   (20.00%) £8.00  
+```
+
+Tier 2 unlocks at £40 and overtakes Tier 1 because it gives a lower total.
+
+### 6 Items (Tier 3 Takes Over)
 
 ```bash
 cargo run --release --example basket -- -f tiered-threshold -n 6
 ```
 
 ```
-╭──────┬────────────┬────────┬────────────┬──────────────────┬─────────────────┬─────────────────────────────────╮
-│      │ Item       │ Tags   │ Base Price │ Discounted Price │         Savings │ Promotion                       │
-├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
-│ #1   │ Red Wine   │ wine   │     £12.00 │           £10.80 │ (10.00%) -£1.20 │ #1   Multi-Tier Basket Discount │
-├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
-│ #2   │ White Wine │ wine   │     £10.00 │            £9.00 │ (10.00%) -£1.00 │ #1   Multi-Tier Basket Discount │
-├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
-│ #3   │ Rose Wine  │ wine   │      £8.00 │            £7.20 │ (10.00%) -£0.80 │ #1   Multi-Tier Basket Discount │
-├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
-│ #4   │ Cheddar    │ cheese │      £5.00 │            £4.50 │ (10.00%) -£0.50 │ #1   Multi-Tier Basket Discount │
-├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
-│ #5   │ Brie       │ cheese │      £4.00 │            £3.60 │ (10.00%) -£0.40 │ #1   Multi-Tier Basket Discount │
-├──────┼────────────┼────────┼────────────┼──────────────────┼─────────────────┼─────────────────────────────────┤
-│ #6   │ Stilton    │ cheese │      £6.00 │            £5.40 │ (10.00%) -£0.60 │ #1   Multi-Tier Basket Discount │
-╰──────┴────────────┴────────┴────────────┴──────────────────┴─────────────────┴─────────────────────────────────╯
- Subtotal:           £45.00  
-    Total:           £40.50  
-  Savings:   (10.00%) £4.50  
-
- 267µs 958ns (0.000267958s)
+╭──────┬────────────────┬────────┬────────────┬──────────────────┬─────────────────┬──────────────────────────────╮
+│      │ Item           │ Tags   │ Base Price │ Discounted Price │         Savings │ Promotion                    │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #1   │ Ladder Item 01 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #2   │ Ladder Item 02 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #3   │ Ladder Item 03 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #4   │ Ladder Item 04 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #5   │ Ladder Item 05 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #6   │ Ladder Item 06 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+╰──────┴────────────────┴────────┴────────────┴──────────────────┴─────────────────┴──────────────────────────────╯
+ Subtotal:            £60.00  
+    Total:            £42.00  
+  Savings:   (30.00%) £18.00  
 ```
+
+Tier 3 unlocks at £60 and overtakes Tier 2.
+
+### 10 Items (Tier 3 Stays Active But Is Capped)
+
+```bash
+cargo run --release --example basket -- -f tiered-threshold -n 10
+```
+
+```
+╭──────┬────────────────┬────────┬────────────┬──────────────────┬─────────────────┬──────────────────────────────╮
+│      │ Item           │ Tags   │ Base Price │ Discounted Price │         Savings │ Promotion                    │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #1   │ Ladder Item 01 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #2   │ Ladder Item 02 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #3   │ Ladder Item 03 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #4   │ Ladder Item 04 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #5   │ Ladder Item 05 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #6   │ Ladder Item 06 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #7   │ Ladder Item 07 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #8   │ Ladder Item 08 │ ladder │     £10.00 │            £7.00 │ (30.00%) -£3.00 │ #1   Tiered Threshold Ladder │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #9   │ Ladder Item 09 │ ladder │     £10.00 │                  │                 │                              │
+├──────┼────────────────┼────────┼────────────┼──────────────────┼─────────────────┼──────────────────────────────┤
+│ #10  │ Ladder Item 10 │ ladder │     £10.00 │                  │                 │                              │
+╰──────┴────────────────┴────────┴────────────┴──────────────────┴─────────────────┴──────────────────────────────╯
+ Subtotal:           £100.00  
+    Total:            £76.00  
+  Savings:   (24.00%) £24.00  
+```
+
+Tier 3 remains active, but its `upper_threshold.monetary` cap (£80) means only
+8 of the 10 £10 items can contribute and be discounted in that tier instance.
+The extra items stay full price (and potentially available for other promotions).
 
 ### Stacking
 

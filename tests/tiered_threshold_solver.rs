@@ -13,7 +13,7 @@ use dante::{
         PromotionKey,
         budget::PromotionBudget,
         promotion,
-        types::{ThresholdDiscount, ThresholdTier, TieredThresholdPromotion},
+        types::{ThresholdDiscount, ThresholdTier, TierThreshold, TieredThresholdPromotion},
     },
     solvers::{Solver, ilp::ILPSolver},
     tags::{collection::TagCollection, string::StringTagCollection},
@@ -263,6 +263,54 @@ fn item_count_only_threshold_met_applies_discount() -> TestResult {
     // Cheese gets 10% off: 500 -> 450
     assert_eq!(result.total.to_minor_units(), 650);
     assert_eq!(result.promotion_applications.len(), 3);
+
+    Ok(())
+}
+
+/// Upper threshold caps contribution/discountable value but does not deactivate the tier.
+#[test]
+fn upper_threshold_caps_discountable_value_without_disabling_tier() -> TestResult {
+    let items = [
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(3000, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(3000, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(3000, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        ),
+    ];
+
+    let basket = Basket::with_items(items, GBP)?;
+    let item_group = ItemGroup::from(&basket);
+
+    let promo = promotion(TieredThresholdPromotion::new(
+        PromotionKey::default(),
+        vec![ThresholdTier::with_thresholds(
+            TierThreshold::with_monetary_threshold(Money::from_minor(3000, GBP)),
+            Some(TierThreshold::with_monetary_threshold(Money::from_minor(
+                6000, GBP,
+            ))),
+            StringTagCollection::from_strs(&["wine"]),
+            StringTagCollection::from_strs(&["wine"]),
+            ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
+        )],
+        PromotionBudget::unlimited(),
+    ));
+
+    let result = ILPSolver::solve(&[promo], &item_group)?;
+
+    // Lower threshold met (>= £30). Upper threshold caps discountable value at £60,
+    // so only two £30 items get discounted: 2700 + 2700 + 3000 = 8400.
+    assert_eq!(result.total.to_minor_units(), 8400);
+    assert_eq!(result.promotion_applications.len(), 2);
 
     Ok(())
 }

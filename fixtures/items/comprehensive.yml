@@ -8,7 +8,7 @@ items:
   - orange
   - lettuce
 
-  # Dairy items (for direct_discount amount_off)
+  # Dairy items (for mix_and_match Breakfast Bundle)
   - milk
   - cheese
   - yogurt
@@ -24,7 +24,7 @@ items:
   - juice
   - soda
 
-  # Snack items
+  # Snack items (for tiered_threshold)
   - chips
   - cookies
   - chocolate

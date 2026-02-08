@@ -95,11 +95,13 @@ impl<'a> TierThreshold<'a> {
 
 /// A single threshold tier within a tiered threshold promotion.
 ///
-/// Each tier specifies threshold requirements, which items contribute to
-/// qualification, which items receive the discount, and what discount applies.
+/// Each tier specifies lower threshold requirements, an optional upper
+/// threshold cap, which items contribute to qualification, which items receive
+/// the discount, and what discount applies.
 #[derive(Debug, Clone)]
 pub struct ThresholdTier<'a, T: TagCollection = StringTagCollection> {
-    threshold: TierThreshold<'a>,
+    lower_threshold: TierThreshold<'a>,
+    upper_threshold: Option<TierThreshold<'a>>,
     contribution_tags: T,
     discount_tags: T,
     discount: ThresholdDiscount<'a>,
@@ -152,24 +154,47 @@ impl<'a, T: TagCollection> ThresholdTier<'a, T> {
         )
     }
 
-    /// Create a new threshold tier from a validated threshold value object.
+    /// Create a new threshold tier from a validated lower threshold.
     pub fn with_threshold(
-        threshold: TierThreshold<'a>,
+        lower_threshold: TierThreshold<'a>,
+        contribution_tags: T,
+        discount_tags: T,
+        discount: ThresholdDiscount<'a>,
+    ) -> Self {
+        Self::with_thresholds(
+            lower_threshold,
+            None,
+            contribution_tags,
+            discount_tags,
+            discount,
+        )
+    }
+
+    /// Create a new threshold tier from validated lower and upper thresholds.
+    pub fn with_thresholds(
+        lower_threshold: TierThreshold<'a>,
+        upper_threshold: Option<TierThreshold<'a>>,
         contribution_tags: T,
         discount_tags: T,
         discount: ThresholdDiscount<'a>,
     ) -> Self {
         Self {
-            threshold,
+            lower_threshold,
+            upper_threshold,
             contribution_tags,
             discount_tags,
             discount,
         }
     }
 
-    /// Return threshold requirements.
-    pub const fn threshold(&self) -> &TierThreshold<'a> {
-        &self.threshold
+    /// Return lower threshold requirements.
+    pub const fn lower_threshold(&self) -> &TierThreshold<'a> {
+        &self.lower_threshold
+    }
+
+    /// Return optional upper threshold requirements.
+    pub const fn upper_threshold(&self) -> Option<&TierThreshold<'a>> {
+        self.upper_threshold.as_ref()
     }
 
     /// Return the contribution tags.
@@ -329,7 +354,7 @@ mod tests {
             promo
                 .tiers()
                 .first()
-                .and_then(|t| t.threshold().monetary_threshold())
+                .and_then(|t| t.lower_threshold().monetary_threshold())
                 .map(Money::to_minor_units),
             Some(5000)
         );
@@ -349,8 +374,15 @@ mod tests {
             promo
                 .tiers()
                 .first()
-                .and_then(|t| t.threshold().item_count_threshold()),
+                .and_then(|t| t.lower_threshold().item_count_threshold()),
             None
+        );
+        assert!(
+            promo
+                .tiers()
+                .first()
+                .and_then(ThresholdTier::upper_threshold)
+                .is_none()
         );
     }
 
@@ -365,12 +397,12 @@ mod tests {
         );
 
         assert_eq!(
-            tier.threshold()
+            tier.lower_threshold()
                 .monetary_threshold()
                 .map(Money::to_minor_units),
             Some(5000)
         );
-        assert_eq!(tier.threshold().item_count_threshold(), Some(3));
+        assert_eq!(tier.lower_threshold().item_count_threshold(), Some(3));
     }
 
     #[test]
@@ -405,8 +437,41 @@ mod tests {
             ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
         );
 
-        assert_eq!(tier.threshold().monetary_threshold(), None);
-        assert_eq!(tier.threshold().item_count_threshold(), Some(3));
+        assert_eq!(tier.lower_threshold().monetary_threshold(), None);
+        assert_eq!(tier.lower_threshold().item_count_threshold(), Some(3));
+    }
+
+    #[test]
+    fn with_thresholds_supports_optional_upper_threshold() {
+        let tier = ThresholdTier::with_thresholds(
+            TierThreshold::with_both_thresholds(Money::from_minor(3000, GBP), 2),
+            Some(TierThreshold::with_both_thresholds(
+                Money::from_minor(6000, GBP),
+                4,
+            )),
+            StringTagCollection::from_strs(&["wine"]),
+            StringTagCollection::from_strs(&["wine"]),
+            ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
+        );
+
+        assert_eq!(
+            tier.lower_threshold()
+                .monetary_threshold()
+                .map(Money::to_minor_units),
+            Some(3000)
+        );
+        assert_eq!(tier.lower_threshold().item_count_threshold(), Some(2));
+        assert_eq!(
+            tier.upper_threshold()
+                .and_then(TierThreshold::monetary_threshold)
+                .map(Money::to_minor_units),
+            Some(6000)
+        );
+        assert_eq!(
+            tier.upper_threshold()
+                .and_then(TierThreshold::item_count_threshold),
+            Some(4)
+        );
     }
 
     #[test]

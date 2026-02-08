@@ -45,6 +45,15 @@ pub struct DirectDiscountPromotionVars {
 }
 
 impl DirectDiscountPromotionVars {
+    fn add_model_constraints(
+        &self,
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        self.add_budget_constraints(self.promotion_key, item_group, state, observer)
+    }
+
     fn discounted_minor_for_item(&self, item_idx: usize) -> Result<i64, SolverError> {
         self.discounted_minor_by_item.get(&item_idx).copied().ok_or(
             SolverError::InvariantViolation {
@@ -141,7 +150,7 @@ impl ILPPromotionVars for DirectDiscountPromotionVars {
         state: &mut ILPState,
         observer: &mut dyn ILPObserver,
     ) -> Result<(), SolverError> {
-        self.add_budget_constraints(self.promotion_key, item_group, state, observer)
+        self.add_model_constraints(item_group, state, observer)
     }
 
     fn calculate_item_discounts(
