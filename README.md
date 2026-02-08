@@ -11,11 +11,11 @@ optimisation engine written in Rust.
   * [Positional Discount Promotions](#positional-discount-promotions)
   * [Mix and Match Promotions](#mix-and-match-promotions)
   * [Tiered Threshold Promotions](#tiered-threshold-promotions)
-* [Stacking](#stacking)
 * [Budgets](#budgets)
   * [Application Budgets](#application-budgets)
   * [Monetary Budgets](#monetary-budgets)
 * [Global Optimisation](#global-optimisation)
+* [Stacking](#stacking)
 * [Export ILP Formulation](#export-ilp-formulation)
 
 ## Promotion Types
@@ -358,109 +358,6 @@ Tier 3 remains active, but its `upper_threshold.monetary` cap (£80) means only
 8 of the 10 £10 items can contribute and be discounted in that tier instance.
 The extra items stay full price (and potentially available for other promotions).
 
-### Stacking
-
-Dante supports promotion stacking via a graph. Promotions are grouped into 
-layers, and within each layer promotions compete and each item can be claimed 
-by at most one promotion. Items then flow to subsequent layers with updated 
-prices, allowing multiple promotions to apply across layers.
-
-A graph can route items based on whether they have participated in any promotions
-up to and including that layer. Use `output: split` to send participating and 
-non-participating items down different paths, or `output: pass-through` to send 
-everything forward together.
-
-```yaml
-root: daily-deals
-
-nodes:
-  daily-deals:
-    promotions: [lunch-deal, drinks-deal]
-    output: split
-    participating: loyalty-bonus
-    non-participating: checkout-coupons
-
-  loyalty-bonus:
-    promotions: [loyalty-stacking-bonus]
-    output: pass-through
-
-  checkout-coupons:
-    promotions: [snack-coupon]
-    output: pass-through
-
-promotions:
-  lunch-deal:
-    type: direct_discount
-    name: "Lunch Deal: 25% Off"
-    tags: [lunch]
-    discount:
-      type: percentage_off
-      amount: 25%
-
-  drinks-deal:
-    type: direct_discount
-    name: "Drinks Deal: 20% Off"
-    tags: [drink]
-    discount:
-      type: percentage_off
-      amount: 20%
-
-  loyalty-stacking-bonus:
-    type: direct_discount
-    name: "Loyalty Bonus (on deals)"
-    tags: []
-    discount:
-      type: percentage_off
-      amount: 5%
-
-  snack-coupon:
-    type: direct_discount
-    name: "Coupon: 10% Off Snacks"
-    tags: [snack]
-    discount:
-      type: percentage_off
-      amount: 10%
-```
-
-```bash
-cargo run --release --example basket -- -f layered
-```
-
-```
-╭──────┬────────────────────┬───────────┬────────────┬──────────────────┬─────────────────┬───────────────────────────────╮
-│      │ Item               │ Tags      │ Base Price │ Discounted Price │         Savings │ Promotion                     │
-├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
-│ #1   │ Chicken Wrap       │ food      │      £3.50 │                  │                 │                               │
-│      │                    │ lunch     │            │                  │                 │                               │
-│      │                    │           │      £3.50 │            £2.62 │ (25.14%) -£0.88 │ #1   Lunch Deal: 25% Off      │
-│      │                    │           │      £2.62 │            £2.49 │  (4.96%) -£0.13 │ #5   Loyalty Bonus (on deals) │
-├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
-│ #2   │ Pasta Salad        │ food      │      £3.00 │                  │                 │                               │
-│      │                    │ lunch     │            │                  │                 │                               │
-│      │                    │           │      £3.00 │            £2.25 │ (25.00%) -£0.75 │ #2   Lunch Deal: 25% Off      │
-│      │                    │           │      £2.25 │            £2.14 │  (4.89%) -£0.11 │ #6   Loyalty Bonus (on deals) │
-├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
-│ #3   │ Fresh Orange Juice │ drink     │      £2.00 │                  │                 │                               │
-│      │                    │           │      £2.00 │            £1.60 │ (20.00%) -£0.40 │ #3   Drinks Deal: 20% Off     │
-│      │                    │           │      £1.60 │            £1.52 │  (5.00%) -£0.08 │ #7   Loyalty Bonus (on deals) │
-├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
-│ #4   │ Sparkling Water    │ drink     │      £1.50 │                  │                 │                               │
-│      │                    │           │      £1.50 │            £1.20 │ (20.00%) -£0.30 │ #4   Drinks Deal: 20% Off     │
-│      │                    │           │      £1.20 │            £1.14 │  (5.00%) -£0.06 │ #8   Loyalty Bonus (on deals) │
-├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
-│ #5   │ Morning Newspaper  │ newspaper │      £2.50 │                  │                 │                               │
-├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
-│ #6   │ Sea Salt Crisps    │ snack     │      £1.20 │            £1.08 │ (10.00%) -£0.12 │ #9   Coupon: 10% Off Snacks   │
-├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
-│ #7   │ Dark Chocolate Bar │ snack     │      £1.80 │            £1.62 │ (10.00%) -£0.18 │ #10  Coupon: 10% Off Snacks   │
-╰──────┴────────────────────┴───────────┴────────────┴──────────────────┴─────────────────┴───────────────────────────────╯
- Subtotal:           £15.50  
-    Total:           £12.49  
-  Savings:   (19.42%) £3.01  
-
- 107µs 239ns (0.000107239s)
-```
-
 ## Budgets
 
 Promotions can be configured with two types of budgets:
@@ -569,12 +466,25 @@ savings of £6.23), but the promotion has a £3.00 monetary budget. The solver
 applies the discount to items 1 and 3 (for £2.75 total savings), leaving the 
 middle item at full price.
 
+Budget accuracy note:
+
+- Monetary budgets are exact for direct discounts, positional discounts, and 
+  cheapest-item discounts.
+- For bundle-total discounts (`amount_off_total` / `fixed_total`) in 
+  mix-and-match and tiered-threshold promotions, we currently use a 
+  conservative estimate when enforcing monetary budgets. This may reject some 
+  combinations that would be valid under _exact_ per-bundle accounting. 
+  Because of this, these budgets should only be used for operational controls,
+  like making sure an alloted "pot" of money is not exceed redeeming the 
+  promotions, and not for per-customer account balances (like rewards-wallet 
+  tracking).
+
 ## Global Optimisation
 
-Baskets are globally optimised for the lowest price given the items added, and 
+Baskets are globally optimised for the lowest price given the items added and 
 the configured promotions and budgetary constraints. As items are added to the 
-basket, promotions may "steal" products from existing applications, if doing so 
-results in a lower basket price, removing the previous application. 
+basket, promotions may "steal" products from existing applications if doing so 
+results in a lower basket price, removing the previous application.
 
 Items may only participate in a single promotion per layer, but can carry multiple 
 applications across layers with [stacking](#stacking).
@@ -738,6 +648,109 @@ of the cheaper Body Wash.
 
 Body Wash is pushed back out of the bundle, and returns to having just the 15% 
 `toiletries` discount.
+
+### Stacking
+
+Dante supports promotion stacking via a graph. Promotions are grouped into 
+layers, and within each layer promotions compete and each item can be claimed 
+by at most one promotion. Items then flow to subsequent layers with updated 
+prices, allowing multiple promotions to apply across layers.
+
+A graph can route items based on whether they have participated in any promotions
+up to and including that layer. Use `output: split` to send participating and 
+non-participating items down different paths, or `output: pass-through` to send 
+everything forward together.
+
+```yaml
+root: daily-deals
+
+nodes:
+  daily-deals:
+    promotions: [lunch-deal, drinks-deal]
+    output: split
+    participating: loyalty-bonus
+    non-participating: checkout-coupons
+
+  loyalty-bonus:
+    promotions: [loyalty-stacking-bonus]
+    output: pass-through
+
+  checkout-coupons:
+    promotions: [snack-coupon]
+    output: pass-through
+
+promotions:
+  lunch-deal:
+    type: direct_discount
+    name: "Lunch Deal: 25% Off"
+    tags: [lunch]
+    discount:
+      type: percentage_off
+      amount: 25%
+
+  drinks-deal:
+    type: direct_discount
+    name: "Drinks Deal: 20% Off"
+    tags: [drink]
+    discount:
+      type: percentage_off
+      amount: 20%
+
+  loyalty-stacking-bonus:
+    type: direct_discount
+    name: "Loyalty Bonus (on deals)"
+    tags: []
+    discount:
+      type: percentage_off
+      amount: 5%
+
+  snack-coupon:
+    type: direct_discount
+    name: "Coupon: 10% Off Snacks"
+    tags: [snack]
+    discount:
+      type: percentage_off
+      amount: 10%
+```
+
+```bash
+cargo run --release --example basket -- -f layered
+```
+
+```
+╭──────┬────────────────────┬───────────┬────────────┬──────────────────┬─────────────────┬───────────────────────────────╮
+│      │ Item               │ Tags      │ Base Price │ Discounted Price │         Savings │ Promotion                     │
+├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #1   │ Chicken Wrap       │ food      │      £3.50 │                  │                 │                               │
+│      │                    │ lunch     │            │                  │                 │                               │
+│      │                    │           │      £3.50 │            £2.62 │ (25.14%) -£0.88 │ #1   Lunch Deal: 25% Off      │
+│      │                    │           │      £2.62 │            £2.49 │  (4.96%) -£0.13 │ #5   Loyalty Bonus (on deals) │
+├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #2   │ Pasta Salad        │ food      │      £3.00 │                  │                 │                               │
+│      │                    │ lunch     │            │                  │                 │                               │
+│      │                    │           │      £3.00 │            £2.25 │ (25.00%) -£0.75 │ #2   Lunch Deal: 25% Off      │
+│      │                    │           │      £2.25 │            £2.14 │  (4.89%) -£0.11 │ #6   Loyalty Bonus (on deals) │
+├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #3   │ Fresh Orange Juice │ drink     │      £2.00 │                  │                 │                               │
+│      │                    │           │      £2.00 │            £1.60 │ (20.00%) -£0.40 │ #3   Drinks Deal: 20% Off     │
+│      │                    │           │      £1.60 │            £1.52 │  (5.00%) -£0.08 │ #7   Loyalty Bonus (on deals) │
+├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #4   │ Sparkling Water    │ drink     │      £1.50 │                  │                 │                               │
+│      │                    │           │      £1.50 │            £1.20 │ (20.00%) -£0.30 │ #4   Drinks Deal: 20% Off     │
+│      │                    │           │      £1.20 │            £1.14 │  (5.00%) -£0.06 │ #8   Loyalty Bonus (on deals) │
+├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #5   │ Morning Newspaper  │ newspaper │      £2.50 │                  │                 │                               │
+├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #6   │ Sea Salt Crisps    │ snack     │      £1.20 │            £1.08 │ (10.00%) -£0.12 │ #9   Coupon: 10% Off Snacks   │
+├──────┼────────────────────┼───────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #7   │ Dark Chocolate Bar │ snack     │      £1.80 │            £1.62 │ (10.00%) -£0.18 │ #10  Coupon: 10% Off Snacks   │
+╰──────┴────────────────────┴───────────┴────────────┴──────────────────┴─────────────────┴───────────────────────────────╯
+ Subtotal:           £15.50  
+    Total:           £12.49  
+  Savings:   (19.42%) £3.01  
+
+ 107µs 239ns (0.000107239s)
+```
 
 ## Export ILP Formulation
 

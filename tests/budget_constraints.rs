@@ -239,6 +239,61 @@ fn mix_and_match_respects_monetary_limit() -> TestResult {
 }
 
 #[test]
+fn mix_and_match_cheapest_budget_uses_exact_target_discount() -> TestResult {
+    let items = [
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(400, GBP),
+            StringTagCollection::from_strs(&["main"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(200, GBP),
+            StringTagCollection::from_strs(&["drink"]),
+        ),
+    ];
+
+    let basket = Basket::with_items(items, GBP)?;
+    let item_group = ItemGroup::from(&basket);
+
+    let mut slot_keys = SlotMap::<PromotionSlotKey, ()>::with_key();
+    let slots = vec![
+        slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["main"]),
+            1,
+            Some(1),
+        ),
+        slot(
+            &mut slot_keys,
+            StringTagCollection::from_strs(&["drink"]),
+            1,
+            Some(1),
+        ),
+    ];
+
+    // Cheapest is 200; 50% off cheapest = 100 total discount.
+    let budget = PromotionBudget {
+        application_limit: None,
+        monetary_limit: Some(Money::from_minor(100, GBP)),
+    };
+
+    let promotion = promotion(MixAndMatchPromotion::new(
+        PromotionKey::default(),
+        slots,
+        MixAndMatchDiscount::PercentCheapest(Percentage::from(0.50)),
+        budget,
+    ));
+
+    let result = ILPSolver::solve(&[promotion], &item_group)?;
+
+    assert_eq!(result.total.to_minor_units(), 500);
+    assert_eq!(result.promotion_applications.len(), 2);
+
+    Ok(())
+}
+
+#[test]
 fn positional_discount_respects_application_limit() -> TestResult {
     let items = [
         Item::with_tags(
@@ -443,6 +498,48 @@ fn tiered_threshold_zero_application_limit_prevents_all_applications() -> TestRe
 
     assert_eq!(result.total.to_minor_units(), 3500);
     assert_eq!(result.promotion_applications.len(), 0);
+
+    Ok(())
+}
+
+#[test]
+fn tiered_threshold_cheapest_budget_uses_exact_target_discount() -> TestResult {
+    let items = [
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(400, GBP),
+            StringTagCollection::from_strs(&["sale"]),
+        ),
+        Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(200, GBP),
+            StringTagCollection::from_strs(&["sale"]),
+        ),
+    ];
+
+    let basket = Basket::with_items(items, GBP)?;
+    let item_group = ItemGroup::from(&basket);
+
+    let budget = PromotionBudget {
+        application_limit: None,
+        monetary_limit: Some(Money::from_minor(100, GBP)),
+    };
+
+    let promotion = promotion(TieredThresholdPromotion::new(
+        PromotionKey::default(),
+        vec![ThresholdTier::new(
+            Money::from_minor(100, GBP),
+            StringTagCollection::from_strs(&["sale"]),
+            StringTagCollection::from_strs(&["sale"]),
+            ThresholdDiscount::PercentCheapest(Percentage::from(0.50)),
+        )],
+        budget,
+    ));
+
+    let result = ILPSolver::solve(&[promotion], &item_group)?;
+
+    assert_eq!(result.total.to_minor_units(), 500);
+    assert_eq!(result.promotion_applications.len(), 1);
 
     Ok(())
 }

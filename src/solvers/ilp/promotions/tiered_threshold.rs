@@ -477,17 +477,36 @@ impl TieredThresholdPromotionVars {
             let mut discount_expr = Expression::default();
 
             for qt in &self.qualifying_tiers {
-                for &(item_idx, var) in &qt.item_vars {
-                    let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
-                    let full_minor = item.price().to_minor_units();
-                    let discounted_minor =
-                        estimate_discounted_minor_for_budget(qt, item_idx, var, full_minor)?;
+                if qt.percent_cheapest.is_some()
+                    || qt.fixed_cheapest_minor.is_some()
+                    || qt.cheapest_free
+                {
+                    // Cheapest-item modes are exact with target vars: only targets consume budget.
+                    for &(item_idx, target_var) in &qt.target_vars {
+                        let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
+                        let full_minor = item.price().to_minor_units();
+                        let discounted_minor =
+                            estimate_target_discounted_minor_for_budget(qt, full_minor)?;
 
-                    let discount_amount = full_minor.saturating_sub(discounted_minor);
-                    let coeff = i64_to_f64_exact(discount_amount)
-                        .ok_or(SolverError::MinorUnitsNotRepresentable(discount_amount))?;
+                        let discount_amount = full_minor.saturating_sub(discounted_minor);
+                        let coeff = i64_to_f64_exact(discount_amount)
+                            .ok_or(SolverError::MinorUnitsNotRepresentable(discount_amount))?;
 
-                    discount_expr += var * coeff;
+                        discount_expr += target_var * coeff;
+                    }
+                } else {
+                    for &(item_idx, var) in &qt.item_vars {
+                        let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
+                        let full_minor = item.price().to_minor_units();
+                        let discounted_minor =
+                            estimate_discounted_minor_for_budget(qt, item_idx, var, full_minor)?;
+
+                        let discount_amount = full_minor.saturating_sub(discounted_minor);
+                        let coeff = i64_to_f64_exact(discount_amount)
+                            .ok_or(SolverError::MinorUnitsNotRepresentable(discount_amount))?;
+
+                        discount_expr += var * coeff;
+                    }
                 }
             }
 
@@ -573,6 +592,29 @@ fn estimate_discounted_minor_for_budget(
 
     // Conservative for other bundle-level modes: assume item could be free.
     Ok(0)
+}
+
+fn estimate_target_discounted_minor_for_budget(
+    tier: &QualifyingTier,
+    full_minor: i64,
+) -> Result<i64, SolverError> {
+    if tier.cheapest_free {
+        return Ok(0);
+    }
+
+    if let Some(pct) = tier.percent_cheapest {
+        let discount_amount = percent_of_minor(&pct, full_minor).map_err(SolverError::Discount)?;
+
+        return Ok(full_minor.saturating_sub(discount_amount));
+    }
+
+    if let Some(fixed) = tier.fixed_cheapest_minor {
+        return Ok(fixed.max(0));
+    }
+
+    Err(SolverError::InvariantViolation {
+        message: "missing cheapest-item budget mode",
+    })
 }
 
 /// Add cheapest-item constraints for a qualifying tier.

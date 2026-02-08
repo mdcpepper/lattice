@@ -386,19 +386,48 @@ impl MixAndMatchVars {
         if let Some(limit_minor) = self.monetary_limit_minor {
             let mut discount_expr = Expression::default();
 
-            // Iterate over all slot variables to compute total discount
-            for slot in &self.slot_vars {
-                for &(item_idx, var) in slot {
-                    let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
-                    let full_minor = item.price().to_minor_units();
-                    let discounted_minor =
-                        calculate_discounted_minor_for_budget(full_minor, self.runtime_discount)?;
+            match self.runtime_discount {
+                MixAndMatchRuntimeDiscount::PercentCheapest(_)
+                | MixAndMatchRuntimeDiscount::FixedCheapest(_) => {
+                    // Cheapest-item modes are exact with target vars: only targets consume budget.
+                    for (item_idx, target_var) in self.target_vars.iter().enumerate() {
+                        let Some(target_var) = target_var else {
+                            continue;
+                        };
 
-                    let discount_amount = full_minor.saturating_sub(discounted_minor);
-                    let coeff = i64_to_f64_exact(discount_amount)
-                        .ok_or(SolverError::MinorUnitsNotRepresentable(discount_amount))?;
+                        let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
+                        let full_minor = item.price().to_minor_units();
+                        let discounted_minor = calculate_discounted_minor_for_budget(
+                            full_minor,
+                            self.runtime_discount,
+                        )?;
 
-                    discount_expr += var * coeff;
+                        let discount_amount = full_minor.saturating_sub(discounted_minor);
+                        let coeff = i64_to_f64_exact(discount_amount)
+                            .ok_or(SolverError::MinorUnitsNotRepresentable(discount_amount))?;
+
+                        discount_expr += *target_var * coeff;
+                    }
+                }
+                _ => {
+                    // Iterate over all slot variables to compute total discount.
+                    // For bundle-total discounts this remains a conservative estimate.
+                    for slot in &self.slot_vars {
+                        for &(item_idx, var) in slot {
+                            let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
+                            let full_minor = item.price().to_minor_units();
+                            let discounted_minor = calculate_discounted_minor_for_budget(
+                                full_minor,
+                                self.runtime_discount,
+                            )?;
+
+                            let discount_amount = full_minor.saturating_sub(discounted_minor);
+                            let coeff = i64_to_f64_exact(discount_amount)
+                                .ok_or(SolverError::MinorUnitsNotRepresentable(discount_amount))?;
+
+                            discount_expr += var * coeff;
+                        }
+                    }
                 }
             }
 
