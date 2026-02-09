@@ -1,6 +1,9 @@
 //! Fixtures
 
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use rustc_hash::FxHashMap;
 use slotmap::{SecondaryMap, SlotMap};
@@ -128,7 +131,7 @@ impl<'a> Fixture<'a> {
     /// Create a new empty fixture with default base path
     #[must_use]
     pub fn new() -> Self {
-        Self::with_base_path("./fixtures")
+        Self::with_base_path(default_fixtures_base_path())
     }
 
     /// Create a new empty fixture with custom base path
@@ -420,6 +423,29 @@ impl Default for Fixture<'_> {
     }
 }
 
+fn default_fixtures_base_path() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    if let Some(workspace_root) = find_workspace_root(&manifest_dir) {
+        return workspace_root.join("fixtures");
+    }
+
+    manifest_dir.join("fixtures")
+}
+
+fn find_workspace_root(start: &Path) -> Option<PathBuf> {
+    start.ancestors().find_map(|dir| {
+        let cargo_toml = dir.join("Cargo.toml");
+        let contents = fs::read_to_string(cargo_toml).ok()?;
+
+        if contents.contains("[workspace]") {
+            Some(dir.to_path_buf())
+        } else {
+            None
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -691,7 +717,7 @@ mod tests {
     fn fixture_default_matches_new() {
         let fixture = Fixture::default();
 
-        assert_eq!(fixture.base_path, PathBuf::from("./fixtures"));
+        assert_eq!(fixture.base_path, default_fixtures_base_path());
         assert!(fixture.items.is_empty());
         assert!(fixture.promotions.is_empty());
     }
