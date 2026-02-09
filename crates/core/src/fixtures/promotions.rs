@@ -4,6 +4,7 @@ use rustc_hash::FxHashMap;
 use rusty_money::Money;
 use serde::Deserialize;
 use slotmap::{SecondaryMap, SlotMap};
+use smallvec::SmallVec;
 
 use crate::{
     discounts::SimpleDiscount,
@@ -15,6 +16,7 @@ use crate::{
         Promotion, PromotionKey, PromotionMeta, PromotionSlotKey,
         budget::PromotionBudget,
         promotion,
+        qualification::{BoolOp, Qualification, QualificationRule},
         types::{
             DirectDiscountPromotion, MixAndMatchDiscount, MixAndMatchPromotion, MixAndMatchSlot,
             PositionalDiscountPromotion, ThresholdDiscount, ThresholdTier, TierThreshold,
@@ -67,8 +69,13 @@ pub enum PromotionFixture {
         /// Promotion name
         name: String,
 
-        /// Promotion tags for targeting
+        /// Legacy shorthand for promotion qualification (`has_any`).
+        #[serde(default)]
         tags: Vec<String>,
+
+        /// Optional complex qualification.
+        #[serde(default)]
+        qualification: Option<QualificationFixture>,
 
         /// Discount configuration
         discount: SimpleDiscountFixture,
@@ -99,8 +106,13 @@ pub enum PromotionFixture {
         /// Promotion name
         name: String,
 
-        /// Promotion tags
+        /// Shorthand for promotion qualification (`has_any`).
+        #[serde(default)]
         tags: Vec<String>,
+
+        /// Optional complex qualification.
+        #[serde(default)]
+        qualification: Option<QualificationFixture>,
 
         /// Size of the bundle
         size: u16,
@@ -144,6 +156,7 @@ impl PromotionFixture {
             PromotionFixture::DirectDiscount {
                 name,
                 tags,
+                qualification,
                 discount,
                 budget,
             } => {
@@ -153,7 +166,12 @@ impl PromotionFixture {
                     layer_names: SecondaryMap::new(),
                 };
 
-                let tag_refs: Vec<&str> = tags.iter().map(String::as_str).collect();
+                let qualification = resolve_selector(
+                    &tags,
+                    qualification,
+                    "direct_discount.tags",
+                    "direct_discount.qualification",
+                )?;
 
                 let budget = budget
                     .map(BudgetFixture::try_into_budget)
@@ -162,7 +180,7 @@ impl PromotionFixture {
 
                 let promotion = promotion(DirectDiscountPromotion::new(
                     key,
-                    StringTagCollection::from_strs(&tag_refs),
+                    qualification,
                     SimpleDiscount::try_from(discount)?,
                     budget,
                 ));
@@ -178,6 +196,7 @@ impl PromotionFixture {
             Self::PositionalDiscount {
                 name,
                 tags,
+                qualification,
                 size,
                 positions,
                 discount,
@@ -189,7 +208,12 @@ impl PromotionFixture {
                     layer_names: SecondaryMap::new(),
                 };
 
-                let tag_refs: Vec<&str> = tags.iter().map(String::as_str).collect();
+                let qualification = resolve_selector(
+                    &tags,
+                    qualification,
+                    "positional_discount.tags",
+                    "positional_discount.qualification",
+                )?;
 
                 let budget = budget
                     .map(BudgetFixture::try_into_budget)
@@ -198,7 +222,7 @@ impl PromotionFixture {
 
                 let promotion = promotion(PositionalDiscountPromotion::new(
                     key,
-                    StringTagCollection::from_strs(&tag_refs),
+                    qualification,
                     size,
                     positions.into(),
                     SimpleDiscount::try_from(discount)?,
@@ -232,23 +256,25 @@ fn convert_mix_and_match(
             let MixAndMatchSlotFixture {
                 name,
                 tags,
+                qualification,
                 min,
                 max,
             } = slot;
 
-            let tag_refs: Vec<&str> = tags.iter().map(String::as_str).collect();
             let slot_key = slot_keys.insert(());
+
+            let qualification = resolve_selector(
+                &tags,
+                qualification,
+                "mix_and_match.slots[].tags",
+                "mix_and_match.slots[].qualification",
+            )?;
 
             slot_names.insert(slot_key, name);
 
-            MixAndMatchSlot::new(
-                slot_key,
-                StringTagCollection::from_strs(&tag_refs),
-                min,
-                max,
-            )
+            Ok(MixAndMatchSlot::new(slot_key, qualification, min, max))
         })
-        .collect();
+        .collect::<Result<Vec<_>, FixtureError>>()?;
 
     let meta = PromotionMeta {
         name,
@@ -295,7 +321,9 @@ fn convert_tiered_threshold(
                 lower_threshold,
                 upper_threshold,
                 contribution_tags,
+                contribution_qualification,
                 discount_tags,
+                discount_qualification,
                 discount,
             } = tier_fixture;
 
@@ -304,25 +332,34 @@ fn convert_tiered_threshold(
                     "tier threshold must define lower_threshold".to_string(),
                 )
             })?;
+
             let lower_threshold = parse_threshold_requirements(lower_threshold, "lower_threshold")?;
+
             let upper_threshold = upper_threshold
                 .map(|threshold| parse_threshold_requirements(threshold, "upper_threshold"))
                 .transpose()?;
 
-            let contribution_tag_refs: Vec<&str> =
-                contribution_tags.iter().map(String::as_str).collect();
+            let contribution_qualification = resolve_selector(
+                &contribution_tags,
+                contribution_qualification,
+                "tiered_threshold.tiers[].contribution_tags",
+                "tiered_threshold.tiers[].contribution_qualification",
+            )?;
 
-            let discount_tag_refs: Vec<&str> = discount_tags.iter().map(String::as_str).collect();
+            let discount_qualification = resolve_selector(
+                &discount_tags,
+                discount_qualification,
+                "tiered_threshold.tiers[].discount_tags",
+                "tiered_threshold.tiers[].discount_qualification",
+            )?;
 
-            let contribution_tags = StringTagCollection::from_strs(&contribution_tag_refs);
-            let discount_tags = StringTagCollection::from_strs(&discount_tag_refs);
             let discount = ThresholdDiscount::try_from(discount)?;
 
-            Ok(ThresholdTier::with_thresholds(
+            Ok(ThresholdTier::new(
                 lower_threshold,
                 upper_threshold,
-                contribution_tags,
-                discount_tags,
+                contribution_qualification,
+                discount_qualification,
                 discount,
             ))
         })
@@ -331,6 +368,122 @@ fn convert_tiered_threshold(
     let promo = promotion(TieredThresholdPromotion::new(key, tier_defs, budget));
 
     Ok((meta, promo))
+}
+
+/// Boolean operation used in fixture qualifications.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoolOpFixture {
+    /// All rules must match.
+    And,
+
+    /// At least one rule must match.
+    Or,
+}
+
+impl From<BoolOpFixture> for BoolOp {
+    fn from(value: BoolOpFixture) -> Self {
+        match value {
+            BoolOpFixture::And => BoolOp::And,
+            BoolOpFixture::Or => BoolOp::Or,
+        }
+    }
+}
+
+fn default_bool_op() -> BoolOpFixture {
+    BoolOpFixture::And
+}
+
+/// Qualification definition from YAML fixtures.
+#[derive(Debug, Deserialize)]
+pub struct QualificationFixture {
+    /// Rule-combination operation.
+    #[serde(default = "default_bool_op")]
+    pub op: BoolOpFixture,
+
+    /// Child rules.
+    #[serde(default)]
+    pub rules: Vec<QualificationRuleFixture>,
+}
+
+impl QualificationFixture {
+    fn try_into_qualification(self) -> Result<Qualification<StringTagCollection>, FixtureError> {
+        let mut rules: SmallVec<[QualificationRule<StringTagCollection>; 2]> = SmallVec::new();
+
+        for rule in self.rules {
+            rules.push(rule.try_into_rule()?);
+        }
+
+        Ok(Qualification::new(self.op.into(), rules))
+    }
+}
+
+/// Qualification rule definition from YAML fixtures.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum QualificationRuleFixture {
+    /// Item must have all listed tags.
+    HasAll {
+        /// Required tags.
+        has_all: Vec<String>,
+    },
+    /// Item must have at least one listed tag.
+    HasAny {
+        /// Optional tags where any one can match.
+        has_any: Vec<String>,
+    },
+    /// Item must have none of the listed tags.
+    HasNone {
+        /// Excluded tags.
+        has_none: Vec<String>,
+    },
+    /// Nested qualification group.
+    Group {
+        /// Nested group definition.
+        group: QualificationFixture,
+    },
+}
+
+impl QualificationRuleFixture {
+    fn try_into_rule(self) -> Result<QualificationRule<StringTagCollection>, FixtureError> {
+        match self {
+            Self::HasAll { has_all } => Ok(QualificationRule::HasAll {
+                tags: tags_to_collection(&has_all),
+            }),
+            Self::HasAny { has_any } => Ok(QualificationRule::HasAny {
+                tags: tags_to_collection(&has_any),
+            }),
+            Self::HasNone { has_none } => Ok(QualificationRule::HasNone {
+                tags: tags_to_collection(&has_none),
+            }),
+            Self::Group { group } => Ok(QualificationRule::Group(Box::new(
+                group.try_into_qualification()?,
+            ))),
+        }
+    }
+}
+
+fn tags_to_collection(tags: &[String]) -> StringTagCollection {
+    let tag_refs: Vec<&str> = tags.iter().map(String::as_str).collect();
+    StringTagCollection::from_strs(&tag_refs)
+}
+
+fn resolve_selector(
+    tags: &[String],
+    qualification: Option<QualificationFixture>,
+    tags_field: &str,
+    qualification_field: &str,
+) -> Result<Qualification<StringTagCollection>, FixtureError> {
+    if !tags.is_empty() && qualification.is_some() {
+        return Err(FixtureError::InvalidPromotionData(format!(
+            "cannot define both {tags_field} and {qualification_field}"
+        )));
+    }
+
+    qualification.map_or_else(
+        || Ok(Qualification::match_any(tags_to_collection(tags))),
+        QualificationFixture::try_into_qualification,
+    )
 }
 
 /// Threshold tier definition from YAML fixtures
@@ -348,9 +501,17 @@ pub struct ThresholdTierFixture {
     #[serde(default)]
     pub contribution_tags: Vec<String>,
 
+    /// Optional complex contribution qualification.
+    #[serde(default)]
+    pub contribution_qualification: Option<QualificationFixture>,
+
     /// Tags for items that receive the discount
     #[serde(default)]
     pub discount_tags: Vec<String>,
+
+    /// Optional complex discount qualification.
+    #[serde(default)]
+    pub discount_qualification: Option<QualificationFixture>,
 
     /// Discount configuration
     pub discount: ThresholdDiscountFixture,
@@ -626,8 +787,13 @@ pub struct MixAndMatchSlotFixture {
     /// Slot name
     pub name: String,
 
-    /// Slot tags (OR)
+    /// Shorthand for slot qualification (`has_any`).
+    #[serde(default)]
     pub tags: Vec<String>,
+
+    /// Optional complex slot qualification.
+    #[serde(default)]
+    pub qualification: Option<QualificationFixture>,
 
     /// Minimum required items
     pub min: usize,
@@ -785,6 +951,7 @@ value: 0.10
         let fixture = PromotionFixture::DirectDiscount {
             name: "Member Sale".to_string(),
             tags: vec!["member".to_string(), "sale".to_string()],
+            qualification: None,
             discount: SimpleDiscountFixture::AmountOff {
                 amount: "0.50 GBP".to_string(),
             },
@@ -805,6 +972,7 @@ value: 0.10
         let fixture = PromotionFixture::PositionalDiscount {
             name: "3-for-2".to_string(),
             tags: vec!["snack".to_string()],
+            qualification: None,
             size: 3,
             positions: vec![2],
             discount: SimpleDiscountFixture::PercentageOff {
@@ -830,12 +998,14 @@ value: 0.10
                 MixAndMatchSlotFixture {
                     name: "main".to_string(),
                     tags: vec!["main".to_string()],
+                    qualification: None,
                     min: 1,
                     max: Some(1),
                 },
                 MixAndMatchSlotFixture {
                     name: "drink".to_string(),
                     tags: vec!["drink".to_string()],
+                    qualification: None,
                     min: 1,
                     max: Some(1),
                 },
@@ -1021,6 +1191,7 @@ value: 0.10
         let fixture = PromotionFixture::DirectDiscount {
             name: "Sale with Budget".to_string(),
             tags: vec!["item".to_string()],
+            qualification: None,
             discount: SimpleDiscountFixture::PercentageOff {
                 amount: "25%".to_string(),
             },
@@ -1043,6 +1214,7 @@ value: 0.10
         let fixture = PromotionFixture::PositionalDiscount {
             name: "BOGOF Limited".to_string(),
             tags: vec!["snack".to_string()],
+            qualification: None,
             size: 2,
             positions: vec![1],
             discount: SimpleDiscountFixture::PercentageOff {
@@ -1073,7 +1245,9 @@ value: 0.10
                 }),
                 upper_threshold: None,
                 contribution_tags: vec!["wine".to_string()],
+                contribution_qualification: None,
                 discount_tags: vec!["cheese".to_string()],
+                discount_qualification: None,
                 discount: ThresholdDiscountFixture::PercentEachItem {
                     amount: "10%".to_string(),
                 },
@@ -1101,7 +1275,9 @@ value: 0.10
                 }),
                 upper_threshold: None,
                 contribution_tags: vec![],
+                contribution_qualification: None,
                 discount_tags: vec![],
+                discount_qualification: None,
                 discount: ThresholdDiscountFixture::AmountOffEachItem {
                     amount: "5.00 GBP".to_string(),
                 },
@@ -1297,5 +1473,121 @@ tiers:
         let result: Result<PromotionFixture, _> = serde_norway::from_str(yaml);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn promotion_fixture_supports_nested_direct_discount_qualification_yaml() -> TestResult {
+        let yaml = r"
+type: direct_discount
+name: Complex Direct
+qualification:
+  op: and
+  rules:
+    - has_any: [snack, peak]
+    - group:
+        op: or
+        rules:
+          - has_all: [member, peak]
+          - has_none: [excluded]
+discount:
+  type: amount_off
+  amount: '0.50 GBP'
+";
+        let fixture: PromotionFixture = serde_norway::from_str(yaml)?;
+
+        let key = test_promotion_key();
+        let (meta, promotion) = fixture.try_into_promotion(key)?;
+
+        assert_eq!(meta.name, "Complex Direct");
+        assert_eq!(promotion.key(), key);
+
+        Ok(())
+    }
+
+    #[test]
+    fn promotion_fixture_rejects_conflicting_tags_and_qualification() {
+        let yaml = r"
+type: direct_discount
+name: Ambiguous
+tags: [snack]
+qualification:
+  rules:
+    - has_any: [snack]
+discount:
+  type: amount_off
+  amount: '0.50 GBP'
+";
+        let fixture: Result<PromotionFixture, _> = serde_norway::from_str(yaml);
+        let Ok(fixture) = fixture else {
+            panic!("Fixture YAML should parse before semantic validation");
+        };
+
+        let key = test_promotion_key();
+        let result = fixture.try_into_promotion(key);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn promotion_fixture_supports_mix_and_match_slot_qualification_yaml() -> TestResult {
+        let yaml = r"
+type: mix_and_match
+name: Qualified Meal Deal
+slots:
+  - name: main
+    qualification:
+      rules:
+        - has_any: [main]
+    min: 1
+    max: 1
+  - name: drink
+    tags: [drink]
+    min: 1
+    max: 1
+discount:
+  type: fixed_total
+  amount: '5.00 GBP'
+";
+        let fixture: PromotionFixture = serde_norway::from_str(yaml)?;
+
+        let key = test_promotion_key();
+        let (meta, promotion) = fixture.try_into_promotion(key)?;
+
+        assert_eq!(meta.name, "Qualified Meal Deal");
+        assert_eq!(meta.slot_names.len(), 2);
+        assert_eq!(promotion.key(), key);
+
+        Ok(())
+    }
+
+    #[test]
+    fn tiered_threshold_fixture_supports_qualification_fields() -> TestResult {
+        let yaml = r"
+type: tiered_threshold
+name: Qualified Tier
+tiers:
+  - lower_threshold:
+      monetary: '10.00 GBP'
+    contribution_qualification:
+      op: and
+      rules:
+        - has_any: [wine]
+        - has_none: [excluded]
+    discount_qualification:
+      rules:
+        - has_any: [cheese]
+    discount:
+      type: percent_each_item
+      amount: '10%'
+";
+        let fixture: PromotionFixture = serde_norway::from_str(yaml)?;
+
+        let key = test_promotion_key();
+        let (meta, promotion) = fixture.try_into_promotion(key)?;
+
+        assert_eq!(meta.name, "Qualified Tier");
+        assert_eq!(promotion.key(), key);
+
+        Ok(())
     }
 }

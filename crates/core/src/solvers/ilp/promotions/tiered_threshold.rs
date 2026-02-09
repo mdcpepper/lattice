@@ -22,7 +22,6 @@ use crate::{
             state::ILPState,
         },
     },
-    tags::collection::TagCollection,
 };
 
 /// Per-qualifying-tier data captured during variable creation.
@@ -918,17 +917,11 @@ impl ILPPromotion for TieredThresholdPromotion<'_> {
             return false;
         }
 
-        // At least one tier must have items matching its discount_tags
+        // At least one tier must have items matching its discount qualification.
         self.tiers().iter().any(|tier| {
-            let discount_tags = tier.discount_tags();
-
-            if discount_tags.is_empty() {
-                return true;
-            }
-
             item_group
                 .iter()
-                .any(|item| item.tags().intersects(discount_tags))
+                .any(|item| tier.discount_qualification().matches(item.tags()))
         })
     }
 
@@ -962,20 +955,18 @@ impl ILPPromotion for TieredThresholdPromotion<'_> {
                 .upper_threshold()
                 .and_then(TierThreshold::item_count_threshold);
 
-            let contribution_tags = tier.contribution_tags();
-            let match_all_contribution = contribution_tags.is_empty();
-            let discount_tags = tier.discount_tags();
-            let match_all_discount = discount_tags.is_empty();
+            let contribution_qualification = tier.contribution_qualification();
+            let discount_qualification = tier.discount_qualification();
 
             let contribution_total: i64 = item_group
                 .iter()
-                .filter(|item| match_all_contribution || item.tags().intersects(contribution_tags))
+                .filter(|item| contribution_qualification.matches(item.tags()))
                 .map(|item| item.price().to_minor_units())
                 .sum();
 
             let contribution_count = item_group
                 .iter()
-                .filter(|item| match_all_contribution || item.tags().intersects(contribution_tags))
+                .filter(|item| contribution_qualification.matches(item.tags()))
                 .count();
 
             let contribution_count_u32 = u32::try_from(contribution_count).unwrap_or(u32::MAX);
@@ -1028,10 +1019,12 @@ impl ILPPromotion for TieredThresholdPromotion<'_> {
                 }
                 ThresholdDiscount::AmountOffTotal(a) => {
                     let m = a.to_minor_units();
+
                     (false, Some(m), None, None, None, false, -m)
                 }
                 ThresholdDiscount::FixedTotal(a) => {
                     let m = a.to_minor_units();
+
                     (false, None, Some(m), None, None, false, m)
                 }
 
@@ -1073,10 +1066,8 @@ impl ILPPromotion for TieredThresholdPromotion<'_> {
             for (item_idx, item) in item_group.iter().enumerate() {
                 let price = item.price().to_minor_units();
 
-                let contributes =
-                    match_all_contribution || item.tags().intersects(contribution_tags);
-
-                let discountable = match_all_discount || item.tags().intersects(discount_tags);
+                let contributes = contribution_qualification.matches(item.tags());
+                let discountable = discount_qualification.matches(item.tags());
 
                 if !contributes && !discountable {
                     continue;
@@ -1205,6 +1196,7 @@ mod tests {
         promotions::{
             PromotionKey,
             budget::PromotionBudget,
+            qualification::Qualification,
             types::{ThresholdDiscount, ThresholdTier},
         },
         solvers::{
@@ -1234,9 +1226,10 @@ mod tests {
         discount: ThresholdDiscount<'a>,
     ) -> ThresholdTier<'a, StringTagCollection> {
         ThresholdTier::new(
-            Money::from_minor(threshold_minor, GBP),
-            StringTagCollection::from_strs(contribution_tags),
-            StringTagCollection::from_strs(discount_tags),
+            TierThreshold::with_monetary_threshold(Money::from_minor(threshold_minor, GBP)),
+            None,
+            Qualification::match_any(StringTagCollection::from_strs(contribution_tags)),
+            Qualification::match_any(StringTagCollection::from_strs(discount_tags)),
             discount,
         )
     }
@@ -1248,11 +1241,14 @@ mod tests {
         discount_tags: &[&str],
         discount: ThresholdDiscount<'a>,
     ) -> ThresholdTier<'a, StringTagCollection> {
-        ThresholdTier::with_item_count_threshold(
-            Money::from_minor(threshold_minor, GBP),
-            item_count_threshold,
-            StringTagCollection::from_strs(contribution_tags),
-            StringTagCollection::from_strs(discount_tags),
+        ThresholdTier::new(
+            TierThreshold::with_both_thresholds(
+                Money::from_minor(threshold_minor, GBP),
+                item_count_threshold,
+            ),
+            None,
+            Qualification::match_any(StringTagCollection::from_strs(contribution_tags)),
+            Qualification::match_any(StringTagCollection::from_strs(discount_tags)),
             discount,
         )
     }
@@ -1412,7 +1408,7 @@ mod tests {
         let expr = vars.add_item_participation_term(Expression::default(), 0);
 
         assert!(
-            good_lp::IntoAffineExpression::linear_coefficients(&expr)
+            IntoAffineExpression::linear_coefficients(&expr)
                 .next()
                 .is_none()
         );

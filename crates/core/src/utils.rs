@@ -4,7 +4,7 @@ use clap::Parser;
 use slotmap::SlotMap;
 
 use crate::{
-    promotions::{PromotionSlotKey, types::MixAndMatchSlot},
+    promotions::{PromotionSlotKey, qualification::Qualification, types::MixAndMatchSlot},
     tags::string::StringTagCollection,
 };
 
@@ -31,5 +31,5 @@ pub fn slot(
     min: usize,
     max: Option<usize>,
 ) -> MixAndMatchSlot {
-    MixAndMatchSlot::new(keys.insert(()), tags, min, max)
+    MixAndMatchSlot::new(keys.insert(()), Qualification::match_any(tags), min, max)
 }

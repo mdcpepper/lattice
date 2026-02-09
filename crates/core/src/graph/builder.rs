@@ -370,7 +370,8 @@ mod tests {
     use crate::{
         discounts::SimpleDiscount,
         promotions::{
-            Promotion, PromotionKey, budget::PromotionBudget, types::DirectDiscountPromotion,
+            Promotion, PromotionKey, budget::PromotionBudget, promotion,
+            qualification::Qualification, types::DirectDiscountPromotion,
         },
         tags::string::StringTagCollection,
     };
@@ -378,9 +379,9 @@ mod tests {
     use super::*;
 
     fn test_promotion(key: PromotionKey) -> Promotion<'static> {
-        crate::promotions::promotion(DirectDiscountPromotion::new(
+        promotion(DirectDiscountPromotion::new(
             key,
-            StringTagCollection::from_strs(&["a"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["a"])),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         ))

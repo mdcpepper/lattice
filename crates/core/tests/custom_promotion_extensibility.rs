@@ -219,7 +219,9 @@ fn solve_handles_builtin_and_external_promotions() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["fruit"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["fruit"]),
+        ),
         SimpleDiscount::AmountOverride(Money::from_minor(10, GBP)),
         PromotionBudget::unlimited(),
     ));

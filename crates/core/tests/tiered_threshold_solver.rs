@@ -68,9 +68,14 @@ fn threshold_met_applies_discount_to_eligible_items() -> TestResult {
     let promo = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
         vec![ThresholdTier::new(
-            Money::from_minor(3000, GBP),
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["cheese"]),
+            TierThreshold::with_monetary_threshold(Money::from_minor(3000, GBP)),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["cheese"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
         )],
         PromotionBudget::unlimited(),
@@ -112,9 +117,14 @@ fn threshold_not_met_no_discount_applied() -> TestResult {
     let promo = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
         vec![ThresholdTier::new(
-            Money::from_minor(3000, GBP),
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["cheese"]),
+            TierThreshold::with_monetary_threshold(Money::from_minor(3000, GBP)),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["cheese"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
         )],
         PromotionBudget::unlimited(),
@@ -155,11 +165,15 @@ fn item_count_threshold_not_met_no_discount_applied() -> TestResult {
 
     let promo = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
-        vec![ThresholdTier::with_item_count_threshold(
-            Money::from_minor(3000, GBP),
-            3,
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["cheese"]),
+        vec![ThresholdTier::new(
+            TierThreshold::with_both_thresholds(Money::from_minor(3000, GBP), 3),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["cheese"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
         )],
         PromotionBudget::unlimited(),
@@ -205,11 +219,15 @@ fn item_count_threshold_met_applies_discount() -> TestResult {
 
     let promo = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
-        vec![ThresholdTier::with_item_count_threshold(
-            Money::from_minor(3000, GBP),
-            3,
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["cheese"]),
+        vec![ThresholdTier::new(
+            TierThreshold::with_both_thresholds(Money::from_minor(3000, GBP), 3),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["cheese"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
         )],
         PromotionBudget::unlimited(),
@@ -250,10 +268,15 @@ fn item_count_only_threshold_met_applies_discount() -> TestResult {
 
     let promo = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
-        vec![ThresholdTier::with_item_count_only_threshold(
-            2,
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["cheese"]),
+        vec![ThresholdTier::new(
+            TierThreshold::with_item_count_threshold(2),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["cheese"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
         )],
         PromotionBudget::unlimited(),
@@ -294,13 +317,17 @@ fn upper_threshold_caps_discountable_value_without_disabling_tier() -> TestResul
 
     let promo = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
-        vec![ThresholdTier::with_thresholds(
+        vec![ThresholdTier::new(
             TierThreshold::with_monetary_threshold(Money::from_minor(3000, GBP)),
             Some(TierThreshold::with_monetary_threshold(Money::from_minor(
                 6000, GBP,
             ))),
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["wine"]),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
         )],
         PromotionBudget::unlimited(),
@@ -333,15 +360,25 @@ fn multiple_tiers_qualify_solver_picks_optimal() -> TestResult {
         PromotionKey::default(),
         vec![
             ThresholdTier::new(
-                Money::from_minor(5000, GBP),
-                StringTagCollection::empty(),
-                StringTagCollection::empty(),
+                TierThreshold::with_monetary_threshold(Money::from_minor(5000, GBP)),
+                None,
+                lattice::promotions::qualification::Qualification::match_any(
+                    StringTagCollection::empty(),
+                ),
+                lattice::promotions::qualification::Qualification::match_any(
+                    StringTagCollection::empty(),
+                ),
                 ThresholdDiscount::AmountOffEachItem(Money::from_minor(500, GBP)),
             ),
             ThresholdTier::new(
-                Money::from_minor(8000, GBP),
-                StringTagCollection::empty(),
-                StringTagCollection::empty(),
+                TierThreshold::with_monetary_threshold(Money::from_minor(8000, GBP)),
+                None,
+                lattice::promotions::qualification::Qualification::match_any(
+                    StringTagCollection::empty(),
+                ),
+                lattice::promotions::qualification::Qualification::match_any(
+                    StringTagCollection::empty(),
+                ),
                 ThresholdDiscount::AmountOffEachItem(Money::from_minor(1200, GBP)),
             ),
         ],
@@ -375,9 +412,14 @@ fn basket_wide_threshold_and_discount() -> TestResult {
     let promo = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
         vec![ThresholdTier::new(
-            Money::from_minor(2000, GBP),
-            StringTagCollection::empty(),
-            StringTagCollection::empty(),
+            TierThreshold::with_monetary_threshold(Money::from_minor(2000, GBP)),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::empty(),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::empty(),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(0.05)),
         )],
         PromotionBudget::unlimited(),
@@ -407,15 +449,25 @@ fn only_lower_tier_qualifies() -> TestResult {
         PromotionKey::default(),
         vec![
             ThresholdTier::new(
-                Money::from_minor(5000, GBP),
-                StringTagCollection::empty(),
-                StringTagCollection::empty(),
+                TierThreshold::with_monetary_threshold(Money::from_minor(5000, GBP)),
+                None,
+                lattice::promotions::qualification::Qualification::match_any(
+                    StringTagCollection::empty(),
+                ),
+                lattice::promotions::qualification::Qualification::match_any(
+                    StringTagCollection::empty(),
+                ),
                 ThresholdDiscount::AmountOffEachItem(Money::from_minor(500, GBP)),
             ),
             ThresholdTier::new(
-                Money::from_minor(8000, GBP),
-                StringTagCollection::empty(),
-                StringTagCollection::empty(),
+                TierThreshold::with_monetary_threshold(Money::from_minor(8000, GBP)),
+                None,
+                lattice::promotions::qualification::Qualification::match_any(
+                    StringTagCollection::empty(),
+                ),
+                lattice::promotions::qualification::Qualification::match_any(
+                    StringTagCollection::empty(),
+                ),
                 ThresholdDiscount::AmountOffEachItem(Money::from_minor(1200, GBP)),
             ),
         ],
@@ -459,9 +511,14 @@ fn tier_items_share_bundle_id() -> TestResult {
     let promo = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
         vec![ThresholdTier::new(
-            Money::from_minor(2000, GBP),
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["cheese"]),
+            TierThreshold::with_monetary_threshold(Money::from_minor(2000, GBP)),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["cheese"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
         )],
         PromotionBudget::unlimited(),
@@ -540,9 +597,14 @@ fn contribution_items_are_exclusive_across_promotions() -> TestResult {
     let wine_cheese = promotion(TieredThresholdPromotion::new(
         wine_cheese_key,
         vec![ThresholdTier::new(
-            Money::from_minor(3000, GBP),
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["cheese"]),
+            TierThreshold::with_monetary_threshold(Money::from_minor(3000, GBP)),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["cheese"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(1.0)),
         )],
         PromotionBudget::unlimited(),
@@ -551,9 +613,14 @@ fn contribution_items_are_exclusive_across_promotions() -> TestResult {
     let basket_wide = promotion(TieredThresholdPromotion::new(
         basket_key,
         vec![ThresholdTier::new(
-            Money::from_minor(0, GBP),
-            StringTagCollection::empty(),
-            StringTagCollection::empty(),
+            TierThreshold::with_monetary_threshold(Money::from_minor(0, GBP)),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::empty(),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::empty(),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(0.05)),
         )],
         PromotionBudget::unlimited(),

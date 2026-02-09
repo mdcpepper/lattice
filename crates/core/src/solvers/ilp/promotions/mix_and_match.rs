@@ -27,7 +27,6 @@ use crate::{
             state::ILPState,
         },
     },
-    tags::collection::TagCollection,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -865,7 +864,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         for slot in self.slots() {
             let matching_items = item_group
                 .iter()
-                .filter(|item| item.tags().intersects(slot.tags()))
+                .filter(|item| slot.qualification().matches(item.tags()))
                 .count();
 
             if matching_items < slot.min() {
@@ -921,7 +920,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
             let mut eligible = SmallVec::new();
 
             for (item_idx, item) in item_group.iter().enumerate() {
-                if item.tags().intersects(slot.tags()) {
+                if slot.qualification().matches(item.tags()) {
                     eligible.push((item_idx, item.price().to_minor_units()));
                 }
             }
@@ -1092,6 +1091,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
         // Fixed total price objective term
         if let MixAndMatchDiscount::FixedTotal(amount) = self.discount() {
             let bundle_price = amount.to_minor_units();
+
             let coeff = i64_to_f64_exact(bundle_price)
                 .ok_or(SolverError::MinorUnitsNotRepresentable(bundle_price))?;
 

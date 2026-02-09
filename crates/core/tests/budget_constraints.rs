@@ -17,7 +17,7 @@ use lattice::{
         promotion,
         types::{
             DirectDiscountPromotion, MixAndMatchDiscount, MixAndMatchPromotion,
-            PositionalDiscountPromotion, ThresholdDiscount, ThresholdTier,
+            PositionalDiscountPromotion, ThresholdDiscount, ThresholdTier, TierThreshold,
             TieredThresholdPromotion,
         },
     },
@@ -57,7 +57,9 @@ fn direct_discount_respects_application_limit() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["fruit"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["fruit"]),
+        ),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
         budget,
     ));
@@ -102,7 +104,9 @@ fn direct_discount_respects_monetary_limit() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["sale"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["sale"]),
+        ),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
         budget,
     ));
@@ -329,7 +333,9 @@ fn positional_discount_respects_application_limit() -> TestResult {
 
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["snack"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["snack"]),
+        ),
         2,
         SmallVec::from_vec(vec![1]),
         SimpleDiscount::PercentageOff(Percentage::from(1.0)),
@@ -381,7 +387,9 @@ fn positional_discount_respects_monetary_limit() -> TestResult {
 
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["item"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["item"]),
+        ),
         2,
         SmallVec::from_vec(vec![1]),
         SimpleDiscount::PercentageOff(Percentage::from(1.0)),
@@ -433,9 +441,14 @@ fn tiered_threshold_application_limit_counts_tiers_not_items() -> TestResult {
     let promotion = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
         vec![ThresholdTier::new(
-            Money::from_minor(3000, GBP),
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["cheese"]),
+            TierThreshold::with_monetary_threshold(Money::from_minor(3000, GBP)),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["cheese"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(1.0)),
         )],
         budget,
@@ -486,9 +499,14 @@ fn tiered_threshold_zero_application_limit_prevents_all_applications() -> TestRe
     let promotion = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
         vec![ThresholdTier::new(
-            Money::from_minor(3000, GBP),
-            StringTagCollection::from_strs(&["wine"]),
-            StringTagCollection::from_strs(&["cheese"]),
+            TierThreshold::with_monetary_threshold(Money::from_minor(3000, GBP)),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["cheese"]),
+            ),
             ThresholdDiscount::PercentEachItem(Percentage::from(1.0)),
         )],
         budget,
@@ -528,9 +546,14 @@ fn tiered_threshold_cheapest_budget_uses_exact_target_discount() -> TestResult {
     let promotion = promotion(TieredThresholdPromotion::new(
         PromotionKey::default(),
         vec![ThresholdTier::new(
-            Money::from_minor(100, GBP),
-            StringTagCollection::from_strs(&["sale"]),
-            StringTagCollection::from_strs(&["sale"]),
+            TierThreshold::with_monetary_threshold(Money::from_minor(100, GBP)),
+            None,
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["sale"]),
+            ),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["sale"]),
+            ),
             ThresholdDiscount::PercentCheapest(Percentage::from(0.50)),
         )],
         budget,
@@ -570,7 +593,9 @@ fn budget_zero_application_limit_prevents_all_applications() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["fruit"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["fruit"]),
+        ),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
         budget,
     ));
@@ -603,7 +628,9 @@ fn budget_zero_monetary_limit_prevents_all_applications() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["sale"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["sale"]),
+        ),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
         budget,
     ));
@@ -648,7 +675,9 @@ fn budget_both_limits_enforced() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["item"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["item"]),
+        ),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
         budget,
     ));

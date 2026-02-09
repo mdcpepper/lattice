@@ -1,0 +1,43 @@
+root: all
+
+nodes:
+  all:
+    promotions: [qualified-snacks-30, qualified-drink-bogof]
+    output: pass-through
+
+promotions:
+  qualified-snacks-30:
+    type: direct_discount
+    name: "30% Off Qualified Snacks"
+    qualification:
+      op: and
+      rules:
+        - has_any: [snack]
+        - group:
+            op: or
+            rules:
+              - has_any: [member]
+              - has_any: [student]
+        - has_none: [excluded]
+    discount:
+      type: percentage_off
+      amount: 30%
+
+  qualified-drink-bogof:
+    type: positional_discount
+    name: "BOGOF Qualified Drinks"
+    qualification:
+      op: and
+      rules:
+        - has_any: [drink]
+        - group:
+            op: or
+            rules:
+              - has_any: [member]
+              - has_any: [off-peak]
+        - has_none: [hot]
+    size: 2
+    positions: [1]
+    discount:
+      type: percentage_off
+      amount: 100%

@@ -9,6 +9,7 @@ use crate::{graph::PromotionLayerKey, solvers::ilp::ILPPromotion};
 pub mod applications;
 pub mod budget;
 pub mod prelude;
+pub mod qualification;
 pub mod types;
 
 new_key_type! {
@@ -53,7 +54,10 @@ mod tests {
         discounts::SimpleDiscount,
         items::{Item, groups::ItemGroup},
         products::ProductKey,
-        promotions::{PromotionKey, budget::PromotionBudget, types::DirectDiscountPromotion},
+        promotions::{
+            PromotionKey, budget::PromotionBudget, qualification::Qualification,
+            types::DirectDiscountPromotion,
+        },
         tags::string::StringTagCollection,
     };
 
@@ -64,7 +68,7 @@ mod tests {
         let key = PromotionKey::default();
         let wrapped = promotion(DirectDiscountPromotion::new(
             key,
-            StringTagCollection::from_strs(&["sale"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["sale"])),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         ));

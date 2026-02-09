@@ -15,6 +15,7 @@ pub use crate::{
         Promotion, PromotionKey, PromotionMeta, PromotionSlotKey,
         budget::PromotionBudget,
         promotion,
+        qualification::{BoolOp, Qualification, QualificationRule},
         types::{
             DirectDiscountPromotion, MixAndMatchDiscount, MixAndMatchPromotion, MixAndMatchSlot,
             PositionalDiscountPromotion,

@@ -1,0 +1,30 @@
+products:
+  protein-bar:
+    name: Protein Bar
+    tags: [snack, peak, member]
+    price: 2.20 GBP
+
+  granola-pot:
+    name: Granola Pot
+    tags: [snack, off-peak, student]
+    price: 1.80 GBP
+
+  mixed-nuts:
+    name: Mixed Nuts
+    tags: [snack, peak]
+    price: 1.50 GBP
+
+  cola-can:
+    name: Cola Can
+    tags: [drink, off-peak]
+    price: 1.40 GBP
+
+  sparkling-water:
+    name: Sparkling Water
+    tags: [drink, member]
+    price: 1.10 GBP
+
+  hot-latte:
+    name: Hot Latte
+    tags: [drink, off-peak, hot]
+    price: 3.00 GBP

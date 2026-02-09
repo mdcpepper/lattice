@@ -8,7 +8,9 @@ use decimal_percentage::Percentage;
 use rusty_money::{Money, iso::Currency};
 
 use crate::{
-    promotions::{PromotionKey, PromotionSlotKey, budget::PromotionBudget},
+    promotions::{
+        PromotionKey, PromotionSlotKey, budget::PromotionBudget, qualification::Qualification,
+    },
     tags::{collection::TagCollection, string::StringTagCollection},
 };
 
@@ -43,8 +45,8 @@ pub struct MixAndMatchSlot<T: TagCollection = StringTagCollection> {
     /// Key for a human-readable name for this slot (e.g. "main", "drink", "snack").
     key: PromotionSlotKey,
 
-    /// Tags that match items to this slot (OR semantics).
-    tags: T,
+    /// Qualification that matches items to this slot.
+    qualification: Qualification<T>,
 
     /// Minimum number of items required in this slot.
     min: usize,
@@ -55,10 +57,15 @@ pub struct MixAndMatchSlot<T: TagCollection = StringTagCollection> {
 
 impl<T: TagCollection> MixAndMatchSlot<T> {
     /// Create a new slot.
-    pub fn new(key: PromotionSlotKey, tags: T, min: usize, max: Option<usize>) -> Self {
+    pub fn new(
+        key: PromotionSlotKey,
+        qualification: Qualification<T>,
+        min: usize,
+        max: Option<usize>,
+    ) -> Self {
         Self {
             key,
-            tags,
+            qualification,
             min,
             max,
         }
@@ -69,9 +76,9 @@ impl<T: TagCollection> MixAndMatchSlot<T> {
         &self.key
     }
 
-    /// Slot tags.
-    pub fn tags(&self) -> &T {
-        &self.tags
+    /// Slot item qualification.
+    pub fn qualification(&self) -> &Qualification<T> {
+        &self.qualification
     }
 
     /// Minimum required items.
@@ -204,16 +211,21 @@ mod tests {
         let slot_key = slot_keys.insert(());
         let slot = MixAndMatchSlot::new(
             slot_key,
-            StringTagCollection::from_strs(&["tag1", "tag2"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["tag1", "tag2"])),
             3,
             Some(5),
         );
 
         assert_eq!(slot.key(), &slot_key);
-        let tags = slot.tags().to_strs();
-        assert_eq!(tags.len(), 2);
-        assert!(tags.iter().any(|t| t == "tag1"));
-        assert!(tags.iter().any(|t| t == "tag2"));
+        assert!(
+            slot.qualification()
+                .matches(&StringTagCollection::from_strs(&["tag1"]))
+        );
+        assert!(
+            !slot
+                .qualification()
+                .matches(&StringTagCollection::from_strs(&["other"]))
+        );
         assert_eq!(slot.min(), 3);
         assert_eq!(slot.max(), Some(5));
     }

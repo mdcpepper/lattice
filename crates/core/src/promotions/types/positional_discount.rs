@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 
 use crate::{
     discounts::SimpleDiscount,
-    promotions::{PromotionKey, budget::PromotionBudget},
+    promotions::{PromotionKey, budget::PromotionBudget, qualification::Qualification},
     tags::{collection::TagCollection, string::StringTagCollection},
 };
 
@@ -16,7 +16,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct PositionalDiscountPromotion<'a, T: TagCollection = StringTagCollection> {
     key: PromotionKey,
-    tags: T,
+    qualification: Qualification<T>,
     size: u16,
     positions: SmallVec<[u16; 5]>,
     discount: SimpleDiscount<'a>,
@@ -27,7 +27,7 @@ impl<'a, T: TagCollection> PositionalDiscountPromotion<'a, T> {
     /// Create a new positional discount promotion.
     pub fn new(
         key: PromotionKey,
-        tags: T,
+        qualification: Qualification<T>,
         size: u16,
         positions: SmallVec<[u16; 5]>,
         discount: SimpleDiscount<'a>,
@@ -35,7 +35,7 @@ impl<'a, T: TagCollection> PositionalDiscountPromotion<'a, T> {
     ) -> Self {
         Self {
             key,
-            tags,
+            qualification,
             size,
             positions,
             discount,
@@ -48,9 +48,9 @@ impl<'a, T: TagCollection> PositionalDiscountPromotion<'a, T> {
         self.key
     }
 
-    /// Return the tags
-    pub fn tags(&self) -> &T {
-        &self.tags
+    /// Return the item qualification expression.
+    pub fn qualification(&self) -> &Qualification<T> {
+        &self.qualification
     }
 
     /// Return the bundle size
@@ -86,13 +86,14 @@ mod tests {
     #[test]
     fn accessors_return_constructor_values() {
         let key = PromotionKey::default();
-        let tags = StringTagCollection::from_strs(&["sale", "vip"]);
+        let qualification =
+            Qualification::match_any(StringTagCollection::from_strs(&["sale", "vip"]));
         let positions = smallvec![0u16, 2u16];
         let discount = SimpleDiscount::AmountOff(Money::from_minor(50, GBP));
 
         let promo = PositionalDiscountPromotion::new(
             key,
-            tags.clone(),
+            qualification.clone(),
             3,
             positions.clone(),
             discount,
@@ -100,7 +101,12 @@ mod tests {
         );
 
         assert_eq!(promo.key(), key);
-        assert_eq!(promo.tags(), &tags);
+        assert!(
+            promo
+                .qualification()
+                .matches(&StringTagCollection::from_strs(&["vip"]))
+        );
+        assert_eq!(promo.qualification().rules.len(), qualification.rules.len());
         assert_eq!(promo.size(), 3);
         assert_eq!(promo.positions(), positions.as_slice());
         assert!(matches!(

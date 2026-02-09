@@ -10,10 +10,11 @@ use lattice::{
     items::{Item, groups::ItemGroup},
     products::ProductKey,
     promotions::{
-        PromotionKey, budget::PromotionBudget, promotion, types::DirectDiscountPromotion,
+        PromotionKey, budget::PromotionBudget, promotion, qualification::Qualification,
+        types::DirectDiscountPromotion,
     },
     solvers::{Solver, ilp::ILPSolver},
-    tags::{collection::TagCollection, string::StringTagCollection},
+    tags::string::StringTagCollection,
 };
 
 #[test]
@@ -41,7 +42,7 @@ fn solver_handles_percentage_off() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["fruit"]),
+        Qualification::match_any(StringTagCollection::from_strs(&["fruit"])),
         SimpleDiscount::PercentageOff(Percentage::from(0.25)),
         PromotionBudget::unlimited(),
     ));
@@ -77,7 +78,7 @@ fn solver_handles_amount_off() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["premium"]),
+        Qualification::match_any(StringTagCollection::from_strs(&["premium"])),
         SimpleDiscount::AmountOff(Money::from_minor(50, GBP)),
         PromotionBudget::unlimited(),
     ));
@@ -116,7 +117,7 @@ fn solver_handles_amount_override() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["clearance"]),
+        Qualification::match_any(StringTagCollection::from_strs(&["clearance"])),
         SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
         PromotionBudget::unlimited(),
     ));
@@ -153,14 +154,18 @@ fn solver_handles_multiple_overlapping_promotions() -> TestResult {
     let promotions = vec![
         promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["fruit"]),
-            SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.10)),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["fruit"]),
+            ),
+            SimpleDiscount::PercentageOff(Percentage::from(0.10)),
             PromotionBudget::unlimited(),
         )),
         promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["organic"]),
-            SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.20)),
+            lattice::promotions::qualification::Qualification::match_any(
+                StringTagCollection::from_strs(&["organic"]),
+            ),
+            SimpleDiscount::PercentageOff(Percentage::from(0.20)),
             PromotionBudget::unlimited(),
         )),
     ];
@@ -197,7 +202,7 @@ fn solver_handles_no_matching_tags() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["meat"]),
+        Qualification::match_any(StringTagCollection::from_strs(&["meat"])),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
         PromotionBudget::unlimited(),
     ));
@@ -232,7 +237,7 @@ fn solver_handles_empty_tag_promotion() -> TestResult {
     // Empty tags means no items match
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::empty(),
+        Qualification::match_all(),
         SimpleDiscount::PercentageOff(Percentage::from(0.50)),
         PromotionBudget::unlimited(),
     ));
@@ -260,7 +265,7 @@ fn solver_handles_amount_off_capped_at_zero() -> TestResult {
     // Discount is larger than item price
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["sale"]),
+        Qualification::match_any(StringTagCollection::from_strs(&["sale"])),
         SimpleDiscount::AmountOff(Money::from_minor(50, GBP)),
         PromotionBudget::unlimited(),
     ));
@@ -304,7 +309,7 @@ fn solver_applies_promotion_to_all_matching_items() -> TestResult {
 
     let promotion = promotion(DirectDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["snack"]),
+        Qualification::match_any(StringTagCollection::from_strs(&["snack"])),
         SimpleDiscount::PercentageOff(Percentage::from(0.20)),
         PromotionBudget::unlimited(),
     ));

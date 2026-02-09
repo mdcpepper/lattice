@@ -322,6 +322,7 @@ pub fn i64_to_f64_exact(v: i64) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    use decimal_percentage::Percentage;
     use good_lp::{Expression, IntoAffineExpression, ProblemVariables};
     use rusty_money::{Money, iso::GBP};
     use smallvec::SmallVec;
@@ -334,6 +335,8 @@ mod tests {
         promotions::{
             PromotionKey, PromotionSlotKey,
             budget::PromotionBudget,
+            promotion,
+            qualification::Qualification,
             types::{
                 DirectDiscountPromotion, MixAndMatchDiscount, MixAndMatchPromotion,
                 PositionalDiscountPromotion,
@@ -345,7 +348,7 @@ mod tests {
                 CountingObserver, SelectAllSolution, item_group_from_items,
             },
         },
-        tags::{collection::TagCollection, string::StringTagCollection},
+        tags::string::StringTagCollection,
         utils::slot,
     };
 
@@ -358,19 +361,22 @@ mod tests {
             Money::from_minor(100, GBP),
             StringTagCollection::from_strs(&["any"]),
         )];
+
         let item_group = item_group_from_items(items);
 
-        let promotion = crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promotion = promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         ));
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
+
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
+
         let instance = PromotionInstance::new(&promotion, &item_group, &mut state, &mut observer)?;
 
         let discounts = instance.calculate_item_discounts(&SelectAllSolution, &item_group)?;
@@ -390,12 +396,12 @@ mod tests {
         ];
         let item_group = item_group_from_items(items);
 
-        let promo = crate::promotions::promotion(PositionalDiscountPromotion::new(
+        let promo = promotion(PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             2,
             SmallVec::from_vec(vec![1u16]),
-            SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.5)),
+            SimpleDiscount::PercentageOff(Percentage::from(0.5)),
             PromotionBudget::unlimited(),
         ));
 
@@ -407,6 +413,7 @@ mod tests {
         assert_eq!(discounts.len(), 4);
 
         let mut next_bundle_id = 0;
+
         let applications = instance.calculate_item_applications(
             &SelectAllSolution,
             &item_group,
@@ -431,19 +438,21 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             2,
             SmallVec::from_vec(vec![1u16]),
-            SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.5)),
+            SimpleDiscount::PercentageOff(Percentage::from(0.5)),
             PromotionBudget::unlimited(),
         );
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let expr = Expression::default();
         let updated = vars.add_item_participation_term(expr, 0);
+
         assert!(updated.linear_coefficients().next().is_some());
 
         assert!(vars.is_item_participating(&SelectAllSolution, 0));
@@ -461,17 +470,19 @@ mod tests {
             ProductKey::default(),
             Money::from_minor(100, GBP),
         )];
+
         let item_group = item_group_from_items(items);
 
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         );
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         assert!(vars.is_item_priced_by_promotion(&SelectAllSolution, 0));
@@ -520,10 +531,10 @@ mod tests {
             ),
         ];
 
-        let promotion = crate::promotions::promotion(MixAndMatchPromotion::new(
+        let promotion = promotion(MixAndMatchPromotion::new(
             PromotionKey::default(),
             slots,
-            MixAndMatchDiscount::PercentAllItems(decimal_percentage::Percentage::from(0.25)),
+            MixAndMatchDiscount::PercentAllItems(Percentage::from(0.25)),
             PromotionBudget::unlimited(),
         ));
 
@@ -570,7 +581,7 @@ mod tests {
                 1,
                 Some(1),
             )],
-            MixAndMatchDiscount::PercentAllItems(decimal_percentage::Percentage::from(0.1)),
+            MixAndMatchDiscount::PercentAllItems(Percentage::from(0.1)),
             PromotionBudget::unlimited(),
         );
 
@@ -582,17 +593,19 @@ mod tests {
 
         let positional = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             1,
             SmallVec::from_vec(vec![0u16]),
-            SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.5)),
+            SimpleDiscount::PercentageOff(Percentage::from(0.5)),
             PromotionBudget::unlimited(),
         );
 
         mm_vars.add_constraints(mm.key(), &item_group, &mut state, &mut observer)?;
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
+
         let positional_vars = positional.add_variables(&item_group, &mut state, &mut observer)?;
+
         positional_vars.add_constraints(
             positional.key(),
             &item_group,
@@ -612,20 +625,23 @@ mod tests {
         )];
         let item_group = item_group_from_items(items);
 
-        let promo = crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promo = promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["no-match"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["no-match"])),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         ));
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
+
         let mut state = ILPState::new(pb, cost);
         let mut observer = CountingObserver::default();
+
         let instance = PromotionInstance::new(&promo, &item_group, &mut state, &mut observer)?;
 
         let expr = instance.add_item_presence_term(Expression::default(), 0);
+
         assert!(expr.linear_coefficients().next().is_none());
         assert_eq!(
             instance.calculate_item_discounts(&SelectAllSolution, &item_group)?,
@@ -633,11 +649,13 @@ mod tests {
         );
 
         let mut next_bundle_id = 0;
+
         let applications = instance.calculate_item_applications(
             &SelectAllSolution,
             &item_group,
             &mut next_bundle_id,
         )?;
+
         assert!(applications.is_empty());
         assert_eq!(next_bundle_id, 0);
 
@@ -664,24 +682,28 @@ mod tests {
         ];
         let item_group = item_group_from_items(items);
 
-        let promo_a = crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promo_a = promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["a"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["a"])),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         ));
-        let promo_b = crate::promotions::promotion(DirectDiscountPromotion::new(
+
+        let promo_b = promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["b"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["b"])),
             SimpleDiscount::AmountOverride(Money::from_minor(75, GBP)),
             PromotionBudget::unlimited(),
         ));
+
         let promotions = vec![&promo_a as &dyn ILPPromotion, &promo_b as &dyn ILPPromotion];
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
+
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
+
         let instances = PromotionInstances::from_promotions(
             &promotions,
             &item_group,
@@ -719,17 +741,19 @@ mod tests {
         ];
         let item_group = item_group_from_items(items);
 
-        let promo = crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promo = promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::with_both_limits(1, Money::from_minor(100, GBP)),
         ));
 
         let pb = ProblemVariables::new();
         let cost = Expression::default();
+
         let mut state = ILPState::new(pb, cost);
         let mut observer = CountingObserver::default();
+
         let _ = PromotionInstance::new(&promo, &item_group, &mut state, &mut observer)?;
 
         assert_eq!(observer.promotion_variables, 2);

@@ -170,7 +170,8 @@ mod tests {
         items::{Item, groups::ItemGroup},
         products::ProductKey,
         promotions::{
-            Promotion, PromotionKey, budget::PromotionBudget, types::DirectDiscountPromotion,
+            Promotion, PromotionKey, budget::PromotionBudget, promotion,
+            qualification::Qualification, types::DirectDiscountPromotion,
         },
         solvers::{Solver, ilp::ILPSolver},
         tags::string::StringTagCollection,
@@ -199,9 +200,9 @@ mod tests {
     }
 
     fn make_promo(key: PromotionKey, tags: &[&str], pct: f64) -> Promotion<'static> {
-        crate::promotions::promotion(DirectDiscountPromotion::new(
+        promotion(DirectDiscountPromotion::new(
             key,
-            StringTagCollection::from_strs(tags),
+            Qualification::match_any(StringTagCollection::from_strs(tags)),
             SimpleDiscount::PercentageOff(Percentage::from(pct)),
             PromotionBudget::unlimited(),
         ))

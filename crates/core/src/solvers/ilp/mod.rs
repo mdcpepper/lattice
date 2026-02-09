@@ -370,11 +370,11 @@ mod tests {
         items::{Item, groups::ItemGroup},
         products::ProductKey,
         promotions::{
-            PromotionKey, applications::PromotionApplication, budget::PromotionBudget,
-            types::DirectDiscountPromotion,
+            PromotionKey, applications::PromotionApplication, budget::PromotionBudget, promotion,
+            qualification::Qualification, types::DirectDiscountPromotion,
         },
         solvers::ilp::promotions::{ILPPromotion, ILPPromotionVars, PromotionVars},
-        tags::{collection::TagCollection, string::StringTagCollection},
+        tags::string::StringTagCollection,
     };
 
     use super::*;
@@ -633,9 +633,9 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promotions = [promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["a"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["a"])),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
             PromotionBudget::unlimited(),
         ))];
@@ -660,9 +660,9 @@ mod tests {
         let items = test_items();
         let item_group = item_group_from_items(items);
 
-        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promotions = [promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         ))];
@@ -685,9 +685,9 @@ mod tests {
         let items = test_items();
         let item_group = item_group_from_items(items);
 
-        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promotions = [promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["missing"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["missing"])),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
             PromotionBudget::unlimited(),
         ))];
@@ -709,9 +709,9 @@ mod tests {
         let items = test_items();
         let item_group = item_group_from_items(items);
 
-        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promotions = [promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             SimpleDiscount::AmountOverride(Money::from_minor(400, GBP)),
             PromotionBudget::unlimited(),
         ))];
@@ -733,9 +733,9 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promotions = [promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["a"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["a"])),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         ))];
@@ -896,9 +896,9 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promotions = [promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["a"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["a"])),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
             PromotionBudget::unlimited(),
         ))];
@@ -926,7 +926,7 @@ mod tests {
     fn solve_accepts_custom_promotion_trait_objects() -> TestResult {
         let items = test_items();
         let item_group = item_group_from_items(items);
-        let promotion = crate::promotions::promotion(TestCustomPromotion {
+        let promotion = promotion(TestCustomPromotion {
             key: PromotionKey::default(),
             final_minor: 1,
         });
@@ -1008,9 +1008,9 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promotions = [promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["a"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["a"])),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
             PromotionBudget::unlimited(),
         ))];
@@ -1088,9 +1088,9 @@ mod tests {
         let items = test_items_with_tags();
         let item_group = item_group_from_items(items);
 
-        let promotions = [crate::promotions::promotion(DirectDiscountPromotion::new(
+        let promotions = [promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["a"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["a"])),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         ))];

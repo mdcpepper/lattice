@@ -38,7 +38,9 @@ fn solver_handles_buy_one_get_one_free() -> TestResult {
     // BOGOF: size=2, discount position 1 (second item) at 100% off
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["fruit"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["fruit"]),
+        ),
         2,
         SmallVec::from_vec(vec![1]),
         SimpleDiscount::PercentageOff(Percentage::from(1.0)),
@@ -80,7 +82,9 @@ fn solver_handles_three_for_two() -> TestResult {
     // 3-for-2: size=3, discount position 2 (third item) at 100% off
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["snack"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["snack"]),
+        ),
         3,
         SmallVec::from_vec(vec![2]),
         SimpleDiscount::PercentageOff(Percentage::from(1.0)),
@@ -122,7 +126,9 @@ fn solver_handles_buy_two_get_one_half_off() -> TestResult {
     // Buy 2 get 1 half off: size=3, discount position 2 at 50% off
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["book"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["book"]),
+        ),
         3,
         SmallVec::from_vec(vec![2]),
         SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -169,7 +175,9 @@ fn solver_handles_multiple_discount_positions() -> TestResult {
     // Size=4, discount positions 1 and 3 (2nd and 4th items) at 50% off
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["item"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["item"]),
+        ),
         4,
         SmallVec::from_vec(vec![1, 3]),
         SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -206,7 +214,9 @@ fn solver_handles_insufficient_items_for_bundle() -> TestResult {
     // Requires 3 items but only 1 matches
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["fruit"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["fruit"]),
+        ),
         3,
         SmallVec::from_vec(vec![2]),
         SimpleDiscount::PercentageOff(Percentage::from(1.0)),
@@ -253,7 +263,9 @@ fn solver_handles_multiple_bundles() -> TestResult {
     // BOGOF - can form 2 bundles
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["snack"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["snack"]),
+        ),
         2,
         SmallVec::from_vec(vec![1]),
         SimpleDiscount::PercentageOff(Percentage::from(1.0)),
@@ -290,7 +302,9 @@ fn solver_handles_fixed_price_discount() -> TestResult {
     // BOGOF with fixed price override
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["premium"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["premium"]),
+        ),
         2,
         SmallVec::from_vec(vec![1]),
         SimpleDiscount::AmountOverride(Money::from_minor(100, GBP)),
@@ -333,7 +347,9 @@ fn solver_handles_mixed_prices_in_bundle() -> TestResult {
     // 3-for-2 (cheapest item free)
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["item"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["item"]),
+        ),
         3,
         SmallVec::from_vec(vec![2]),
         SimpleDiscount::PercentageOff(Percentage::from(1.0)),
@@ -370,7 +386,9 @@ fn solver_handles_no_matching_tags() -> TestResult {
 
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["snack"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["snack"]),
+        ),
         2,
         SmallVec::from_vec(vec![1]),
         SimpleDiscount::PercentageOff(Percentage::from(1.0)),
@@ -407,7 +425,9 @@ fn solver_handles_amount_off_in_bundle() -> TestResult {
     // BOGOF with 30 off instead of free
     let promotion = promotion(PositionalDiscountPromotion::new(
         PromotionKey::default(),
-        StringTagCollection::from_strs(&["candy"]),
+        lattice::promotions::qualification::Qualification::match_any(
+            StringTagCollection::from_strs(&["candy"]),
+        ),
         2,
         SmallVec::from_vec(vec![1]),
         SimpleDiscount::AmountOff(Money::from_minor(30, GBP)),

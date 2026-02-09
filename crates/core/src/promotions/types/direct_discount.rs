@@ -5,16 +5,16 @@
 use crate::{
     discounts::{DiscountError, SimpleDiscount, percent_of_minor},
     items::Item,
-    promotions::{PromotionKey, budget::PromotionBudget},
+    promotions::{PromotionKey, budget::PromotionBudget, qualification::Qualification},
     tags::{collection::TagCollection, string::StringTagCollection},
 };
 use rusty_money::{Money, iso::Currency};
 
 /// A discount applied directly to all participating items
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub struct DirectDiscountPromotion<'a, T: TagCollection = StringTagCollection> {
     key: PromotionKey,
-    tags: T,
+    qualification: Qualification<T>,
     discount: SimpleDiscount<'a>,
     budget: PromotionBudget<'a>,
 }
@@ -23,13 +23,13 @@ impl<'a, T: TagCollection> DirectDiscountPromotion<'a, T> {
     /// Create a new direct discount promotion.
     pub fn new(
         key: PromotionKey,
-        tags: T,
+        qualification: Qualification<T>,
         discount: SimpleDiscount<'a>,
         budget: PromotionBudget<'a>,
     ) -> Self {
         Self {
             key,
-            tags,
+            qualification,
             discount,
             budget,
         }
@@ -40,9 +40,9 @@ impl<'a, T: TagCollection> DirectDiscountPromotion<'a, T> {
         self.key
     }
 
-    /// Return the tags
-    pub fn tags(&self) -> &T {
-        &self.tags
+    /// Return the item qualification expression.
+    pub fn qualification(&self) -> &Qualification<T> {
+        &self.qualification
     }
 
     /// Return the discount
@@ -99,7 +99,7 @@ mod tests {
     use slotmap::SlotMap;
     use testresult::TestResult;
 
-    use crate::{items::Item, products::ProductKey};
+    use crate::{items::Item, products::ProductKey, promotions::qualification::Qualification};
 
     use super::*;
 
@@ -110,7 +110,7 @@ mod tests {
 
         let promo = DirectDiscountPromotion::new(
             key,
-            StringTagCollection::empty(),
+            Qualification::<StringTagCollection>::match_all(),
             SimpleDiscount::AmountOverride(Money::from_minor(0, GBP)),
             PromotionBudget::unlimited(),
         );
@@ -123,7 +123,7 @@ mod tests {
     fn calculate_discounted_price_percentage() -> TestResult {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::<StringTagCollection>::match_all(),
             SimpleDiscount::PercentageOff(Percentage::from(0.25)),
             PromotionBudget::unlimited(),
         );
@@ -140,7 +140,7 @@ mod tests {
     fn calculate_discounted_price_amount_override() -> TestResult {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::<StringTagCollection>::match_all(),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         );
@@ -157,7 +157,7 @@ mod tests {
     fn calculate_discounted_price_amount_discount_off() -> TestResult {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::<StringTagCollection>::match_all(),
             SimpleDiscount::AmountOff(Money::from_minor(25, GBP)),
             PromotionBudget::unlimited(),
         );
@@ -174,7 +174,7 @@ mod tests {
     fn calculate_discounted_price_clamps_percentage_to_zero() -> TestResult {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::<StringTagCollection>::match_all(),
             SimpleDiscount::PercentageOff(Percentage::from(2.0)),
             PromotionBudget::unlimited(),
         );
@@ -191,7 +191,7 @@ mod tests {
     fn calculate_discounted_price_clamps_amount_off_to_zero() -> TestResult {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::<StringTagCollection>::match_all(),
             SimpleDiscount::AmountOff(Money::from_minor(200, GBP)),
             PromotionBudget::unlimited(),
         );
@@ -208,7 +208,7 @@ mod tests {
     fn calculate_discounted_price_clamps_amount_override_to_zero() -> TestResult {
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::<StringTagCollection>::match_all(),
             SimpleDiscount::AmountOverride(Money::from_minor(-50, GBP)),
             PromotionBudget::unlimited(),
         );
@@ -223,17 +223,23 @@ mod tests {
 
     #[test]
     fn accessors_return_constructor_values() {
-        let tags = StringTagCollection::from_strs(&["member", "sale"]);
+        let qualification =
+            Qualification::match_any(StringTagCollection::from_strs(&["member", "sale"]));
         let discount = SimpleDiscount::AmountOff(Money::from_minor(10, GBP));
 
         let promo = DirectDiscountPromotion::new(
             PromotionKey::default(),
-            tags.clone(),
+            qualification.clone(),
             discount,
             PromotionBudget::unlimited(),
         );
 
-        assert_eq!(promo.tags(), &tags);
+        assert!(
+            promo
+                .qualification()
+                .matches(&StringTagCollection::from_strs(&["member"]))
+        );
+        assert_eq!(promo.qualification().rules.len(), qualification.rules.len());
         assert!(matches!(
             promo.discount(),
             SimpleDiscount::AmountOff(amount) if amount.to_minor_units() == 10

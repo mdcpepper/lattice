@@ -3,6 +3,7 @@
 #[cfg(test)]
 use std::any::Any;
 
+use decimal_percentage::Percentage;
 use good_lp::{Expression, Solution, Variable, variable};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -23,12 +24,11 @@ use crate::{
             state::ILPState,
         },
     },
-    tags::collection::TagCollection,
 };
 
 #[derive(Debug, Clone, Copy)]
 enum PositionalRuntimeDiscount {
-    PercentageOff(decimal_percentage::Percentage),
+    PercentageOff(Percentage),
     AmountOverride(i64),
     AmountOff(i64),
 }
@@ -618,15 +618,11 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
             return false;
         }
 
-        let promotion_tags = self.tags();
-
-        if promotion_tags.is_empty() {
-            return true;
-        }
+        let qualification = self.qualification();
 
         item_group
             .iter()
-            .any(|item| item.tags().intersects(promotion_tags))
+            .any(|item| qualification.matches(item.tags()))
     }
 
     #[expect(
@@ -648,15 +644,11 @@ impl ILPPromotion for PositionalDiscountPromotion<'_> {
             .monetary_limit
             .map(|value| value.to_minor_units());
 
-        // An empty tag set means this promotion can target any item, so we can skip tag checks
-        // if that is the case.
-        let match_all = self.tags().is_empty();
-
         // Filter and sort eligible items by price descending, index ascending
         let mut eligible: SmallVec<[(usize, i64); 10]> = SmallVec::new();
 
         for (item_idx, item) in item_group.iter().enumerate() {
-            if !match_all && !item.tags().intersects(self.tags()) {
+            if !self.qualification().matches(item.tags()) {
                 continue;
             }
 
@@ -836,7 +828,7 @@ mod tests {
         discounts::SimpleDiscount,
         items::{Item, groups::ItemGroup},
         products::ProductKey,
-        promotions::{PromotionKey, budget::PromotionBudget},
+        promotions::{PromotionKey, budget::PromotionBudget, qualification::Qualification},
         solvers::ilp::{
             NoopObserver,
             promotions::test_support::{
@@ -898,7 +890,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["fresh"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["fresh"])),
             2,
             SmallVec::from_vec(vec![1u16]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -919,7 +911,7 @@ mod tests {
 
         let match_all = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             2,
             SmallVec::from_vec(vec![1u16]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -935,7 +927,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             3,
             SmallVec::from_vec(vec![2]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -944,8 +936,10 @@ mod tests {
 
         let pb = good_lp::ProblemVariables::new();
         let cost = Expression::default();
+
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
@@ -963,7 +957,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             2,
             SmallVec::from_vec(vec![1]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -972,8 +966,10 @@ mod tests {
 
         let pb = good_lp::ProblemVariables::new();
         let cost = Expression::default();
+
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
@@ -991,7 +987,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             3,
             SmallVec::from_vec(vec![2]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -1000,8 +996,10 @@ mod tests {
 
         let pb = good_lp::ProblemVariables::new();
         let cost = Expression::default();
+
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
@@ -1018,15 +1016,19 @@ mod tests {
     #[test]
     fn add_dfa_constraints_skips_missing_next_state() {
         let mut state = ILPState::new(good_lp::ProblemVariables::new(), Expression::default());
+
         let state_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let take_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let participation_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let discount_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
@@ -1063,15 +1065,19 @@ mod tests {
     #[test]
     fn add_dfa_constraints_skips_missing_current_state() {
         let mut state = ILPState::new(good_lp::ProblemVariables::new(), Expression::default());
+
         let next_state = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let take_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let participation_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let discount_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
@@ -1114,15 +1120,19 @@ mod tests {
     #[test]
     fn add_dfa_constraints_skips_missing_take_current() {
         let mut state = ILPState::new(good_lp::ProblemVariables::new(), Expression::default());
+
         let state_now = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let state_next = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let participation_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let discount_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
@@ -1165,18 +1175,23 @@ mod tests {
     #[test]
     fn add_dfa_constraints_skips_missing_take_prev() {
         let mut state = ILPState::new(good_lp::ProblemVariables::new(), Expression::default());
+
         let state_now = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let state_next = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let take_curr = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let participation_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let discount_var = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
@@ -1227,7 +1242,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             1,
             SmallVec::from_vec(vec![0]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -1236,6 +1251,7 @@ mod tests {
 
         let pb = good_lp::ProblemVariables::new();
         let cost = Expression::default();
+
         let mut state = ILPState::new(pb, cost);
         let mut observer = NoopObserver;
 
@@ -1268,7 +1284,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&["fresh"]),
+            Qualification::match_any(StringTagCollection::from_strs(&["fresh"])),
             1,
             SmallVec::from_vec(vec![0]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -1277,6 +1293,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
@@ -1293,7 +1310,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             2,
             SmallVec::from_vec(vec![1]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -1302,6 +1319,7 @@ mod tests {
 
         let mut state = ILPState::with_presence_variables(&item_group)?;
         let mut observer = NoopObserver;
+
         let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
 
         let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<PositionalDiscountVars>())
@@ -1328,7 +1346,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             2,
             SmallVec::from_vec(vec![1]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -1361,18 +1379,23 @@ mod tests {
         let s00 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let s01 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let s10 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let s11 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let s20 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let s21 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
@@ -1380,12 +1403,15 @@ mod tests {
         let t00 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let t01 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let t10 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let t11 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
@@ -1393,12 +1419,15 @@ mod tests {
         let p0 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let p1 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let d0 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
+
         let d1 = state
             .problem_variables_mut()
             .add(good_lp::variable().binary());
@@ -1469,7 +1498,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             2,
             SmallVec::from_vec(vec![1]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -1513,7 +1542,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             1,
             SmallVec::from_vec(vec![0]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -1551,7 +1580,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             2,
             SmallVec::from_vec(vec![1]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),
@@ -1596,7 +1625,7 @@ mod tests {
 
         let promo = PositionalDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::empty(),
+            Qualification::match_all(),
             2,
             SmallVec::from_vec(vec![1]),
             SimpleDiscount::PercentageOff(Percentage::from(0.5)),

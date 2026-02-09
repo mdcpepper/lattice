@@ -10,6 +10,7 @@ optimisation engine written in Rust.
   * [Positional Discount Promotions](#positional-discount-promotions)
   * [Mix and Match Promotions](#mix-and-match-promotions)
   * [Tiered Threshold Promotions](#tiered-threshold-promotions)
+* [Qualification](#qualification)
 * [Budgets](#budgets)
   * [Application Budgets](#application-budgets)
   * [Monetary Budgets](#monetary-budgets)
@@ -19,8 +20,8 @@ optimisation engine written in Rust.
 
 ## Promotion Types
 
-Promotions are rules that select candidate items via tag intersections, and 
-apply a discount to them. Promotion applications are treated as a global basket 
+Promotions are rules that select candidate items via tag qualifications, and
+apply a discount to them. Promotion applications are treated as a global basket
 optimisation problem and the combination that produces the lowest total basket 
 price is chosen.
 
@@ -356,6 +357,114 @@ cargo run --release --example basket -- -f tiered-threshold -n 10
 Tier 3 remains active, but its `upper_threshold.monetary` cap (£80) means only
 8 of the 10 £10 items can contribute and be discounted in that tier instance.
 The extra items stay full price (and potentially available for other promotions).
+
+## Qualification
+
+By default, `tags: [...]` uses `has_any` behavior (any overlap qualifies). For 
+more control, promotions and mix-and-match slots can use a nested `qualification` 
+expression:
+
+- `op`: `and` or `or` (defaults to `and`)
+- `rules`:
+  - `has_all: [...]` item must contain all tags
+  - `has_any: [...]` item must contain at least one tag
+  - `has_none: [...]` item must contain none of the tags
+  - `group: { op, rules }` nested expression
+
+This allows dynamic tags to be composed into rich conditions without 
+introducing a separate rule language.
+
+The `qualification` fixture demonstrates nested logic for both direct and
+positional promotions:
+
+```yaml
+root: all
+
+nodes:
+  all:
+    promotions: [qualified-snacks-30, qualified-drink-bogof]
+    output: pass-through
+
+promotions:
+  qualified-snacks-30:
+    type: direct_discount
+    name: "30% Off Qualified Snacks"
+    qualification:
+      op: and
+      rules:
+        - has_any: [snack]
+        - group:
+            op: or
+            rules:
+              - has_any: [member]
+              - has_any: [student]
+        - has_none: [excluded]
+    discount:
+      type: percentage_off
+      amount: 30%
+
+  qualified-drink-bogof:
+    type: positional_discount
+    name: "BOGOF Qualified Drinks"
+    qualification:
+      op: and
+      rules:
+        - has_any: [drink]
+        - group:
+            op: or
+            rules:
+              - has_any: [member]
+              - has_any: [off-peak]
+        - has_none: [hot]
+    size: 2
+    positions: [1]
+    discount:
+      type: percentage_off
+      amount: 100%
+```
+
+```bash
+cargo run --release --example basket -- -f qualification
+```
+
+```
+╭──────┬─────────────────┬──────────┬────────────┬──────────────────┬─────────────────┬───────────────────────────────╮
+│      │ Item            │ Tags     │ Base Price │ Discounted Price │         Savings │ Promotion                     │
+├──────┼─────────────────┼──────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #1   │ Protein Bar     │ member   │      £2.20 │            £1.54 │ (30.00%) -£0.66 │ #1   30% Off Qualified Snacks │
+│      │                 │ peak     │            │                  │                 │                               │
+│      │                 │ snack    │            │                  │                 │                               │
+├──────┼─────────────────┼──────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #2   │ Granola Pot     │ off-peak │      £1.80 │            £1.26 │ (30.00%) -£0.54 │ #2   30% Off Qualified Snacks │
+│      │                 │ snack    │            │                  │                 │                               │
+│      │                 │ student  │            │                  │                 │                               │
+├──────┼─────────────────┼──────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #3   │ Mixed Nuts      │ peak     │      £1.50 │                  │                 │                               │
+│      │                 │ snack    │            │                  │                 │                               │
+├──────┼─────────────────┼──────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #4   │ Cola Can        │ drink    │      £1.40 │                  │                 │ #3   BOGOF Qualified Drinks   │
+│      │                 │ off-peak │            │                  │                 │                               │
+├──────┼─────────────────┼──────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #5   │ Sparkling Water │ drink    │      £1.10 │            £0.00 │   (100%) -£1.10 │ #3   BOGOF Qualified Drinks   │
+│      │                 │ member   │            │                  │                 │                               │
+├──────┼─────────────────┼──────────┼────────────┼──────────────────┼─────────────────┼───────────────────────────────┤
+│ #6   │ Hot Latte       │ drink    │      £3.00 │                  │                 │                               │
+│      │                 │ hot      │            │                  │                 │                               │
+│      │                 │ off-peak │            │                  │                 │                               │
+╰──────┴─────────────────┴──────────┴────────────┴──────────────────┴─────────────────┴───────────────────────────────╯
+ Subtotal:           £11.00  
+    Total:            £8.70  
+  Savings:   (20.91%) £2.30  
+```
+
+In this run, `30% Off Qualified Snacks` requires `snack AND (member OR student) 
+AND NOT excluded`, so `Protein Bar` (`snack + member`) and `Granola Pot` 
+(`snack + student`) are discounted, while `Mixed Nuts` is not because it has 
+`snack` but neither `member` nor `student`. `BOGOF Qualified Drinks` requires 
+`drink AND (member OR off-peak) AND NOT hot`, so `Cola Can` (`drink + off-peak`) 
+and `Sparkling Water` (`drink + member`) qualify as the pair, and because it is 
+BOGOF, the cheaper of the two is discounted to `£0.00`; `Hot Latte` is excluded 
+by `has_none: [hot]`.
 
 ## Budgets
 

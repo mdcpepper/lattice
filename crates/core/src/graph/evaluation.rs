@@ -270,10 +270,10 @@ mod tests {
         items::Item,
         products::ProductKey,
         promotions::{
-            Promotion, PromotionKey, budget::PromotionBudget, types::DirectDiscountPromotion,
+            Promotion, PromotionKey, budget::PromotionBudget, promotion,
+            qualification::Qualification, types::DirectDiscountPromotion,
         },
         solvers::ilp::observer::ILPObserver,
-        tags::string::StringTagCollection,
     };
 
     use super::*;
@@ -327,9 +327,9 @@ mod tests {
     }
 
     fn direct_discount_promotion() -> Promotion<'static> {
-        crate::promotions::promotion(DirectDiscountPromotion::new(
+        promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
-            StringTagCollection::from_strs(&[]),
+            Qualification::match_all(),
             SimpleDiscount::AmountOverride(Money::from_minor(50, GBP)),
             PromotionBudget::unlimited(),
         ))
