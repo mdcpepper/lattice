@@ -422,7 +422,12 @@ impl Default for Fixture<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs, path::Path};
+    use std::{
+        env, fs,
+        path::Path,
+        process,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use rusty_money::iso::GBP;
     use testresult::TestResult;
@@ -567,11 +572,9 @@ mod tests {
     #[test]
     fn fixture_load_products_rejects_currency_mismatch() -> TestResult {
         let unique = format!(
-            "dante-fixtures-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)?
-                .as_nanos()
+            "lattice-fixtures-{}-{}",
+            process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
         );
 
         let base_path = env::temp_dir().join(unique);

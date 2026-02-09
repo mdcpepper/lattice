@@ -1,6 +1,6 @@
 //! Real-world conformance tests
 
-use dante::{fixtures::Fixture, receipt::Receipt};
+use lattice::{fixtures::Fixture, receipt::Receipt};
 use rusty_money::{Money, iso::GBP};
 use testresult::TestResult;
 

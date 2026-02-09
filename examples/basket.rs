@@ -12,7 +12,7 @@ use anyhow::Result;
 use clap::Parser;
 use humanize_duration::{Truncate, prelude::DurationExt};
 
-use dante::{
+use lattice::{
     fixtures::Fixture, items::groups::ItemGroup, receipt::Receipt,
     solvers::ilp::renderers::typst::MultiLayerRenderer, utils::ExampleBasketArgs,
 };

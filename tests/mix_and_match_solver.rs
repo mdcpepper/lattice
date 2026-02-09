@@ -5,7 +5,7 @@ use rusty_money::{Money, iso::GBP};
 use slotmap::SlotMap;
 use testresult::TestResult;
 
-use dante::{
+use lattice::{
     basket::Basket,
     items::{Item, groups::ItemGroup},
     products::ProductKey,

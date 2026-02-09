@@ -289,30 +289,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
 
 [[package]]
-name = "dante"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "decimal-percentage",
- "good_lp",
- "humanize-duration",
- "num-traits",
- "petgraph",
- "rust_decimal",
- "rustc-hash",
- "rusty-money",
- "serde",
- "serde_norway",
- "slotmap",
- "smallvec",
- "tabled",
- "tempfile",
- "testresult",
- "thiserror",
-]
-
-[[package]]
 name = "decimal-percentage"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -527,6 +503,30 @@ checksum = "8c942ebf8e95485ca0d52d97da7c5a2c387d0e7f0ba4c35e93bfcaee045955b3"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "lattice"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "decimal-percentage",
+ "good_lp",
+ "humanize-duration",
+ "num-traits",
+ "petgraph",
+ "rust_decimal",
+ "rustc-hash",
+ "rusty-money",
+ "serde",
+ "serde_norway",
+ "slotmap",
+ "smallvec",
+ "tabled",
+ "tempfile",
+ "testresult",
+ "thiserror",
 ]
 
 [[package]]

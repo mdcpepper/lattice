@@ -6,7 +6,7 @@ use slotmap::SlotMap;
 use smallvec::SmallVec;
 use testresult::TestResult;
 
-use dante::{
+use lattice::{
     basket::Basket,
     discounts::SimpleDiscount,
     items::{Item, groups::ItemGroup},

@@ -6,9 +6,9 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use dante::solvers::ilp::{ILPSolver, renderers::typst::TypstRenderer};
+//! use lattice::solvers::ilp::{ILPSolver, renderers::typst::TypstRenderer};
 //! use std::path::PathBuf;
-//! # use dante::{fixtures::Fixture, items::groups::ItemGroup};
+//! # use lattice::{fixtures::Fixture, items::groups::ItemGroup};
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! # let fixture = Fixture::from_set("example_direct_discounts")?;
 //! # let basket = fixture.basket(Some(10))?;

@@ -5,8 +5,9 @@ use rusty_money::{Money, iso::GBP};
 use slotmap::SlotMap;
 use testresult::TestResult;
 
-use dante::{
+use lattice::{
     basket::Basket,
+    fixtures::Fixture,
     items::{Item, groups::ItemGroup},
     products::ProductKey,
     promotions::{
@@ -486,7 +487,7 @@ fn tier_items_share_bundle_id() -> TestResult {
 /// Fixture-based test: load the tiered-threshold fixtures
 #[test]
 fn fixture_based_tiered_threshold() -> TestResult {
-    let fixture = dante::fixtures::Fixture::from_set("tiered-threshold")?;
+    let fixture = Fixture::from_set("tiered-threshold")?;
     let basket = fixture.basket(None)?;
     let item_group = ItemGroup::from(&basket);
 

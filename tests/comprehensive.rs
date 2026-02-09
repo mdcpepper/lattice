@@ -7,7 +7,7 @@
 use smallvec::SmallVec;
 use testresult::TestResult;
 
-use dante::{
+use lattice::{
     fixtures::Fixture,
     items::groups::ItemGroup,
     solvers::{Solver, ilp::ILPSolver},

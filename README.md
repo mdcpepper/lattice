@@ -1,9 +1,8 @@
-# Dante
+# Project Lattice
 
-![Dante](assets/dante.png)
-[![Build & Test](https://github.com/mdcpepper/dante/actions/workflows/ci.yml/badge.svg)](https://github.com/mdcpepper/dante/actions/workflows/ci.yml)
+[![Build & Test](https://github.com/mdcpepper/lattice/actions/workflows/ci.yml/badge.svg)](https://github.com/mdcpepper/latice/actions/workflows/ci.yml)
 
-Dante is a high-performance, general-purpose pricing, promotion and basket 
+Lattice is a high-performance, general-purpose pricing, promotion and basket 
 optimisation engine written in Rust.
 
 * [Promotion Types](#promotion-types)
@@ -640,7 +639,7 @@ When the "Deep Repair Hair Mask" item is added, the solver re-optimises _again_
 because the set of eligible `haircare` items has changed, and there is now a 
 higher priced item available. 
 
-Becaues the value of the 3-for-2 promotion depends on which item becomes free, 
+Because the value of the 3-for-2 promotion depends on which item becomes free, 
 the optimal bundle includes the most expensive items, so that the "free" slot 
 is maximised. The bundle therefore re-shuffles, to include the Hair Mask (£6.00), 
 Shampoo (£4.50), and Conditioner (£4.00), making the £4.00 item free, instead 
@@ -651,7 +650,7 @@ Body Wash is pushed back out of the bundle, and returns to having just the 15%
 
 ### Stacking
 
-Dante supports promotion stacking via a graph. Promotions are grouped into 
+Promotion stacking is supported via a graph. Promotions are grouped into 
 layers, and within each layer promotions compete and each item can be claimed 
 by at most one promotion. Items then flow to subsequent layers with updated 
 prices, allowing multiple promotions to apply across layers.

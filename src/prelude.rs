@@ -1,4 +1,4 @@
-//! Dante prelude.
+//! Loom prelude.
 //!
 //! Convenience exports for common library consumers.
 

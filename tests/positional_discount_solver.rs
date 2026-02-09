@@ -5,7 +5,7 @@ use rusty_money::{Money, iso::GBP};
 use smallvec::SmallVec;
 use testresult::TestResult;
 
-use dante::{
+use lattice::{
     basket::Basket,
     discounts::SimpleDiscount,
     items::{Item, groups::ItemGroup},

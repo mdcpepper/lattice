@@ -4,7 +4,7 @@ use decimal_percentage::Percentage;
 use rusty_money::{Money, iso::GBP};
 use testresult::TestResult;
 
-use dante::{
+use lattice::{
     basket::Basket,
     discounts::SimpleDiscount,
     items::{Item, groups::ItemGroup},
@@ -151,13 +151,13 @@ fn solver_handles_multiple_overlapping_promotions() -> TestResult {
     let item_group = ItemGroup::from(&basket);
 
     let promotions = vec![
-        dante::promotions::promotion(DirectDiscountPromotion::new(
+        promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["fruit"]),
             SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.10)),
             PromotionBudget::unlimited(),
         )),
-        dante::promotions::promotion(DirectDiscountPromotion::new(
+        promotion(DirectDiscountPromotion::new(
             PromotionKey::default(),
             StringTagCollection::from_strs(&["organic"]),
             SimpleDiscount::PercentageOff(decimal_percentage::Percentage::from(0.20)),
