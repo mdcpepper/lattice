@@ -7,7 +7,7 @@ nodes:
     next: base-promotions
 
   base-promotions:
-    promotions: [meal-deal, bogof-drinks]
+    promotions: [meal-deal, bogof-drinks, 3-for-2]
     output: split
     non-participating: staff-discount
 
@@ -40,6 +40,18 @@ promotions:
     tags: [drink]
     size: 2
     positions: [1]
+    discount:
+      type: percentage_off
+      amount: 100%
+
+  3-for-2:
+    type: positional_discount
+    name: 3-for-2 Vitamins
+    qualification:
+      rules:
+        - has_any: [vitamins]
+    size: 3
+    positions: [2]
     discount:
       type: percentage_off
       amount: 100%

@@ -151,7 +151,7 @@ fn PriceSummary(impact_price: String, shelf_price: Option<String>) -> impl IntoV
 fn ProductsHeading(show_spinner: RwSignal<bool>) -> impl IntoView {
     view! {
         <div class="mb-4 flex items-center gap-2">
-            <h2 class="text-lg font-semibold">"Products"</h2>
+            <h2 class="text-lg font-semibold pl-4">"Products"</h2>
             {move || {
                 if show_spinner.get() {
                     view! {
@@ -207,7 +207,7 @@ pub fn ProductsPanel(
     let products = Arc::unwrap_or_clone(products);
 
     view! {
-        <section class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <section>
             <ProductsHeading show_spinner=show_spinner />
             <ul class="space-y-3">
                 {move || {
@@ -253,7 +253,7 @@ pub fn ProductsPanel(
                         let fixture_key = product.fixture_key.clone();
 
                         view! {
-                            <li class="flex items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-2">
+                            <li class="flex items-center justify-between gap-3 bg-white rounded-md border border-slate-200 px-3 py-2">
                                 <div class="min-w-0">
                                     <p class="truncate text-sm font-medium">{product_name}</p>
                                     <SavingsLine text=savings_text />
