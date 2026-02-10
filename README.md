@@ -1,9 +1,11 @@
 # Project Lattice
 
-[![Build & Test](https://github.com/mdcpepper/lattice/actions/workflows/ci.yml/badge.svg)](https://github.com/mdcpepper/latice/actions/workflows/ci.yml)
+[![Build & Test](https://github.com/mdcpepper/lattice/actions/workflows/ci.yml/badge.svg)](https://github.com/mdcpepper/lattice/actions/workflows/ci.yml)
 
 Lattice is a high-performance, general-purpose pricing, promotion and basket 
 optimisation engine written in Rust.
+
+[Live Demo](https://mdcpepper.github.io/lattice/)
 
 * [Promotion Types](#promotion-types)
   * [Direct Discount Promotions](#direct-discount-promotions)
@@ -17,6 +19,7 @@ optimisation engine written in Rust.
 * [Global Optimisation](#global-optimisation)
 * [Stacking](#stacking)
 * [Export ILP Formulation](#export-ilp-formulation)
+* [Demo](#demo)
 
 ## Promotion Types
 
@@ -883,3 +886,17 @@ typst compile target/ilp-formulations/layered.typ --open
 
 There is an ready-made example of of a stacked formulation in `assets/demo.typ` (and the rendered
 `assets/demo.pdf`).
+
+## Demo
+
+The `crates/demo` app is a small client-side Leptos UI that loads the demo fixtures,
+lists products, and evaluates basket pricing through the promotion graph in real time.
+
+To run the demo locally in development with Trunk:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install trunk --locked
+cd crates/demo
+trunk serve --open
+```

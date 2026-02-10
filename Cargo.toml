@@ -1,3 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/core"]
+members = ["crates/core", "crates/demo"]
+
+[workspace.dependencies]
+petgraph = "0.8.3"
+rusty-money = "0.5.0"
+serde_norway = "0.9.42"
+slotmap = "1.1.1"

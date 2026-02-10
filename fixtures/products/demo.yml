@@ -9,17 +9,32 @@ products:
     tags: [drink]
     price: 1.00 GBP
 
+  enrgy-drink:
+    name: Energy Drink 250Ml
+    tags: [drink]
+    price: 1.70 GBP
+
   crisps:
     name: Crisps
     tags: [snack]
     price: 1.50 GBP
 
+  chicken-bites:
+    name: Chicken Bites 45g
+    tags: [snack]
+    price: 1.35 GBP
+
   sandwich:
-    name: Chicken Sandwich
+    name: Chicken Triple Sandwich
     tags: [main]
-    price: 4.00 GBP
+    price: 3.25 GBP
+
+  cheese-and-onion:
+    name: Cheese & Onion Sandwich
+    tags: [main]
+    price: 1.50 GBP
 
   newspaper:
     name: Newspaper
-    tags: [newspaper]
+    tags: [newspaper, staff-discount-exempt]
     price: 2.00 GBP
