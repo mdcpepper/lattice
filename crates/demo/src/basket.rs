@@ -308,16 +308,16 @@ fn BasketSummary(
     total: String,
 ) -> impl IntoView {
     view! {
-        <div class="mt-4 border-t border-slate-200 pt-3">
-            <p class="flex items-center justify-between text-sm">
-                <span class="text-slate-600">"Subtotal"</span>
+        <div class="basket-summary">
+            <p class="basket-summary-row">
+                <span>"Subtotal"</span>
                 <span>{subtotal}</span>
             </p>
-            <details class="group mt-1 text-sm text-slate-600">
-                <summary class="flex list-none cursor-pointer items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white [&::marker]:hidden [&::-webkit-details-marker]:hidden">
-                    <span class="inline-flex items-center gap-1.5">
-                    <span>"Savings"</span>
-                    <svg
+            <details class="basket-savings">
+                <summary class="basket-savings-summary">
+                    <span>
+                        <span>"Savings"</span>
+                        <svg
                             xmlns="http://www.w3.org/2000/svg"
                             width="24"
                             height="24"
@@ -327,7 +327,6 @@ fn BasketSummary(
                             stroke-width="2"
                             stroke-linecap="round"
                             stroke-linejoin="round"
-                            class="h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform duration-150 group-open:rotate-90"
                             aria-hidden="true"
                         >
                             <path d="m9 18 6-6-6-6"></path>
@@ -336,17 +335,17 @@ fn BasketSummary(
                     <span>{savings}</span>
                 </summary>
 
-                <div class="mt-2 mb-2 space-y-1 text-xs text-slate-700">
+                <div class="basket-savings-body">
                     {if savings_breakdown.is_empty() {
                         view! { <p>"No promotion savings applied."</p> }.into_any()
                     } else {
                         view! {
-                            <ul class="space-y-1">
+                            <ul>
                                 {savings_breakdown
                                     .into_iter()
                                     .map(|entry| {
                                         view! {
-                                            <li class="flex items-center pb-1 ml-2 justify-between gap-3 border-b border-b-1 border-dashed border-slate-300">
+                                            <li>
                                                 <span>{entry.name}</span>
                                                 <span>{entry.savings}</span>
                                             </li>
@@ -360,7 +359,7 @@ fn BasketSummary(
                 </div>
             </details>
 
-            <p class="mt-1 flex items-center justify-between text-sm font-semibold">
+            <p class="basket-total-row">
                 <span>"Total"</span>
                 <span>{total}</span>
             </p>
@@ -396,27 +395,27 @@ fn BasketLine(
 
     view! {
         <li>
-            <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-3">
-                        <p class="min-w-0 flex-1 truncate text-sm font-medium">{line.name}</p>
-                        <div class="shrink-0 text-right">
+            <div class="basket-line-content">
+                <div>
+                    <div class="basket-line-header">
+                        <p class="basket-line-name">{line.name}</p>
+                        <div class="basket-line-price">
                             {if has_discount {
                                 view! {
-                                    <span class="mr-2 text-xs text-slate-500 line-through">{line.base_price}</span>
+                                    <span class="basket-line-base-price">{line.base_price}</span>
                                 }
                                     .into_any()
                             } else {
                                 ().into_any()
                             }}
-                            <span class="text-sm text-slate-700">{line.final_price}</span>
+                            <span class="basket-line-final-price">{line.final_price}</span>
                         </div>
                     </div>
                     {if promotion_pills.is_empty() {
                         ().into_any()
                     } else {
                         view! {
-                            <div class="mt-1.5 flex flex-wrap gap-1.5">
+                            <div class="basket-line-pills">
                                 {promotion_pills
                                     .into_iter()
                                     .map(|pill| {
@@ -424,7 +423,7 @@ fn BasketLine(
 
                                         view! {
                                             <span
-                                                class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                                                class="basket-line-pill"
                                                 style=pill.style
                                             >
                                                 {pill_text}
@@ -438,11 +437,11 @@ fn BasketLine(
                     }}
                 </div>
 
-                <div class="flex items-center gap-2">
+                <div>
                     <button
                         type="button"
                         aria-label=remove_button_label
-                        class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                        class="icon-button icon-button-secondary icon-button-compact"
                         on:click=move |_| {
                             cart_items.update(|items| {
                                 if basket_index < items.len() {
@@ -472,7 +471,7 @@ fn BasketLine(
                     <button
                         type="button"
                         aria-label=add_button_label
-                        class="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                        class="icon-button icon-button-primary icon-button-compact"
                         on:click=move |_| {
                             cart_items.update(|items| items.push(fixture_key.clone()));
                             action_message
@@ -519,7 +518,7 @@ fn BasketBody(
     if basket.lines.is_empty() {
         view! {
             <div>
-                <p class="text-sm text-slate-600">"Your basket is empty."</p>
+                <p class="basket-empty">"Your basket is empty."</p>
                 {summary}
             </div>
         }
@@ -527,7 +526,7 @@ fn BasketBody(
     } else {
         view! {
             <div>
-                <ul class="space-y-3">
+                <ul class="basket-lines">
                     {basket
                         .lines
                         .into_iter()
@@ -551,7 +550,7 @@ pub fn BasketPanel(
     action_message: RwSignal<Option<String>>,
 ) -> impl IntoView {
     view! {
-        <aside>
+        <aside class="basket-panel">
             {let solver_data = solver_data;
                 move || {
                     let cart_snapshot = cart_items.get();
@@ -569,13 +568,13 @@ pub fn BasketPanel(
                             let basket_total = basket.total.clone();
 
                             view! {
-                                <h2 class="mb-4 text-lg font-semibold">
-                                    <div class="flex items-center justify-between gap-3">
-                                        <span class="pl-4">{format!("Basket ({item_count})")}</span>
-                                        <span class="pr-4 text-right">{basket_total}</span>
+                                <h2 class="panel-title panel-title-spaced">
+                                    <div class="panel-title-row">
+                                        <span class="panel-title-leading">{format!("Basket ({item_count})")}</span>
+                                        <span class="panel-title-trailing">{basket_total}</span>
                                     </div>
                                 </h2>
-                                <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                                <div class="panel-card">
                                     <BasketBody basket=basket cart_items=cart_items action_message=action_message/>
                                 </div>
                             }
@@ -583,13 +582,13 @@ pub fn BasketPanel(
                         }
                         Err(error_message) => view! {
                             {solve_time_text.set(String::new());}
-                            <h2 class="mb-4 text-lg font-semibold">
-                                <div class="flex items-center justify-between gap-3">
+                            <h2 class="panel-title panel-title-spaced">
+                                <div class="panel-title-row">
                                     <span>{format!("Basket ({item_count})")}</span>
                                 </div>
                             </h2>
-                            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                                <p class="text-sm text-red-700">{error_message}</p>
+                            <div class="panel-card">
+                                <p class="error-text">{error_message}</p>
                             </div>
                         }
                             .into_any(),
@@ -601,7 +600,7 @@ pub fn BasketPanel(
                     ().into_any()
                 } else {
                     view! {
-                        <p class="mt-1 w-full pr-2 text-right text-xs text-slate-400">{value}</p>
+                        <p class="panel-meta">{value}</p>
                     }
                         .into_any()
                 }

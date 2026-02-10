@@ -58,14 +58,14 @@ fn render_app(app_data: AppData) -> AnyView {
     let estimate_ui = estimates::install(cart_items);
 
     view! {
-        <main class="min-h-screen bg-slate-50 px-4 py-6 text-slate-900">
+        <main class="app-shell">
             <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
                 {move || live_message.get().1}
             </p>
-            <div class="mx-auto mb-6 max-w-5xl">
-                <h1 class="text-2xl font-semibold tracking-tight">"Lattice Demo"</h1>
+            <div class="app-header app-frame">
+                <h1 class="app-title">"Lattice Demo"</h1>
             </div>
-            <div class="mx-auto grid max-w-5xl grid-cols-1 gap-6 md:grid-cols-2">
+            <div class="app-layout app-frame">
                 <products::ProductsPanel
                     products=Arc::clone(&app_data.products)
                     cart_items=cart_items
@@ -88,12 +88,12 @@ fn render_app(app_data: AppData) -> AnyView {
 
 fn render_load_error(error_message: String) -> AnyView {
     view! {
-        <main class="min-h-screen bg-slate-50 px-4 py-6 text-slate-900">
-            <div class="mx-auto mb-6 max-w-5xl">
-                <h1 class="text-2xl font-semibold tracking-tight">"Lattice Demo"</h1>
+        <main class="app-shell">
+            <div class="app-header app-frame">
+                <h1 class="app-title">"Lattice Demo"</h1>
             </div>
-            <div class="mx-auto max-w-3xl rounded-lg border border-red-200 bg-red-50 p-4">
-                <p class="text-sm text-red-700">{error_message}</p>
+            <div class="app-error app-frame">
+                <p class="error-text">{error_message}</p>
             </div>
         </main>
     }

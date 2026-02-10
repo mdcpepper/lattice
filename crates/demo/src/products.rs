@@ -129,12 +129,12 @@ pub fn format_price(minor_units: i64, currency_code: &str) -> String {
 #[component]
 fn PriceSummary(impact_price: String, shelf_price: Option<String>) -> impl IntoView {
     view! {
-        <div class="flex items-center gap-2">
+        <div class="product-price-summary">
             {shelf_price.map_or_else(
                 || ().into_any(),
                 |value| {
                     view! {
-                        <span class="text-xs text-slate-500">
+                        <span class="product-shelf-price">
                             <span class="sr-only">"Was "</span>
                             <del>{value}</del>
                         </span>
@@ -142,7 +142,7 @@ fn PriceSummary(impact_price: String, shelf_price: Option<String>) -> impl IntoV
                     .into_any()
                 },
             )}
-            <span class="text-sm font-medium text-slate-700">{impact_price}</span>
+            <span class="product-impact-price">{impact_price}</span>
         </div>
     }
 }
@@ -150,12 +150,12 @@ fn PriceSummary(impact_price: String, shelf_price: Option<String>) -> impl IntoV
 #[component]
 fn ProductsHeading(show_spinner: RwSignal<bool>) -> impl IntoView {
     view! {
-        <div class="mb-4 flex items-center gap-2">
-            <h2 class="text-lg font-semibold pl-4">"Products"</h2>
+        <div class="panel-header">
+            <h2 class="panel-title panel-title-offset">"Products"</h2>
             {move || {
                 if show_spinner.get() {
                     view! {
-                        <span class="inline-flex animate-spin text-slate-500" aria-live="polite">
+                        <span class="panel-spinner" aria-live="polite">
                             <svg
                                 xmlns="http://www.w3.org/2000/svg"
                                 width="24"
@@ -186,8 +186,11 @@ fn ProductsHeading(show_spinner: RwSignal<bool>) -> impl IntoView {
 #[component]
 fn SavingsLine(text: Option<String>) -> impl IntoView {
     let (classes, value) = match text {
-        Some(value) => ("min-h-4 text-xs text-emerald-700", value),
-        None => ("min-h-4 text-xs text-emerald-700 invisible", String::new()),
+        Some(value) => ("product-savings-line", value),
+        None => (
+            "product-savings-line product-savings-line-hidden",
+            String::new(),
+        ),
     };
 
     view! {
@@ -207,9 +210,9 @@ pub fn ProductsPanel(
     let products = Arc::unwrap_or_clone(products);
 
     view! {
-        <section>
+        <section class="products-panel">
             <ProductsHeading show_spinner=show_spinner />
-            <ul class="space-y-3">
+            <ul class="products-list">
                 {move || {
                     let estimate_map = estimates.get();
 
@@ -226,6 +229,8 @@ pub fn ProductsPanel(
                             || price.clone(),
                             |value| format_price(value.marginal_minor, product.currency_code),
                         );
+                        let is_favorable_impact =
+                            estimate.is_some_and(|value| value.marginal_minor <= 0);
 
                         let show_shelf_price =
                             estimate.is_some_and(|value| value.marginal_minor != product.price_minor);
@@ -251,19 +256,24 @@ pub fn ProductsPanel(
                             },
                         );
                         let fixture_key = product.fixture_key.clone();
+                        let row_class = if is_favorable_impact {
+                            "product-row product-row-favorable"
+                        } else {
+                            "product-row"
+                        };
 
                         view! {
-                            <li class="flex items-center justify-between gap-3 bg-white rounded-md border border-slate-200 px-3 py-2">
-                                <div class="min-w-0">
-                                    <p class="truncate text-sm font-medium">{product_name}</p>
+                            <li class=row_class>
+                                <div>
+                                    <p class="product-name">{product_name}</p>
                                     <SavingsLine text=savings_text />
                                 </div>
-                                <div class="flex shrink-0 items-center gap-2">
+                                <div>
                                     <PriceSummary impact_price=impact_price shelf_price=shelf_price />
                                     <button
                                         type="button"
                                         aria-label=add_button_label
-                                        class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                                        class="icon-button icon-button-primary icon-button-product"
                                         on:click=move |_| {
                                             cart_items.update(|items| items.push(fixture_key.clone()));
                                             action_message
