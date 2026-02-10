@@ -44,7 +44,7 @@ promotions:
 
   meal-deal:
     type: mix_and_match
-    name: "£5 Meal Deal"
+    name: "£3.80 Meal Deal"
     slots:
       - name: main
         tags: [main]
@@ -60,4 +60,4 @@ promotions:
         max: 1
     discount:
       type: fixed_total
-      amount: 5.00 GBP
+      amount: 3.80 GBP
