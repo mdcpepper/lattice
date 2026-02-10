@@ -247,16 +247,16 @@ impl TypstRenderer {
 
         output.push_str("= ILP Formulation for Basket Pricing\n\n");
 
-        output.push_str("== Decision Variables\n\n");
+        output.push_str("=== Decision Variables\n\n");
         self.render_variables(&formulation, &mut output);
 
-        output.push_str("\n== Objective Function\n\n");
+        output.push_str("\n=== Objective Function\n\n");
         Self::render_objective(&formulation, &mut output);
 
-        output.push_str("\n== Constraints\n\n");
+        output.push_str("\n=== Constraints\n\n");
         self.render_constraints(&formulation, &mut output);
 
-        output.push_str("\n== Full ILP in Standard Form\n\n");
+        output.push_str("\n=== Full ILP in Standard Form\n\n");
         Self::render_standard_form(&formulation, &mut output);
 
         output
@@ -625,7 +625,7 @@ impl TypstRenderer {
     fn render_variables(&self, formulation: &ILPFormulation, output: &mut String) {
         output.push_str("All decision variables are binary.\n\n");
 
-        output.push_str("=== Presence Variables (Full Price)\n\n");
+        output.push_str("==== Presence Variables (Full Price)\n\n");
 
         let mut presence_items: Vec<_> = formulation.presence_vars.iter().collect();
 
@@ -641,7 +641,7 @@ impl TypstRenderer {
             output.push_str(")\n");
         }
 
-        output.push_str("\n=== Promotion Variables (Participation & Discounts)\n\n");
+        output.push_str("\n==== Promotion Variables (Participation & Discounts)\n\n");
 
         let mut promotion_items: Vec<_> = formulation.promotion_vars.iter().collect();
 
@@ -750,9 +750,9 @@ impl TypstRenderer {
         for (item_idx, expr) in exclusivity_items {
             output.push_str("$ ");
             output.push_str(&Self::render_expression(formulation, expr));
-            output.push_str(" = 1 $ (");
+            output.push_str(" = 1 $ ");
             output.push_str(&self.item_label(*item_idx, true));
-            output.push_str(")\n\n");
+            output.push_str("\n\n");
         }
 
         if !formulation.promotion_constraints.is_empty() {
@@ -767,11 +767,11 @@ impl TypstRenderer {
                 output.push_str(relation);
                 output.push(' ');
                 output.push_str(&Self::render_number(*rhs));
-                output.push_str(" $ (");
+                output.push_str(" $ ");
                 output.push_str(constraint_type);
                 output.push_str(" for promotion \"");
                 output.push_str(&self.promotion_label(*promo_key));
-                output.push_str("\")\n\n");
+                output.push_str("\"\n\n");
             }
         }
     }
@@ -976,7 +976,6 @@ pub struct MultiLayerRenderer {
     /// Item metadata for rendering
     item_names: Vec<Option<String>>,
     promotion_names: FxHashMap<PromotionKey, String>,
-    layer_names: FxHashMap<PromotionLayerKey, String>,
 }
 
 impl MultiLayerRenderer {
@@ -990,7 +989,6 @@ impl MultiLayerRenderer {
             output_path,
             item_names: Vec::new(),
             promotion_names: FxHashMap::default(),
-            layer_names: FxHashMap::default(),
         }
     }
 
@@ -1017,6 +1015,7 @@ impl MultiLayerRenderer {
             .collect();
 
         let mut layer_names: FxHashMap<PromotionLayerKey, String> = FxHashMap::default();
+
         for (_promotion_key, meta) in promotion_meta {
             for (layer_key, layer_name) in &meta.layer_names {
                 layer_names
@@ -1032,7 +1031,6 @@ impl MultiLayerRenderer {
             output_path,
             item_names,
             promotion_names,
-            layer_names,
         }
     }
 
@@ -1042,30 +1040,18 @@ impl MultiLayerRenderer {
         &self.output_path
     }
 
-    fn layer_label(&self, layer_key: PromotionLayerKey) -> String {
-        self.layer_names
-            .get(&layer_key)
-            .cloned()
-            .unwrap_or_else(|| format!("{layer_key:?}"))
-    }
-
-    /// Write all captured formulations to a single .typ file
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TypstRenderError::IoError`] if the file cannot be created or written.
-    pub fn write(&self) -> Result<(), TypstRenderError> {
-        use std::io::Write;
-
+    /// Render all captured formulations to Typst syntax.
+    #[must_use]
+    pub fn render(&self) -> String {
         let layers = self.layers.lock().map_or_else(
             |poisoned| poisoned.into_inner().clone(),
             |layers| layers.clone(),
         );
 
-        let mut file = File::create(&self.output_path)?;
+        let mut output = String::new();
 
         // Document header
-        writeln!(file, "= ILP Formulations for Layered Promotion Graph\n")?;
+        output.push_str("= ILP Formulations for Layered Promotion Graph\n\n");
 
         // Filter out layers with no promotion variables (pure routing layers)
         let non_trivial_layers: Vec<_> = layers
@@ -1074,25 +1060,15 @@ impl MultiLayerRenderer {
             .collect();
 
         if non_trivial_layers.is_empty() {
-            writeln!(file, "_No layers with promotions to display._\n")?;
-            return Ok(());
+            output.push_str("_No layers with promotions to display._\n");
+            return output;
         }
 
         // Render each non-trivial layer
         for (idx, layer) in non_trivial_layers.iter().enumerate() {
-            let promo_count = layer.formulation.promotion_vars.len();
-            let layer_label = self.layer_label(layer.layer_key);
-
-            writeln!(
-                file,
-                "== Layer {}: {} (Node {:?})\n",
-                layer.solve_order, layer_label, layer.node_index
-            )?;
-
-            writeln!(
-                file,
-                "_Note: This layer contains {promo_count} promotion variable(s)._\n"
-            )?;
+            output.push_str("== Layer ");
+            output.push_str(&(layer.solve_order + 1).to_string());
+            output.push_str("\n\n");
 
             // Render formulation using existing rendering logic
             let renderer = TypstRenderer {
@@ -1106,20 +1082,36 @@ impl MultiLayerRenderer {
 
             // Write content, skipping the top-level heading (we already have layer headers)
             let lines: Vec<&str> = content.lines().collect();
+
             let start_idx = lines
                 .iter()
-                .position(|line| line.starts_with("== Decision Variables"))
+                .position(|line| line.starts_with("=== Decision Variables"))
                 .unwrap_or(0);
 
             for line in lines.iter().skip(start_idx) {
-                writeln!(file, "{line}")?;
+                output.push_str(line);
+                output.push('\n');
             }
 
             // Add pagebreak between layers (not after last)
             if idx < non_trivial_layers.len() - 1 {
-                writeln!(file, "\n#pagebreak()\n")?;
+                output.push_str("\n#pagebreak()\n\n");
             }
         }
+
+        output
+    }
+
+    /// Write all captured formulations to a single .typ file
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypstRenderError::IoError`] if the file cannot be created or written.
+    pub fn write(&self) -> Result<(), TypstRenderError> {
+        let content = self.render();
+        let mut file = File::create(&self.output_path)?;
+
+        file.write_all(content.as_bytes())?;
 
         Ok(())
     }
@@ -1762,9 +1754,9 @@ mod tests {
         let var2_label = TypstRenderer::var_label(&formulation, var2);
 
         assert!(output.contains("= ILP Formulation"));
-        assert!(output.contains("== Decision Variables"));
-        assert!(output.contains("== Objective Function"));
-        assert!(output.contains("== Constraints"));
+        assert!(output.contains("=== Decision Variables"));
+        assert!(output.contains("=== Objective Function"));
+        assert!(output.contains("=== Constraints"));
 
         assert!(output.contains(&var1_label));
         assert!(output.contains(&var2_label));

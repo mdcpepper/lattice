@@ -890,13 +890,8 @@ There is an ready-made example of of a stacked formulation in `assets/demo.typ` 
 ## Demo
 
 The `crates/demo` app is a small client-side Leptos UI that loads the demo fixtures,
-lists products, and evaluates basket pricing through the promotion graph in real time.
-
-The demo CSS is built with a Rust-only pipeline (no Node/PostCSS runtime):
-`crates/demo/app.src.css` imports modular files from `crates/demo/css/`, and
-`crates/css-build` bundles/transforms that graph into `crates/demo/app.css`
-via a Trunk `pre_build` hook (`crates/demo/Trunk.toml`).
-When `TRUNK_PROFILE=release`, the generated CSS is minified.
+lists products, and evaluates basket pricing through the promotion graph in real time,
+on the client.
 
 To run the demo locally in development with Trunk:
 

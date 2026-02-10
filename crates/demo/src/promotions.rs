@@ -9,7 +9,7 @@ use lattice::{
         promotions::PromotionsFixture,
     },
     graph::{OutputMode, PromotionGraph, PromotionGraphBuilder},
-    promotions::{Promotion, PromotionKey},
+    promotions::{Promotion, PromotionKey, PromotionMeta},
 };
 
 /// Render model for a promotion pill.
@@ -31,8 +31,11 @@ pub struct LoadedPromotions {
     /// Promotion graph built from fixtures.
     pub graph: PromotionGraph<'static>,
 
-    /// Promotion key -> display name.
+    /// Promotion key to display name.
     pub promotion_names: SecondaryMap<PromotionKey, String>,
+
+    /// Promotion metadata keyed by promotion key.
+    pub promotion_meta_map: SlotMap<PromotionKey, PromotionMeta>,
 }
 
 /// Load promotions and graph fixture content.
@@ -43,33 +46,52 @@ pub fn load_promotions(yaml: &str) -> Result<LoadedPromotions, String> {
     let graph_fixture: GraphFixture = serde_norway::from_str(yaml)
         .map_err(|error| format!("Failed to parse promotion graph fixture: {error}"))?;
 
-    let mut promotion_key_slots: SlotMap<PromotionKey, ()> = SlotMap::with_key();
+    let mut promotion_meta_map: SlotMap<PromotionKey, PromotionMeta> = SlotMap::with_key();
     let mut promotion_names: SecondaryMap<PromotionKey, String> = SecondaryMap::new();
     let mut promotions_by_fixture_key: HashMap<String, Promotion<'static>> = HashMap::new();
 
     for (fixture_key, promotion_fixture) in promotions_fixture.promotions {
-        let promotion_key = promotion_key_slots.insert(());
+        let promotion_key = promotion_meta_map.insert(PromotionMeta::default());
 
         let (promotion_meta, promotion) = promotion_fixture
             .try_into_promotion(promotion_key)
             .map_err(|error| format!("Failed to parse promotion '{fixture_key}': {error}"))?;
 
         promotion_names.insert(promotion_key, promotion_meta.name.clone());
+
+        let Some(meta_slot) = promotion_meta_map.get_mut(promotion_key) else {
+            return Err("Failed to store promotion metadata".to_string());
+        };
+
+        *meta_slot = promotion_meta;
+
         promotions_by_fixture_key.insert(fixture_key, promotion);
     }
 
     Ok(LoadedPromotions {
         graph: build_graph(&graph_fixture, &promotions_by_fixture_key)?,
         promotion_names,
+        promotion_meta_map,
     })
 }
 
 /// Deterministic bundle color style derived from bundle id.
 pub fn bundle_pill_style(bundle_id: usize) -> String {
-    let hue = ((bundle_id as u64 * 137 + 47) % 360) as u16;
+    let bundle = bundle_id as u64;
+    let hue = ((bundle * 137 + 47 + (bundle / 24) * 19) % 360) as u16;
+
+    let tone_band = (bundle / 12) % 6;
+    let (bg_sat, bg_light, border_sat, border_light, text_sat, text_light) = match tone_band {
+        0 => (85, 92, 70, 74, 60, 24),
+        1 => (78, 89, 66, 68, 62, 22),
+        2 => (72, 86, 62, 62, 66, 20),
+        3 => (68, 83, 58, 58, 68, 19),
+        4 => (76, 90, 64, 70, 58, 23),
+        _ => (82, 94, 68, 78, 55, 26),
+    };
 
     format!(
-        "background-color:hsl({hue},85%,92%);border-color:hsl({hue},70%,74%);color:hsl({hue},60%,24%);"
+        "background-color:hsl({hue},{bg_sat}%,{bg_light}%);border-color:hsl({hue},{border_sat}%,{border_light}%);color:hsl({hue},{text_sat}%,{text_light}%);"
     )
 }
 

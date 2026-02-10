@@ -4,6 +4,8 @@ use std::{
 };
 
 #[cfg(target_arch = "wasm32")]
+use std::path::PathBuf;
+#[cfg(target_arch = "wasm32")]
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
@@ -13,12 +15,14 @@ use leptos::prelude::*;
 use rusty_money::{Money, iso::Currency};
 use slotmap::{SecondaryMap, SlotMap};
 
+#[cfg(target_arch = "wasm32")]
+use lattice::solvers::ilp::renderers::typst::MultiLayerRenderer;
 use lattice::{
     basket::Basket,
     graph::PromotionGraph,
     items::{Item, groups::ItemGroup},
     products::{Product, ProductKey},
-    promotions::PromotionKey,
+    promotions::{PromotionKey, PromotionMeta},
     receipt::Receipt,
 };
 
@@ -71,6 +75,16 @@ pub struct BasketSolverData {
 
     /// Promotion key -> display name.
     pub promotion_names: SecondaryMap<PromotionKey, String>,
+
+    /// Promotion metadata keyed by promotion key.
+    #[cfg_attr(
+        not(target_arch = "wasm32"),
+        expect(
+            dead_code,
+            reason = "This field is read only in wasm32 for Typst download support."
+        )
+    )]
+    pub promotion_meta_map: SlotMap<PromotionKey, PromotionMeta>,
 
     /// Currency used by this demo fixture set.
     pub currency: &'static Currency,
@@ -330,6 +344,89 @@ fn elapsed_since(start_ms: f64) -> Duration {
     let elapsed_ms = (monotonic_now() - start_ms).max(0.0);
 
     Duration::from_secs_f64(elapsed_ms / 1_000.0)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn render_basket_typst(
+    solver_data: &BasketSolverData,
+    cart_fixture_keys: &[String],
+) -> Result<String, String> {
+    let basket = build_basket(solver_data, cart_fixture_keys)?;
+    let item_group = ItemGroup::from(&basket);
+
+    let mut renderer = MultiLayerRenderer::new_with_metadata(
+        PathBuf::from("basket.typ"),
+        &item_group,
+        &solver_data.product_meta_map,
+        &solver_data.promotion_meta_map,
+    );
+
+    solver_data
+        .graph
+        .evaluate_with_observer(&item_group, Some(&mut renderer))
+        .map_err(|error| format!("Failed to capture ILP formulation: {error}"))?;
+
+    Ok(renderer.render())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn js_value_message(error: wasm_bindgen::JsValue, fallback: &str) -> String {
+    error.as_string().unwrap_or_else(|| fallback.to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn download_text_file(filename: &str, content: &str) -> Result<(), String> {
+    use wasm_bindgen::JsCast;
+
+    let options = web_sys::BlobPropertyBag::new();
+    options.set_type("text/plain;charset=utf-8");
+
+    let parts = js_sys::Array::new();
+    parts.push(&wasm_bindgen::JsValue::from_str(content));
+
+    let blob = web_sys::Blob::new_with_str_sequence_and_options(&parts, &options)
+        .map_err(|error| js_value_message(error, "Failed to create download blob"))?;
+
+    let object_url = web_sys::Url::create_object_url_with_blob(&blob)
+        .map_err(|error| js_value_message(error, "Failed to create download URL"))?;
+
+    let window = web_sys::window().ok_or_else(|| "Window is unavailable".to_string())?;
+
+    let document = window
+        .document()
+        .ok_or_else(|| "Document is unavailable".to_string())?;
+
+    let body = document
+        .body()
+        .ok_or_else(|| "Document body is unavailable".to_string())?;
+
+    let anchor = document
+        .create_element("a")
+        .map_err(|error| js_value_message(error, "Failed to create download link"))?;
+
+    anchor
+        .set_attribute("href", &object_url)
+        .map_err(|error| js_value_message(error, "Failed to set download URL"))?;
+
+    anchor
+        .set_attribute("download", filename)
+        .map_err(|error| js_value_message(error, "Failed to set filename"))?;
+
+    body.append_child(&anchor)
+        .map_err(|error| js_value_message(error, "Failed to add temporary download link"))?;
+
+    let anchor_element: web_sys::HtmlElement = anchor
+        .dyn_into()
+        .map_err(|_error| "Failed to prepare download link".to_string())?;
+
+    anchor_element.click();
+
+    let _ = body.remove_child(&anchor_element);
+
+    web_sys::Url::revoke_object_url(&object_url)
+        .map_err(|error| js_value_message(error, "Failed to release download URL"))?;
+
+    Ok(())
 }
 
 /// Basket panel component.
@@ -668,14 +765,85 @@ fn BasketHeading(item_count: usize, basket_total: Option<String>) -> impl IntoVi
 }
 
 #[component]
-fn BasketPanelMeta(solve_time_text: RwSignal<String>) -> impl IntoView {
+fn BasketPanelMeta(
+    solve_time_text: RwSignal<String>,
+    solver_data: Arc<BasketSolverData>,
+    cart_items: RwSignal<Vec<String>>,
+    live_message: RwSignal<(u64, String)>,
+) -> impl IntoView {
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (&solver_data, cart_items, live_message);
+
     move || {
         let value = solve_time_text.get();
 
         if value.is_empty() {
             ().into_any()
         } else {
-            view! { <p class="panel-meta">{value}</p> }.into_any()
+            #[cfg(target_arch = "wasm32")]
+            let on_download = {
+                let solver_data = Arc::clone(&solver_data);
+
+                move |_| {
+                    let cart_snapshot = cart_items.get_untracked();
+
+                    let result = render_basket_typst(&solver_data, &cart_snapshot)
+                        .and_then(|typst| download_text_file("basket.typ", &typst));
+
+                    match result {
+                        Ok(()) => announce(live_message, "Downloaded basket.typ.".to_string()),
+                        Err(error) => announce(live_message, format!("Download failed: {error}")),
+                    }
+                }
+            };
+
+            let download_link = {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    view! {
+                        <button
+                            type="button"
+                            class="panel-meta-download"
+                            on:click=on_download
+                            title="Download ILP formulation as basket.typ"
+                            aria-label="Download basket.typ"
+                        >
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="24"
+                                height="24"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                class="panel-meta-download-icon lucide lucide-file-down-icon lucide-file-down"
+                                aria-hidden="true"
+                            >
+                                <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"></path>
+                                <path d="M14 2v5a1 1 0 0 0 1 1h5"></path>
+                                <path d="M12 18v-6"></path>
+                                <path d="m9 15 3 3 3-3"></path>
+                            </svg>
+                            <span><span class="sr-only">"download" </span>".typ"</span>
+                        </button>
+                    }
+                    .into_any()
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    ().into_any()
+                }
+            };
+
+            view! {
+                <p class="panel-meta">
+                    <span>{value}</span>
+                    {download_link}
+                </p>
+            }
+            .into_any()
         }
     }
 }
@@ -738,12 +906,14 @@ pub fn BasketPanel(
     action_message: RwSignal<Option<String>>,
 ) -> impl IntoView {
     let add_icon_confirmations = RwSignal::new(HashSet::<String>::new());
+    let panel_solver_data = solver_data;
+    let meta_solver_data = Arc::clone(&panel_solver_data);
 
     view! {
         <aside class="basket-panel">
             {move || {
                 render_basket_panel_content(
-                    &solver_data,
+                    &panel_solver_data,
                     cart_items,
                     solve_time_text,
                     live_message,
@@ -751,7 +921,12 @@ pub fn BasketPanel(
                     add_icon_confirmations,
                 )
             }}
-            <BasketPanelMeta solve_time_text=solve_time_text />
+            <BasketPanelMeta
+                solve_time_text=solve_time_text
+                solver_data=meta_solver_data
+                cart_items=cart_items
+                live_message=live_message
+            />
         </aside>
     }
 }

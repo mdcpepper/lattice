@@ -35,6 +35,7 @@ impl AppData {
                 product_key_by_fixture_key: loaded_products.product_key_by_fixture_key,
                 graph: loaded_promotions.graph,
                 promotion_names: loaded_promotions.promotion_names,
+                promotion_meta_map: loaded_promotions.promotion_meta_map,
                 currency: loaded_products.currency,
             }),
         })

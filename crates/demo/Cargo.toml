@@ -12,7 +12,17 @@ petgraph.workspace = true
 rusty-money.workspace = true
 serde_norway.workspace = true
 slotmap.workspace = true
-web-sys = { version = "0.3.85", features = ["Performance", "Window"] }
+web-sys = { version = "0.3.85", features = [
+    "Blob",
+    "BlobPropertyBag",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "Node",
+    "Performance",
+    "Url",
+    "Window",
+] }
 leptos_workers = "0.3.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

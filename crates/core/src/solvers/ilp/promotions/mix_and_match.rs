@@ -165,14 +165,14 @@ impl MixAndMatchVars {
         let min_i32 = i32_from_usize(min);
         let min_expr = slot_sum.clone() - min_i32 * y_bundle;
 
-        observer.on_promotion_constraint(promotion_key, "slot min", &min_expr, ">=", 0.0);
+        observer.on_promotion_constraint(promotion_key, "Slot min", &min_expr, ">=", 0.0);
         state.add_geq_constraint(min_expr, 0.0);
 
         if let Some(max) = max {
             let max_i32 = i32_from_usize(max);
             let max_expr = slot_sum - max_i32 * y_bundle;
 
-            observer.on_promotion_constraint(promotion_key, "slot max", &max_expr, "<=", 0.0);
+            observer.on_promotion_constraint(promotion_key, "Slot max", &max_expr, "<=", 0.0);
             state.add_leq_constraint(max_expr, 0.0);
         }
     }
@@ -189,7 +189,7 @@ impl MixAndMatchVars {
         let min_i32 = i32_from_usize(min);
         let min_expr = slot_sum.clone() - min_i32 * bundle_formed;
 
-        observer.on_promotion_constraint(promotion_key, "slot min (formed)", &min_expr, ">=", 0.0);
+        observer.on_promotion_constraint(promotion_key, "Slot min (formed)", &min_expr, ">=", 0.0);
         state.add_geq_constraint(min_expr, 0.0);
 
         if let Some(max) = max {
@@ -198,7 +198,7 @@ impl MixAndMatchVars {
 
             observer.on_promotion_constraint(
                 promotion_key,
-                "slot max (formed)",
+                "Slot max (formed)",
                 &max_expr,
                 "<=",
                 0.0,
@@ -966,7 +966,7 @@ impl ILPPromotion for MixAndMatchPromotion<'_> {
                 .problem_variables_mut()
                 .add(variable().integer().min(0).max(max_bundles_i32));
 
-            observer.on_auxiliary_variable(promotion_key, var, "bundle count", None, None);
+            observer.on_auxiliary_variable(promotion_key, var, "Bundle count", None, None);
 
             (Some(var), None)
         } else {
@@ -2088,11 +2088,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            observed_lhs_values_for_type(&observer, "slot min", &solution),
+            observed_lhs_values_for_type(&observer, "Slot min", &solution),
             vec![0.0]
         );
         assert_eq!(
-            observed_lhs_values_for_type(&observer, "slot max", &solution),
+            observed_lhs_values_for_type(&observer, "Slot max", &solution),
             vec![0.0]
         );
         assert_eq!(
@@ -2187,11 +2187,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            observed_lhs_values_for_type(&observer, "slot min (formed)", &solution),
+            observed_lhs_values_for_type(&observer, "Slot min (formed)", &solution),
             vec![0.0]
         );
         assert_eq!(
-            observed_lhs_values_for_type(&observer, "slot max (formed)", &solution),
+            observed_lhs_values_for_type(&observer, "Slot max (formed)", &solution),
             vec![-1.0]
         );
         assert_eq!(
