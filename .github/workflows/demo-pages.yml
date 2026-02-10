@@ -1,16 +1,10 @@
 name: Deploy Demo to Pages
 
 on:
+  pull_request:
+    branches: ["main"]
   push:
     branches: ["main"]
-    paths:
-      - "crates/demo/**"
-      - "crates/core/**"
-      - "fixtures/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - ".github/workflows/demo-pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -61,6 +55,7 @@ jobs:
           path: crates/demo/dist
 
   deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:

@@ -140,7 +140,7 @@ fn connect_graph_edges(
                 connect_pass_through_edge(builder, node_indices, from_idx, label, node_fixture)?;
             }
             OutputMode::Split => {
-                connect_split_edges(builder, node_indices, from_idx, label, node_fixture)?
+                connect_split_edges(builder, node_indices, from_idx, label, node_fixture)?;
             }
         }
     }
