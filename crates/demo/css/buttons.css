@@ -2,11 +2,34 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    position: relative;
     border: 1px solid transparent;
     border-radius: var(--size-radius-control);
     cursor: pointer;
     font-weight: 500;
     transition: background-color 150ms ease;
+}
+
+.icon-button-icon-stack {
+    display: inline-grid;
+    place-items: center;
+}
+
+.icon-button-icon {
+    grid-area: 1 / 1;
+    opacity: 1;
+}
+
+.icon-button-icon-check {
+    opacity: 0;
+}
+
+.icon-button-confirmed .icon-button-icon-original {
+    animation: icon-button-original-confirm 500ms ease both;
+}
+
+.icon-button-confirmed .icon-button-icon-check {
+    animation: icon-button-check-confirm 500ms ease both;
 }
 
 .icon-button-primary {

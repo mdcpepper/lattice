@@ -11,3 +11,6 @@ command_arguments = [
   "--output",
   "app.css",
 ]
+
+[watch]
+watch = ["app.src.css", "css", "src"]

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 #[cfg(target_arch = "wasm32")]
 use std::time::Duration;
@@ -23,6 +26,36 @@ use crate::{
     announce,
     promotions::{PromotionPill, bundle_pill_style},
 };
+
+fn start_icon_confirmation(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) {
+    confirmed_icons.update(|states| {
+        states.insert(icon_key.to_string());
+    });
+}
+
+fn clear_icon_confirmation(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) {
+    confirmed_icons.update(|states| {
+        states.remove(icon_key);
+    });
+}
+
+fn is_icon_confirmed(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) -> bool {
+    confirmed_icons.with(|states| states.contains(icon_key))
+}
+
+fn remove_line_item(items: &mut Vec<String>, basket_index: usize, fixture_key: &str) {
+    if items
+        .get(basket_index)
+        .is_some_and(|item_key| item_key == fixture_key)
+    {
+        items.remove(basket_index);
+        return;
+    }
+
+    if let Some(position) = items.iter().position(|item_key| item_key == fixture_key) {
+        items.remove(position);
+    }
+}
 
 /// Solver inputs required to build basket/receipt view state.
 #[derive(Debug)]
@@ -372,11 +405,21 @@ fn BasketLine(
     line: BasketLineItem,
     cart_items: RwSignal<Vec<String>>,
     action_message: RwSignal<Option<String>>,
+    add_icon_confirmations: RwSignal<HashSet<String>>,
 ) -> impl IntoView {
     let basket_index = line.basket_index;
+
     let fixture_key = line.fixture_key.clone();
+    let remove_fixture_key = line.fixture_key.clone();
+    let line_key = format!("{basket_index}:{}", line.fixture_key);
+
     let item_name_for_add = line.name.clone();
     let item_name_for_remove = line.name.clone();
+
+    let add_icon_key = format!("add:{line_key}");
+    let add_icon_key_for_class = add_icon_key.clone();
+    let add_icon_key_for_click = add_icon_key.clone();
+    let add_icon_key_for_animation_end = add_icon_key.clone();
 
     let add_button_label = format!(
         "Add another {} ({}) to basket",
@@ -444,13 +487,12 @@ fn BasketLine(
                         class="icon-button icon-button-secondary icon-button-compact"
                         on:click=move |_| {
                             cart_items.update(|items| {
-                                if basket_index < items.len() {
-                                    items.remove(basket_index);
-                                }
+                                remove_line_item(items, basket_index, &remove_fixture_key);
                             });
 
-                            action_message
-                                .set(Some(format!("Removed {item_name_for_remove} from basket.")));
+                            action_message.set(Some(format!(
+                                "Removed {item_name_for_remove} from basket."
+                            )));
                         }
                     >
                         <svg
@@ -471,28 +513,65 @@ fn BasketLine(
                     <button
                         type="button"
                         aria-label=add_button_label
-                        class="icon-button icon-button-primary icon-button-compact"
+                        class=move || {
+                            if is_icon_confirmed(
+                                add_icon_confirmations,
+                                &add_icon_key_for_class,
+                            ) {
+                                "icon-button icon-button-primary icon-button-compact icon-button-confirmed"
+                            } else {
+                                "icon-button icon-button-primary icon-button-compact"
+                            }
+                        }
                         on:click=move |_| {
+                            start_icon_confirmation(
+                                add_icon_confirmations,
+                                &add_icon_key_for_click,
+                            );
+
                             cart_items.update(|items| items.push(fixture_key.clone()));
+
                             action_message
                                 .set(Some(format!("Added {item_name_for_add} to basket.")));
                         }
                     >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="24"
-                            height="24"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            class="lucide lucide-plus-icon lucide-plus"
-                        >
-                            <path d="M5 12h14"></path>
-                            <path d="M12 5v14"></path>
-                        </svg>
+                        <span class="icon-button-icon-stack" aria-hidden="true">
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="24"
+                                height="24"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                class="icon-button-icon icon-button-icon-original lucide lucide-plus-icon lucide-plus"
+                            >
+                                <path d="M5 12h14"></path>
+                                <path d="M12 5v14"></path>
+                            </svg>
+                            <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="24"
+                                height="24"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                class="icon-button-icon icon-button-icon-check lucide lucide-check-icon lucide-check"
+                                on:animationend=move |_| {
+                                    clear_icon_confirmation(
+                                        add_icon_confirmations,
+                                        &add_icon_key_for_animation_end,
+                                    );
+                                }
+                            >
+                                <path d="M20 6 9 17l-5-5"></path>
+                            </svg>
+                        </span>
                     </button>
                 </div>
             </div>
@@ -505,6 +584,7 @@ fn BasketBody(
     basket: BasketViewModel,
     cart_items: RwSignal<Vec<String>>,
     action_message: RwSignal<Option<String>>,
+    add_icon_confirmations: RwSignal<HashSet<String>>,
 ) -> impl IntoView {
     let summary = view! {
         <BasketSummary
@@ -530,13 +610,121 @@ fn BasketBody(
                     {basket
                         .lines
                         .into_iter()
-                        .map(|line| view! { <BasketLine line=line cart_items=cart_items action_message=action_message/> })
+                        .map(|line| {
+                            view! {
+                                <BasketLine
+                                    line=line
+                                    cart_items=cart_items
+                                    action_message=action_message
+                                    add_icon_confirmations=add_icon_confirmations
+                                />
+                            }
+                        })
                         .collect_view()}
                 </ul>
                 {summary}
             </div>
         }
         .into_any()
+    }
+}
+
+#[component]
+fn BasketHeading(item_count: usize, basket_total: Option<String>) -> impl IntoView {
+    view! {
+        <h2 class="panel-title panel-title-spaced">
+            <div class="panel-title-row">
+                <span class="panel-title-leading basket-title-label">
+                    <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        class="basket-title-icon lucide lucide-shopping-basket-icon lucide-shopping-basket"
+                        aria-hidden="true"
+                    >
+                        <path d="m15 11-1 9"></path>
+                        <path d="m19 11-4-7"></path>
+                        <path d="M2 11h20"></path>
+                        <path d="m3.5 11 1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4"></path>
+                        <path d="M4.5 15.5h15"></path>
+                        <path d="m5 11 4-7"></path>
+                        <path d="m9 11 1 9"></path>
+                    </svg>
+                    <span>{format!("Basket ({item_count})")}</span>
+                </span>
+                {basket_total.map_or_else(
+                    || ().into_any(),
+                    |total| view! { <span class="panel-title-trailing">{total}</span> }.into_any(),
+                )}
+            </div>
+        </h2>
+    }
+}
+
+#[component]
+fn BasketPanelMeta(solve_time_text: RwSignal<String>) -> impl IntoView {
+    move || {
+        let value = solve_time_text.get();
+
+        if value.is_empty() {
+            ().into_any()
+        } else {
+            view! { <p class="panel-meta">{value}</p> }.into_any()
+        }
+    }
+}
+
+fn render_basket_panel_content(
+    solver_data: &Arc<BasketSolverData>,
+    cart_items: RwSignal<Vec<String>>,
+    solve_time_text: RwSignal<String>,
+    live_message: RwSignal<(u64, String)>,
+    action_message: RwSignal<Option<String>>,
+    add_icon_confirmations: RwSignal<HashSet<String>>,
+) -> AnyView {
+    let cart_snapshot = cart_items.get();
+    let item_count = cart_snapshot.len();
+
+    match solve_basket(solver_data, &cart_snapshot) {
+        Ok(basket) => {
+            solve_time_text.set(basket.solve_duration.clone());
+
+            if let Some(action) = action_message.get_untracked() {
+                announce(live_message, format!("{action}, total {}.", basket.total));
+                action_message.set(None);
+            }
+
+            let basket_total = basket.total.clone();
+
+            view! {
+                <BasketHeading item_count=item_count basket_total=Some(basket_total) />
+                <div class="panel-card">
+                    <BasketBody
+                        basket=basket
+                        cart_items=cart_items
+                        action_message=action_message
+                        add_icon_confirmations=add_icon_confirmations
+                    />
+                </div>
+            }
+            .into_any()
+        }
+        Err(error_message) => {
+            solve_time_text.set(String::new());
+            view! {
+                <BasketHeading item_count=item_count basket_total=None />
+                <div class="panel-card">
+                    <p class="error-text">{error_message}</p>
+                </div>
+            }
+            .into_any()
+        }
     }
 }
 
@@ -549,108 +737,21 @@ pub fn BasketPanel(
     live_message: RwSignal<(u64, String)>,
     action_message: RwSignal<Option<String>>,
 ) -> impl IntoView {
+    let add_icon_confirmations = RwSignal::new(HashSet::<String>::new());
+
     view! {
         <aside class="basket-panel">
-            {let solver_data = solver_data;
-                move || {
-                    let cart_snapshot = cart_items.get();
-                    let item_count = cart_snapshot.len();
-
-                    match solve_basket(&solver_data, &cart_snapshot) {
-                        Ok(basket) => {
-                            solve_time_text.set(basket.solve_duration.clone());
-
-                            if let Some(action) = action_message.get_untracked() {
-                                announce(live_message, format!("{action}, total {}.", basket.total));
-                                action_message.set(None);
-                            }
-
-                            let basket_total = basket.total.clone();
-
-                            view! {
-                                <h2 class="panel-title panel-title-spaced">
-                                    <div class="panel-title-row">
-                                        <span class="panel-title-leading basket-title-label">
-                                            <svg
-                                                xmlns="http://www.w3.org/2000/svg"
-                                                width="24"
-                                                height="24"
-                                                viewBox="0 0 24 24"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                stroke-width="2"
-                                                stroke-linecap="round"
-                                                stroke-linejoin="round"
-                                                class="basket-title-icon lucide lucide-shopping-basket-icon lucide-shopping-basket"
-                                                aria-hidden="true"
-                                            >
-                                                <path d="m15 11-1 9"></path>
-                                                <path d="m19 11-4-7"></path>
-                                                <path d="M2 11h20"></path>
-                                                <path d="m3.5 11 1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4"></path>
-                                                <path d="M4.5 15.5h15"></path>
-                                                <path d="m5 11 4-7"></path>
-                                                <path d="m9 11 1 9"></path>
-                                            </svg>
-                                            <span>{format!("Basket ({item_count})")}</span>
-                                        </span>
-                                        <span class="panel-title-trailing">{basket_total}</span>
-                                    </div>
-                                </h2>
-                                <div class="panel-card">
-                                    <BasketBody basket=basket cart_items=cart_items action_message=action_message/>
-                                </div>
-                            }
-                                .into_any()
-                        }
-                        Err(error_message) => view! {
-                            {solve_time_text.set(String::new());}
-                            <h2 class="panel-title panel-title-spaced">
-                                <div class="panel-title-row">
-                                    <span class="basket-title-label">
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            width="24"
-                                            height="24"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            class="basket-title-icon lucide lucide-shopping-basket-icon lucide-shopping-basket"
-                                            aria-hidden="true"
-                                        >
-                                            <path d="m15 11-1 9"></path>
-                                            <path d="m19 11-4-7"></path>
-                                            <path d="M2 11h20"></path>
-                                            <path d="m3.5 11 1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4"></path>
-                                            <path d="M4.5 15.5h15"></path>
-                                            <path d="m5 11 4-7"></path>
-                                            <path d="m9 11 1 9"></path>
-                                        </svg>
-                                        <span>{format!("Basket ({item_count})")}</span>
-                                    </span>
-                                </div>
-                            </h2>
-                            <div class="panel-card">
-                                <p class="error-text">{error_message}</p>
-                            </div>
-                        }
-                            .into_any(),
-                    }
-                }}
             {move || {
-                let value = solve_time_text.get();
-                if value.is_empty() {
-                    ().into_any()
-                } else {
-                    view! {
-                        <p class="panel-meta">{value}</p>
-                    }
-                        .into_any()
-                }
+                render_basket_panel_content(
+                    &solver_data,
+                    cart_items,
+                    solve_time_text,
+                    live_message,
+                    action_message,
+                    add_icon_confirmations,
+                )
             }}
+            <BasketPanelMeta solve_time_text=solve_time_text />
         </aside>
     }
 }

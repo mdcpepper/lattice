@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use leptos::prelude::*;
 use rusty_money::iso::Currency;
@@ -8,6 +11,18 @@ use lattice::{
     fixtures::products::{ProductsFixture, parse_price},
     products::{Product, ProductKey},
 };
+
+fn start_icon_confirmation(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) {
+    confirmed_icons.update(|states| {
+        states.insert(icon_key.to_string());
+    });
+}
+
+fn clear_icon_confirmation(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) {
+    confirmed_icons.update(|states| {
+        states.remove(icon_key);
+    });
+}
 
 /// UI model for a product row.
 #[derive(Debug, Clone)]
@@ -198,6 +213,154 @@ fn SavingsLine(text: Option<String>) -> impl IntoView {
     }
 }
 
+#[component]
+fn ProductRow(
+    product: ProductListItem,
+    estimate: Option<ProductEstimate>,
+    cart_items: RwSignal<Vec<String>>,
+    action_message: RwSignal<Option<String>>,
+    add_icon_confirmations: RwSignal<HashSet<String>>,
+) -> impl IntoView {
+    let item_name = product.name.clone();
+    let product_name = item_name.clone();
+    let announce_name = item_name.clone();
+    let price = product.price.clone();
+
+    let impact_price = estimate.map_or_else(
+        || price.clone(),
+        |value| format_price(value.marginal_minor, product.currency_code),
+    );
+
+    let is_favorable_impact = estimate.is_some_and(|value| value.marginal_minor <= 0);
+
+    let show_shelf_price =
+        estimate.is_some_and(|value| value.marginal_minor != product.price_minor);
+    let shelf_price = show_shelf_price.then_some(price.clone());
+
+    let savings_text = estimate.and_then(|value| {
+        (value.savings_minor > 0).then(|| {
+            format!(
+                "Save {}",
+                format_price(value.savings_minor, product.currency_code)
+            )
+        })
+    });
+
+    let add_button_label = estimate.map_or_else(
+        || format!("Add {item_name} ({price}) to basket"),
+        |value| {
+            format!(
+                "Add {item_name}. Basket impact {}.",
+                format_price(value.marginal_minor, product.currency_code)
+            )
+        },
+    );
+
+    let fixture_key = product.fixture_key.clone();
+    let icon_key_for_class = product.fixture_key.clone();
+    let icon_key_for_click = product.fixture_key.clone();
+    let icon_key_for_animation_end = product.fixture_key.clone();
+
+    let row_class = if is_favorable_impact {
+        "product-row product-row-favorable"
+    } else {
+        "product-row"
+    };
+
+    view! {
+        <li class=row_class>
+            <div>
+                <p class="product-name">{product_name}</p>
+                <SavingsLine text=savings_text />
+            </div>
+            <div>
+                <PriceSummary impact_price=impact_price shelf_price=shelf_price />
+                <button
+                    type="button"
+                    aria-label=add_button_label
+                    class=move || {
+                        if add_icon_confirmations.with(|states| states.contains(&icon_key_for_class)) {
+                            "icon-button icon-button-primary icon-button-product icon-button-confirmed"
+                        } else {
+                            "icon-button icon-button-primary icon-button-product"
+                        }
+                    }
+                    on:click=move |_| {
+                        start_icon_confirmation(add_icon_confirmations, &icon_key_for_click);
+                        cart_items.update(|items| items.push(fixture_key.clone()));
+                        action_message.set(Some(format!("Added {announce_name} to basket.")));
+                    }
+                >
+                    <span class="icon-button-icon-stack" aria-hidden="true">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="24"
+                            height="24"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            class="icon-button-icon icon-button-icon-original lucide lucide-plus-icon lucide-plus"
+                        >
+                            <path d="M5 12h14"></path>
+                            <path d="M12 5v14"></path>
+                        </svg>
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="24"
+                            height="24"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            class="icon-button-icon icon-button-icon-check lucide lucide-check-icon lucide-check"
+                            on:animationend=move |_| {
+                                clear_icon_confirmation(add_icon_confirmations, &icon_key_for_animation_end);
+                            }
+                        >
+                            <path d="M20 6 9 17l-5-5"></path>
+                        </svg>
+                    </span>
+                </button>
+            </div>
+        </li>
+    }
+}
+
+#[component]
+fn ProductRows(
+    products: Vec<ProductListItem>,
+    cart_items: RwSignal<Vec<String>>,
+    action_message: RwSignal<Option<String>>,
+    estimates: RwSignal<HashMap<String, ProductEstimate>>,
+    add_icon_confirmations: RwSignal<HashSet<String>>,
+) -> impl IntoView {
+    view! {
+        {move || {
+            let estimate_map = estimates.get();
+
+            products
+                .iter()
+                .map(|product| {
+                    view! {
+                        <ProductRow
+                            product=product.clone()
+                            estimate=estimate_map.get(&product.fixture_key).copied()
+                            cart_items=cart_items
+                            action_message=action_message
+                            add_icon_confirmations=add_icon_confirmations
+                        />
+                    }
+                })
+                .collect_view()
+        }}
+    }
+}
+
 /// Products panel component.
 #[component]
 pub fn ProductsPanel(
@@ -208,100 +371,19 @@ pub fn ProductsPanel(
     show_spinner: RwSignal<bool>,
 ) -> impl IntoView {
     let products = Arc::unwrap_or_clone(products);
+    let add_icon_confirmations = RwSignal::new(HashSet::<String>::new());
 
     view! {
         <section class="products-panel">
             <ProductsHeading show_spinner=show_spinner />
             <ul class="products-list">
-                {move || {
-                    let estimate_map = estimates.get();
-
-                    products
-                    .iter()
-                    .map(|product| {
-                        let item_name = product.name.clone();
-                        let product_name = item_name.clone();
-                        let announce_name = item_name.clone();
-                        let price = product.price.clone();
-                        let estimate = estimate_map.get(&product.fixture_key).copied();
-
-                        let impact_price = estimate.map_or_else(
-                            || price.clone(),
-                            |value| format_price(value.marginal_minor, product.currency_code),
-                        );
-                        let is_favorable_impact =
-                            estimate.is_some_and(|value| value.marginal_minor <= 0);
-
-                        let show_shelf_price =
-                            estimate.is_some_and(|value| value.marginal_minor != product.price_minor);
-
-                        let shelf_price = show_shelf_price.then(|| price.clone());
-
-                        let savings_text = estimate.and_then(|value| {
-                            (value.savings_minor > 0).then(|| {
-                                format!(
-                                    "Save {}",
-                                    format_price(value.savings_minor, product.currency_code)
-                                )
-                            })
-                        });
-
-                        let add_button_label = estimate.map_or_else(
-                            || format!("Add {item_name} ({price}) to basket"),
-                            |value| {
-                                format!(
-                                    "Add {item_name}. Basket impact {}.",
-                                    format_price(value.marginal_minor, product.currency_code)
-                                )
-                            },
-                        );
-                        let fixture_key = product.fixture_key.clone();
-                        let row_class = if is_favorable_impact {
-                            "product-row product-row-favorable"
-                        } else {
-                            "product-row"
-                        };
-
-                        view! {
-                            <li class=row_class>
-                                <div>
-                                    <p class="product-name">{product_name}</p>
-                                    <SavingsLine text=savings_text />
-                                </div>
-                                <div>
-                                    <PriceSummary impact_price=impact_price shelf_price=shelf_price />
-                                    <button
-                                        type="button"
-                                        aria-label=add_button_label
-                                        class="icon-button icon-button-primary icon-button-product"
-                                        on:click=move |_| {
-                                            cart_items.update(|items| items.push(fixture_key.clone()));
-                                            action_message
-                                                .set(Some(format!("Added {announce_name} to basket.")));
-                                        }
-                                    >
-                                        <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            width="24"
-                                            height="24"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            class="lucide lucide-plus-icon lucide-plus"
-                                        >
-                                            <path d="M5 12h14"></path>
-                                            <path d="M12 5v14"></path>
-                                        </svg>
-                                    </button>
-                                </div>
-                            </li>
-                        }
-                    })
-                    .collect_view()
-                }}
+                <ProductRows
+                    products=products
+                    cart_items=cart_items
+                    action_message=action_message
+                    estimates=estimates
+                    add_icon_confirmations=add_icon_confirmations
+                />
             </ul>
         </section>
     }
