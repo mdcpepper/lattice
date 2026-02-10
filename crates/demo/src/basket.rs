@@ -19,7 +19,10 @@ use lattice::{
     receipt::Receipt,
 };
 
-use crate::promotions::{PromotionPill, bundle_pill_style};
+use crate::{
+    announce,
+    promotions::{PromotionPill, bundle_pill_style},
+};
 
 /// Solver inputs required to build basket/receipt view state.
 #[derive(Debug)]
@@ -229,9 +232,25 @@ fn BasketSummary(subtotal: String, savings: String, total: String) -> impl IntoV
 }
 
 #[component]
-fn BasketLine(line: BasketLineItem, cart_items: RwSignal<Vec<String>>) -> impl IntoView {
+fn BasketLine(
+    line: BasketLineItem,
+    cart_items: RwSignal<Vec<String>>,
+    action_message: RwSignal<Option<String>>,
+) -> impl IntoView {
     let basket_index = line.basket_index;
     let fixture_key = line.fixture_key.clone();
+    let item_name_for_add = line.name.clone();
+    let item_name_for_remove = line.name.clone();
+    let add_button_label = format!(
+        "Add another {} ({}) to basket",
+        item_name_for_add.clone(),
+        line.final_price
+    );
+    let remove_button_label = format!(
+        "Remove {} ({}) from basket",
+        item_name_for_remove.clone(),
+        line.final_price
+    );
     let has_discount = line.base_price != line.final_price;
     let promotion_pills = line.promotions;
 
@@ -282,14 +301,16 @@ fn BasketLine(line: BasketLineItem, cart_items: RwSignal<Vec<String>>) -> impl I
                 <div class="flex items-center gap-2">
                     <button
                         type="button"
-                        aria-label="Remove item from basket"
-                        class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        aria-label=remove_button_label
+                        class="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
                         on:click=move |_| {
                             cart_items.update(|items| {
                                 if basket_index < items.len() {
                                     items.remove(basket_index);
                                 }
                             });
+                            action_message
+                                .set(Some(format!("Removed {item_name_for_remove} from basket.")));
                         }
                     >
                         <svg
@@ -309,10 +330,12 @@ fn BasketLine(line: BasketLineItem, cart_items: RwSignal<Vec<String>>) -> impl I
                     </button>
                     <button
                         type="button"
-                        aria-label="Add another item to basket"
-                        class="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700"
+                        aria-label=add_button_label
+                        class="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
                         on:click=move |_| {
                             cart_items.update(|items| items.push(fixture_key.clone()));
+                            action_message
+                                .set(Some(format!("Added {item_name_for_add} to basket.")));
                         }
                     >
                         <svg
@@ -338,7 +361,11 @@ fn BasketLine(line: BasketLineItem, cart_items: RwSignal<Vec<String>>) -> impl I
 }
 
 #[component]
-fn BasketBody(basket: BasketViewModel, cart_items: RwSignal<Vec<String>>) -> impl IntoView {
+fn BasketBody(
+    basket: BasketViewModel,
+    cart_items: RwSignal<Vec<String>>,
+    action_message: RwSignal<Option<String>>,
+) -> impl IntoView {
     let summary = view! {
         <BasketSummary
             subtotal=basket.subtotal.clone()
@@ -362,7 +389,7 @@ fn BasketBody(basket: BasketViewModel, cart_items: RwSignal<Vec<String>>) -> imp
                     {basket
                         .lines
                         .into_iter()
-                        .map(|line| view! { <BasketLine line=line cart_items=cart_items/> })
+                        .map(|line| view! { <BasketLine line=line cart_items=cart_items action_message=action_message/> })
                         .collect_view()}
                 </ul>
                 {summary}
@@ -378,6 +405,8 @@ pub fn BasketPanel(
     solver_data: Arc<BasketSolverData>,
     cart_items: RwSignal<Vec<String>>,
     solve_time_text: RwSignal<String>,
+    live_message: RwSignal<(u64, String)>,
+    action_message: RwSignal<Option<String>>,
 ) -> impl IntoView {
     view! {
         <aside>
@@ -387,7 +416,13 @@ pub fn BasketPanel(
                     move || match solve_basket(&solver_data, &cart_items.get()) {
                     Ok(basket) => {
                         solve_time_text.set(basket.solve_duration.clone());
-                        view! { <BasketBody basket=basket cart_items=cart_items/> }.into_any()
+
+                        if let Some(action) = action_message.get_untracked() {
+                            announce(live_message, format!("{action}, total {}.", basket.total));
+                            action_message.set(None);
+                        }
+
+                        view! { <BasketBody basket=basket cart_items=cart_items action_message=action_message/> }.into_any()
                     }
                     Err(error_message) => view! {
                         {solve_time_text.set(String::new());}

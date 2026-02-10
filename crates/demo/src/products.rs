@@ -113,6 +113,7 @@ pub fn format_price(minor_units: i64, currency_code: &str) -> String {
 pub fn ProductsPanel(
     products: Arc<Vec<ProductListItem>>,
     cart_items: RwSignal<Vec<String>>,
+    action_message: RwSignal<Option<String>>,
 ) -> impl IntoView {
     let products = Arc::unwrap_or_clone(products);
 
@@ -123,8 +124,11 @@ pub fn ProductsPanel(
                 {products
                     .iter()
                     .map(|product| {
-                        let product_name = product.name.clone();
+                        let item_name = product.name.clone();
+                        let product_name = item_name.clone();
+                        let announce_name = item_name.clone();
                         let price = product.price.clone();
+                        let add_button_label = format!("Add {item_name} ({price}) to basket");
                         let fixture_key = product.fixture_key.clone();
 
                         view! {
@@ -135,10 +139,12 @@ pub fn ProductsPanel(
                                 </div>
                                 <button
                                     type="button"
-                                    aria-label="Add product to basket"
-                                    class="shrink-0 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-slate-700"
+                                    aria-label=add_button_label
+                                    class="shrink-0 rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
                                     on:click=move |_| {
                                         cart_items.update(|items| items.push(fixture_key.clone()));
+                                        action_message
+                                            .set(Some(format!("Added {announce_name} to basket.")));
                                     }
                                 >
                                     <svg

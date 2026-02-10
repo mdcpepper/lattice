@@ -47,9 +47,14 @@ fn App() -> impl IntoView {
             let app_data = Arc::new(app_data);
             let cart_items = RwSignal::new(Vec::<String>::new());
             let solve_time_text = RwSignal::new(String::new());
+            let live_message = RwSignal::new((0_u64, String::new()));
+            let action_message = RwSignal::new(None::<String>);
 
             view! {
                 <main class="min-h-screen bg-slate-50 px-4 py-6 text-slate-900">
+                    <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+                        {move || live_message.get().1}
+                    </p>
                     <div class="mx-auto mb-6 max-w-5xl">
                         <h1 class="text-2xl font-semibold tracking-tight">"Lattice Demo"</h1>
                     </div>
@@ -57,11 +62,14 @@ fn App() -> impl IntoView {
                         <products::ProductsPanel
                             products=Arc::clone(&app_data.products)
                             cart_items=cart_items
+                            action_message=action_message
                         />
                         <basket::BasketPanel
                             solver_data=Arc::clone(&app_data.basket_solver_data)
                             cart_items=cart_items
                             solve_time_text=solve_time_text
+                            live_message=live_message
+                            action_message=action_message
                         />
                     </div>
                 </main>
@@ -87,4 +95,11 @@ fn main() {
     console_error_panic_hook::set_once();
 
     leptos::mount::mount_to_body(App);
+}
+
+fn announce(live_message: RwSignal<(u64, String)>, message: String) {
+    live_message.update(|(id, text)| {
+        *id = id.saturating_add(1);
+        *text = message;
+    });
 }
