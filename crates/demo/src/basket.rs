@@ -80,8 +80,21 @@ struct BasketViewModel {
     /// Savings from receipt.
     savings: String,
 
+    /// Savings grouped by promotion.
+    savings_breakdown: Vec<PromotionSavings>,
+
     /// Time taken by graph solver.
     solve_duration: String,
+}
+
+/// Render model for savings contribution by promotion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PromotionSavings {
+    /// Promotion display name.
+    name: String,
+
+    /// Savings amount for this promotion.
+    savings: String,
 }
 
 fn build_basket(
@@ -125,6 +138,7 @@ pub fn solve_total_minor(
 ) -> Result<i64, String> {
     let basket = build_basket(solver_data, cart_fixture_keys)?;
     let item_group = ItemGroup::from(&basket);
+
     let solved = solver_data
         .graph
         .evaluate(&item_group)
@@ -209,13 +223,61 @@ fn solve_basket(
         .savings()
         .map_err(|error| format!("Failed to compute receipt savings: {error}"))?;
 
+    let savings_breakdown = collect_promotion_savings(&receipt, solver_data)?;
+
     Ok(BasketViewModel {
         lines,
         subtotal: format_money(&receipt.subtotal()),
         total: format_money(&receipt.total()),
         savings: format!("-{}", format_money(&savings)),
+        savings_breakdown,
         solve_duration: format!("{}", solve_elapsed.human(Truncate::Nano)),
     })
+}
+
+fn collect_promotion_savings(
+    receipt: &Receipt<'_>,
+    solver_data: &BasketSolverData,
+) -> Result<Vec<PromotionSavings>, String> {
+    let mut savings_by_promotion: HashMap<String, i64> = HashMap::new();
+
+    for applications in receipt.promotion_applications().values() {
+        for app in applications {
+            let app_savings_minor = app
+                .savings()
+                .map_err(|error| format!("Failed to compute promotion savings: {error}"))?
+                .to_minor_units();
+
+            if app_savings_minor <= 0 {
+                continue;
+            }
+
+            let promotion_name = solver_data
+                .promotion_names
+                .get(app.promotion_key)
+                .cloned()
+                .unwrap_or_else(|| "Unknown promotion".to_string());
+
+            savings_by_promotion
+                .entry(promotion_name)
+                .and_modify(|total| *total += app_savings_minor)
+                .or_insert(app_savings_minor);
+        }
+    }
+
+    let mut grouped: Vec<(String, i64)> = savings_by_promotion.into_iter().collect();
+    grouped.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+
+    Ok(grouped
+        .into_iter()
+        .map(|(name, savings_minor)| PromotionSavings {
+            name,
+            savings: format!(
+                "-{}",
+                format_money(&Money::from_minor(savings_minor, solver_data.currency))
+            ),
+        })
+        .collect())
 }
 
 fn format_money(money: &Money<'_, Currency>) -> String {
@@ -239,18 +301,66 @@ fn elapsed_since(start_ms: f64) -> Duration {
 
 /// Basket panel component.
 #[component]
-fn BasketSummary(subtotal: String, savings: String, total: String) -> impl IntoView {
+fn BasketSummary(
+    subtotal: String,
+    savings: String,
+    savings_breakdown: Vec<PromotionSavings>,
+    total: String,
+) -> impl IntoView {
     view! {
-        <div class="mt-4 space-y-1 border-t border-slate-200 pt-3 text-sm">
-            <p class="flex items-center justify-between">
+        <div class="mt-4 border-t border-slate-200 pt-3">
+            <p class="flex items-center justify-between text-sm">
                 <span class="text-slate-600">"Subtotal"</span>
                 <span>{subtotal}</span>
             </p>
-            <p class="flex items-center justify-between">
-                <span class="text-slate-600">"Savings"</span>
-                <span>{savings}</span>
-            </p>
-            <p class="flex items-center justify-between font-semibold">
+            <details class="group mt-1 text-sm text-slate-600">
+                <summary class="flex list-none cursor-pointer items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white [&::marker]:hidden [&::-webkit-details-marker]:hidden">
+                    <span class="inline-flex items-center gap-1.5">
+                    <span>"Savings"</span>
+                    <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="24"
+                            height="24"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            class="h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform duration-150 group-open:rotate-90"
+                            aria-hidden="true"
+                        >
+                            <path d="m9 18 6-6-6-6"></path>
+                        </svg>
+                    </span>
+                    <span>{savings}</span>
+                </summary>
+
+                <div class="mt-2 mb-2 space-y-1 text-xs text-slate-700">
+                    {if savings_breakdown.is_empty() {
+                        view! { <p>"No promotion savings applied."</p> }.into_any()
+                    } else {
+                        view! {
+                            <ul class="space-y-1">
+                                {savings_breakdown
+                                    .into_iter()
+                                    .map(|entry| {
+                                        view! {
+                                            <li class="flex items-center pb-1 ml-2 justify-between gap-3 border-b border-b-1 border-dashed border-slate-300">
+                                                <span>{entry.name}</span>
+                                                <span>{entry.savings}</span>
+                                            </li>
+                                        }
+                                    })
+                                    .collect_view()}
+                            </ul>
+                        }
+                            .into_any()
+                    }}
+                </div>
+            </details>
+
+            <p class="mt-1 flex items-center justify-between text-sm font-semibold">
                 <span>"Total"</span>
                 <span>{total}</span>
             </p>
@@ -268,16 +378,19 @@ fn BasketLine(
     let fixture_key = line.fixture_key.clone();
     let item_name_for_add = line.name.clone();
     let item_name_for_remove = line.name.clone();
+
     let add_button_label = format!(
         "Add another {} ({}) to basket",
         item_name_for_add.clone(),
         line.final_price
     );
+
     let remove_button_label = format!(
         "Remove {} ({}) from basket",
         item_name_for_remove.clone(),
         line.final_price
     );
+
     let has_discount = line.base_price != line.final_price;
     let promotion_pills = line.promotions;
 
@@ -336,6 +449,7 @@ fn BasketLine(
                                     items.remove(basket_index);
                                 }
                             });
+
                             action_message
                                 .set(Some(format!("Removed {item_name_for_remove} from basket.")));
                         }
@@ -397,6 +511,7 @@ fn BasketBody(
         <BasketSummary
             subtotal=basket.subtotal.clone()
             savings=basket.savings.clone()
+            savings_breakdown=basket.savings_breakdown.clone()
             total=basket.total.clone()
         />
     };
@@ -437,34 +552,56 @@ pub fn BasketPanel(
 ) -> impl IntoView {
     view! {
         <aside>
-            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <h2 class="mb-4 text-lg font-semibold">{move || format!("Basket ({})", cart_items.get().len())}</h2>
-                {let solver_data = solver_data;
-                    move || match solve_basket(&solver_data, &cart_items.get()) {
-                    Ok(basket) => {
-                        solve_time_text.set(basket.solve_duration.clone());
+            {let solver_data = solver_data;
+                move || {
+                    let cart_snapshot = cart_items.get();
+                    let item_count = cart_snapshot.len();
 
-                        if let Some(action) = action_message.get_untracked() {
-                            announce(live_message, format!("{action}, total {}.", basket.total));
-                            action_message.set(None);
+                    match solve_basket(&solver_data, &cart_snapshot) {
+                        Ok(basket) => {
+                            solve_time_text.set(basket.solve_duration.clone());
+
+                            if let Some(action) = action_message.get_untracked() {
+                                announce(live_message, format!("{action}, total {}.", basket.total));
+                                action_message.set(None);
+                            }
+
+                            let basket_total = basket.total.clone();
+
+                            view! {
+                                <h2 class="mb-4 text-lg font-semibold">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <span class="pl-4">{format!("Basket ({item_count})")}</span>
+                                        <span class="pr-4 text-right">{basket_total}</span>
+                                    </div>
+                                </h2>
+                                <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                                    <BasketBody basket=basket cart_items=cart_items action_message=action_message/>
+                                </div>
+                            }
+                                .into_any()
                         }
-
-                        view! { <BasketBody basket=basket cart_items=cart_items action_message=action_message/> }.into_any()
+                        Err(error_message) => view! {
+                            {solve_time_text.set(String::new());}
+                            <h2 class="mb-4 text-lg font-semibold">
+                                <div class="flex items-center justify-between gap-3">
+                                    <span>{format!("Basket ({item_count})")}</span>
+                                </div>
+                            </h2>
+                            <div class="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                                <p class="text-sm text-red-700">{error_message}</p>
+                            </div>
+                        }
+                            .into_any(),
                     }
-                    Err(error_message) => view! {
-                        {solve_time_text.set(String::new());}
-                        <p class="text-sm text-red-700">{error_message}</p>
-                    }
-                        .into_any(),
                 }}
-            </div>
             {move || {
                 let value = solve_time_text.get();
                 if value.is_empty() {
                     ().into_any()
                 } else {
                     view! {
-                        <p class="mr-2 mt-1 text-right text-xs text-slate-400">{value}</p>
+                        <p class="mt-1 w-full pr-2 text-right text-xs text-slate-400">{value}</p>
                     }
                         .into_any()
                 }

@@ -34,6 +34,21 @@ products:
     tags: [main]
     price: 1.50 GBP
 
+  multivitamins:
+    name: Multivitamins 30 gummies
+    tags: [vitamins, staff-discount-exempt]
+    price: 4.50 GBP
+
+  vitamin-c:
+    name: Vitamin C 1000mg 20 Tablets
+    tags: [vitamins, staff-discount-exempt]
+    price: 1.99 GBP
+
+  magnesium:
+     name: Magnesium 180 Tablets
+     tags: [vitamins, staff-discount-exempt]
+     price: 12.85 GBP
+
   newspaper:
     name: Newspaper
     tags: [newspaper, staff-discount-exempt]
