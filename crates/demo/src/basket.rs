@@ -570,7 +570,30 @@ pub fn BasketPanel(
                             view! {
                                 <h2 class="panel-title panel-title-spaced">
                                     <div class="panel-title-row">
-                                        <span class="panel-title-leading">{format!("Basket ({item_count})")}</span>
+                                        <span class="panel-title-leading basket-title-label">
+                                            <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                width="24"
+                                                height="24"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                                stroke-linecap="round"
+                                                stroke-linejoin="round"
+                                                class="basket-title-icon lucide lucide-shopping-basket-icon lucide-shopping-basket"
+                                                aria-hidden="true"
+                                            >
+                                                <path d="m15 11-1 9"></path>
+                                                <path d="m19 11-4-7"></path>
+                                                <path d="M2 11h20"></path>
+                                                <path d="m3.5 11 1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4"></path>
+                                                <path d="M4.5 15.5h15"></path>
+                                                <path d="m5 11 4-7"></path>
+                                                <path d="m9 11 1 9"></path>
+                                            </svg>
+                                            <span>{format!("Basket ({item_count})")}</span>
+                                        </span>
                                         <span class="panel-title-trailing">{basket_total}</span>
                                     </div>
                                 </h2>
@@ -584,7 +607,30 @@ pub fn BasketPanel(
                             {solve_time_text.set(String::new());}
                             <h2 class="panel-title panel-title-spaced">
                                 <div class="panel-title-row">
-                                    <span>{format!("Basket ({item_count})")}</span>
+                                    <span class="basket-title-label">
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            width="24"
+                                            height="24"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                            class="basket-title-icon lucide lucide-shopping-basket-icon lucide-shopping-basket"
+                                            aria-hidden="true"
+                                        >
+                                            <path d="m15 11-1 9"></path>
+                                            <path d="m19 11-4-7"></path>
+                                            <path d="M2 11h20"></path>
+                                            <path d="m3.5 11 1.6 7.4a2 2 0 0 0 2 1.6h9.8a2 2 0 0 0 2-1.6l1.7-7.4"></path>
+                                            <path d="M4.5 15.5h15"></path>
+                                            <path d="m5 11 4-7"></path>
+                                            <path d="m9 11 1 9"></path>
+                                        </svg>
+                                        <span>{format!("Basket ({item_count})")}</span>
+                                    </span>
                                 </div>
                             </h2>
                             <div class="panel-card">
