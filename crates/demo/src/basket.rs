@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeSet, HashMap},
     sync::Arc,
 };
 
@@ -31,19 +31,19 @@ use crate::{
     promotions::{PromotionPill, bundle_pill_style},
 };
 
-fn start_icon_confirmation(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) {
+fn start_icon_confirmation(confirmed_icons: RwSignal<BTreeSet<String>>, icon_key: &str) {
     confirmed_icons.update(|states| {
         states.insert(icon_key.to_string());
     });
 }
 
-fn clear_icon_confirmation(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) {
+fn clear_icon_confirmation(confirmed_icons: RwSignal<BTreeSet<String>>, icon_key: &str) {
     confirmed_icons.update(|states| {
         states.remove(icon_key);
     });
 }
 
-fn is_icon_confirmed(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) -> bool {
+fn is_icon_confirmed(confirmed_icons: RwSignal<BTreeSet<String>>, icon_key: &str) -> bool {
     confirmed_icons.with(|states| states.contains(icon_key))
 }
 
@@ -495,7 +495,7 @@ fn BasketLine(
     line: BasketLineItem,
     cart_items: RwSignal<Vec<String>>,
     action_message: RwSignal<Option<String>>,
-    add_icon_confirmations: RwSignal<HashSet<String>>,
+    add_icon_confirmations: RwSignal<BTreeSet<String>>,
 ) -> impl IntoView {
     let basket_index = line.basket_index;
 
@@ -674,7 +674,7 @@ fn BasketBody(
     basket: BasketViewModel,
     cart_items: RwSignal<Vec<String>>,
     action_message: RwSignal<Option<String>>,
-    add_icon_confirmations: RwSignal<HashSet<String>>,
+    add_icon_confirmations: RwSignal<BTreeSet<String>>,
 ) -> impl IntoView {
     let summary = view! {
         <BasketSummary
@@ -847,7 +847,7 @@ fn render_basket_panel_content(
     solve_time_text: RwSignal<String>,
     live_message: RwSignal<(u64, String)>,
     action_message: RwSignal<Option<String>>,
-    add_icon_confirmations: RwSignal<HashSet<String>>,
+    add_icon_confirmations: RwSignal<BTreeSet<String>>,
 ) -> AnyView {
     let cart_snapshot = cart_items.get();
     let item_count = cart_snapshot.len();
@@ -903,7 +903,7 @@ pub fn BasketPanel(
     /// Ephemeral action message shown to the user.
     action_message: RwSignal<Option<String>>,
 ) -> impl IntoView {
-    let add_icon_confirmations = RwSignal::new(HashSet::<String>::new());
+    let add_icon_confirmations = RwSignal::new(BTreeSet::<String>::new());
     let panel_solver_data = solver_data;
     let meta_solver_data = Arc::clone(&panel_solver_data);
 
@@ -931,7 +931,7 @@ pub fn BasketPanel(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
     use leptos::prelude::*;
     use rusty_money::{Money, iso};
@@ -941,13 +941,14 @@ mod tests {
         basket::Basket, graph::PromotionGraph, items::groups::ItemGroup, products::Product,
         receipt::Receipt, tags::string::StringTagCollection,
     };
+    use testresult::TestResult;
 
     use super::*;
 
     // Test helper functions that manipulate icon confirmation state
     #[test]
     fn test_start_icon_confirmation_adds_key() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         start_icon_confirmation(confirmed_icons, "test-key");
 
@@ -958,7 +959,7 @@ mod tests {
 
     #[test]
     fn test_start_icon_confirmation_multiple_keys() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         start_icon_confirmation(confirmed_icons, "key1");
         start_icon_confirmation(confirmed_icons, "key2");
@@ -972,7 +973,7 @@ mod tests {
 
     #[test]
     fn test_clear_icon_confirmation_removes_key() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         start_icon_confirmation(confirmed_icons, "test-key");
 
@@ -985,7 +986,7 @@ mod tests {
 
     #[test]
     fn test_clear_icon_confirmation_nonexistent_key() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         clear_icon_confirmation(confirmed_icons, "nonexistent");
 
@@ -996,7 +997,7 @@ mod tests {
 
     #[test]
     fn test_is_icon_confirmed_returns_true_when_present() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         start_icon_confirmation(confirmed_icons, "test-key");
 
@@ -1005,7 +1006,7 @@ mod tests {
 
     #[test]
     fn test_is_icon_confirmed_returns_false_when_absent() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         assert!(!is_icon_confirmed(confirmed_icons, "test-key"));
     }
@@ -1094,7 +1095,7 @@ mod tests {
 
     #[test]
     fn test_format_money_large_amount() {
-        let money = Money::from_minor(123456, iso::EUR);
+        let money = Money::from_minor(123_456, iso::EUR);
 
         let result = format_money(&money);
 
@@ -1104,51 +1105,53 @@ mod tests {
 
     // Test build_basket function
     #[test]
-    fn test_build_basket_empty_cart() {
-        let solver_data = create_minimal_solver_data();
+    fn test_build_basket_empty_cart() -> TestResult {
+        let solver_data = create_minimal_solver_data()?;
         let cart_fixture_keys: Vec<String> = vec![];
 
         let result = build_basket(&solver_data, &cart_fixture_keys);
 
         assert!(result.is_ok());
 
-        let basket = result.ok().unwrap();
+        let basket = result?;
 
         assert_eq!(basket.len(), 0);
+
+        Ok(())
     }
 
     #[test]
-    fn test_build_basket_unknown_fixture_key() {
-        let solver_data = create_minimal_solver_data();
+    fn test_build_basket_unknown_fixture_key() -> TestResult {
+        let solver_data = create_minimal_solver_data()?;
         let cart_fixture_keys = vec!["unknown-key".to_string()];
 
         let result = build_basket(&solver_data, &cart_fixture_keys);
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Product key not found in fixture")
-        );
+        assert!(result.is_err_and(|error| error.contains("Product key not found in fixture")));
+
+        Ok(())
     }
 
     #[test]
-    fn test_build_basket_with_valid_products() {
-        let solver_data = create_test_solver_data();
+    fn test_build_basket_with_valid_products() -> TestResult {
+        let solver_data = create_test_solver_data()?;
         let cart_fixture_keys = vec!["product1".to_string()];
 
         let result = build_basket(&solver_data, &cart_fixture_keys);
 
         assert!(result.is_ok());
 
-        let basket = result.ok().unwrap();
+        let basket = result?;
 
         assert_eq!(basket.len(), 1);
+
+        Ok(())
     }
 
     #[test]
-    fn test_build_basket_multiple_items() {
-        let solver_data = create_test_solver_data();
+    fn test_build_basket_multiple_items() -> TestResult {
+        let solver_data = create_test_solver_data()?;
         let cart_fixture_keys = vec![
             "product1".to_string(),
             "product1".to_string(),
@@ -1159,91 +1162,100 @@ mod tests {
 
         assert!(result.is_ok());
 
-        let basket = result.ok().unwrap();
+        let basket = result?;
 
         assert_eq!(basket.len(), 3);
+
+        Ok(())
     }
 
     // Test solve_basket function
     #[test]
-    fn test_solve_basket_empty() {
-        let solver_data = create_test_solver_data();
+    fn test_solve_basket_empty() -> TestResult {
+        let solver_data = create_test_solver_data()?;
         let cart_fixture_keys: Vec<String> = vec![];
 
         let result = solve_basket(&solver_data, &cart_fixture_keys);
 
         assert!(result.is_ok());
-
-        let view_model = result.ok().unwrap();
+        let view_model = result?;
 
         assert_eq!(view_model.lines.len(), 0);
         assert!(!view_model.solve_duration.is_empty());
+
+        Ok(())
     }
 
     #[test]
-    fn test_solve_basket_single_item() {
-        let solver_data = create_test_solver_data();
+    fn test_solve_basket_single_item() -> TestResult {
+        let solver_data = create_test_solver_data()?;
         let cart_fixture_keys = vec!["product1".to_string()];
 
         let result = solve_basket(&solver_data, &cart_fixture_keys);
 
         assert!(result.is_ok());
 
-        let view_model = result.ok().unwrap();
+        let view_model = result?;
 
         assert_eq!(view_model.lines.len(), 1);
         assert_eq!(view_model.lines[0].name, "Test Product 1");
+
+        Ok(())
     }
 
     #[test]
-    fn test_solve_basket_unknown_product() {
-        let solver_data = create_test_solver_data();
+    fn test_solve_basket_unknown_product() -> TestResult {
+        let solver_data = create_test_solver_data()?;
         let cart_fixture_keys = vec!["nonexistent".to_string()];
 
         let result = solve_basket(&solver_data, &cart_fixture_keys);
 
         assert!(result.is_err());
+
+        Ok(())
     }
 
     // Test collect_promotion_savings
     #[test]
-    fn test_collect_promotion_savings_empty_receipt() {
-        let solver_data = create_test_solver_data();
+    fn test_collect_promotion_savings_empty_receipt() -> TestResult {
+        let solver_data = create_test_solver_data()?;
         let basket = Basket::new(iso::GBP);
         let items = ItemGroup::from(&basket);
 
-        let solved = solver_data.graph.evaluate(&items).ok().unwrap();
-        let receipt = Receipt::from_layered_result(&basket, solved).ok().unwrap();
+        let solved = solver_data.graph.evaluate(&items)?;
+        let receipt = Receipt::from_layered_result(&basket, solved)?;
 
         let result = collect_promotion_savings(&receipt, &solver_data);
 
         assert!(result.is_ok());
 
-        let savings = result.ok().unwrap();
+        let savings = result?;
 
         assert_eq!(savings.len(), 0);
+
+        Ok(())
     }
 
     // Helper functions for creating test data
-    fn create_minimal_solver_data() -> BasketSolverData {
+    fn create_minimal_solver_data() -> TestResult<BasketSolverData> {
         let product_meta_map = SlotMap::with_key();
         let product_key_by_fixture_key = HashMap::new();
         let promotion_names = SecondaryMap::new();
         let promotion_meta_map = SlotMap::with_key();
 
-        let graph = PromotionGraph::single_layer(Vec::new()).ok().unwrap();
+        let graph = PromotionGraph::single_layer(Vec::new())?;
 
-        BasketSolverData {
+        Ok(BasketSolverData {
             product_meta_map,
             product_key_by_fixture_key,
             graph,
             promotion_names,
             promotion_meta_map,
             currency: iso::GBP,
-        }
+        })
     }
 
-    fn create_test_solver_data() -> BasketSolverData {
+    fn create_test_solver_data() -> TestResult<BasketSolverData> {
         let mut product_meta_map = SlotMap::with_key();
         let mut product_key_by_fixture_key = HashMap::new();
 
@@ -1269,15 +1281,15 @@ mod tests {
         product_key_by_fixture_key.insert("product1".to_string(), key1);
         product_key_by_fixture_key.insert("product2".to_string(), key2);
 
-        let graph = PromotionGraph::single_layer(Vec::new()).ok().unwrap();
+        let graph = PromotionGraph::single_layer(Vec::new())?;
 
-        BasketSolverData {
+        Ok(BasketSolverData {
             product_meta_map,
             product_key_by_fixture_key,
             graph,
             promotion_names,
             promotion_meta_map,
             currency: iso::GBP,
-        }
+        })
     }
 }

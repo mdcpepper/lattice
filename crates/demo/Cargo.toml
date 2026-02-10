@@ -3,6 +3,9 @@ name = "lattice-demo"
 version = "0.1.0"
 edition = "2024"
 
+[dev-dependencies]
+testresult.workspace = true
+
 [dependencies]
 console_error_panic_hook = "0.1.7"
 humanize-duration = "0.0.7"

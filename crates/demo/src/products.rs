@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
 };
 
@@ -12,13 +12,13 @@ use lattice::{
     products::{Product, ProductKey},
 };
 
-fn start_icon_confirmation(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) {
+fn start_icon_confirmation(confirmed_icons: RwSignal<BTreeSet<String>>, icon_key: &str) {
     confirmed_icons.update(|states| {
         states.insert(icon_key.to_string());
     });
 }
 
-fn clear_icon_confirmation(confirmed_icons: RwSignal<HashSet<String>>, icon_key: &str) {
+fn clear_icon_confirmation(confirmed_icons: RwSignal<BTreeSet<String>>, icon_key: &str) {
     confirmed_icons.update(|states| {
         states.remove(icon_key);
     });
@@ -70,6 +70,11 @@ pub struct LoadedProducts {
 }
 
 /// Load products fixture content into UI and solver-ready structures.
+///
+/// # Errors
+///
+/// Returns an error when fixture parsing fails, prices are invalid, currencies
+/// are inconsistent across products, or no products are present.
 pub fn load_products(yaml: &str) -> Result<LoadedProducts, String> {
     let products_fixture: ProductsFixture = serde_norway::from_str(yaml)
         .map_err(|error| format!("Failed to parse products fixture: {error}"))?;
@@ -219,7 +224,7 @@ fn ProductRow(
     estimate: Option<ProductEstimate>,
     cart_items: RwSignal<Vec<String>>,
     action_message: RwSignal<Option<String>>,
-    add_icon_confirmations: RwSignal<HashSet<String>>,
+    add_icon_confirmations: RwSignal<BTreeSet<String>>,
 ) -> impl IntoView {
     let item_name = product.name.clone();
     let product_name = item_name.clone();
@@ -336,8 +341,8 @@ fn ProductRows(
     products: Vec<ProductListItem>,
     cart_items: RwSignal<Vec<String>>,
     action_message: RwSignal<Option<String>>,
-    estimates: RwSignal<HashMap<String, ProductEstimate>>,
-    add_icon_confirmations: RwSignal<HashSet<String>>,
+    estimates: RwSignal<BTreeMap<String, ProductEstimate>>,
+    add_icon_confirmations: RwSignal<BTreeSet<String>>,
 ) -> impl IntoView {
     view! {
         {move || {
@@ -371,12 +376,12 @@ pub fn ProductsPanel(
     /// Ephemeral action message shown to the user.
     action_message: RwSignal<Option<String>>,
     /// Latest per-product basket-impact estimates.
-    estimates: RwSignal<HashMap<String, ProductEstimate>>,
+    estimates: RwSignal<BTreeMap<String, ProductEstimate>>,
     /// Whether estimate recalculation is currently in progress.
     show_spinner: RwSignal<bool>,
 ) -> impl IntoView {
     let products = Arc::unwrap_or_clone(products);
-    let add_icon_confirmations = RwSignal::new(HashSet::<String>::new());
+    let add_icon_confirmations = RwSignal::new(BTreeSet::<String>::new());
 
     view! {
         <section class="products-panel">
@@ -396,16 +401,15 @@ pub fn ProductsPanel(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use leptos::prelude::*;
+    use testresult::TestResult;
 
     use super::*;
 
     // Test icon confirmation helper functions
     #[test]
     fn test_start_icon_confirmation_adds_key() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         start_icon_confirmation(confirmed_icons, "test-key");
 
@@ -416,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_start_icon_confirmation_multiple_keys() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         start_icon_confirmation(confirmed_icons, "key1");
         start_icon_confirmation(confirmed_icons, "key2");
@@ -430,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_clear_icon_confirmation_removes_key() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         start_icon_confirmation(confirmed_icons, "test-key");
 
@@ -443,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_clear_icon_confirmation_nonexistent_key() {
-        let confirmed_icons = RwSignal::new(HashSet::<String>::new());
+        let confirmed_icons = RwSignal::new(BTreeSet::<String>::new());
 
         clear_icon_confirmation(confirmed_icons, "nonexistent");
 
@@ -518,7 +522,7 @@ mod tests {
 
     #[test]
     fn test_format_price_large_amount() {
-        let result = format_price(123456, "GBP");
+        let result = format_price(123_456, "GBP");
 
         assert_eq!(result, "£1234.56");
     }
@@ -582,7 +586,7 @@ products: {}
         let result = load_products(yaml);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("No products found in fixture"));
+        assert!(result.is_err_and(|error| error.contains("No products found in fixture")));
     }
 
     #[test]
@@ -595,7 +599,7 @@ products: {}
     }
 
     #[test]
-    fn test_load_products_single_product() {
+    fn test_load_products_single_product() -> TestResult {
         let yaml = r#"
 products:
   product1:
@@ -608,15 +612,17 @@ products:
 
         assert!(result.is_ok());
 
-        let loaded = result.ok().unwrap();
+        let loaded = result?;
 
         assert_eq!(loaded.products.len(), 1);
         assert_eq!(loaded.products[0].name, "Test Product");
         assert_eq!(loaded.products[0].price_minor, 1000);
+
+        Ok(())
     }
 
     #[test]
-    fn test_load_products_multiple_products_sorted() {
+    fn test_load_products_multiple_products_sorted() -> TestResult {
         let yaml = r#"
 products:
   product1:
@@ -637,7 +643,7 @@ products:
 
         assert!(result.is_ok());
 
-        let loaded = result.ok().unwrap();
+        let loaded = result?;
 
         assert_eq!(loaded.products.len(), 3);
 
@@ -645,6 +651,8 @@ products:
         assert_eq!(loaded.products[0].name, "Apple");
         assert_eq!(loaded.products[1].name, "Mango");
         assert_eq!(loaded.products[2].name, "Zebra");
+
+        Ok(())
     }
 
     #[test]
@@ -664,7 +672,7 @@ products:
         let result = load_products(yaml);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Currency mismatch"));
+        assert!(result.is_err_and(|error| error.contains("Currency mismatch")));
     }
 
     #[test]
@@ -680,11 +688,11 @@ products:
         let result = load_products(yaml);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid price"));
+        assert!(result.is_err_and(|error| error.contains("Invalid price")));
     }
 
     #[test]
-    fn test_load_products_with_tags() {
+    fn test_load_products_with_tags() -> TestResult {
         let yaml = r#"
 products:
   product1:
@@ -697,13 +705,15 @@ products:
 
         assert!(result.is_ok());
 
-        let loaded = result.ok().unwrap();
+        let loaded = result?;
 
         assert_eq!(loaded.products.len(), 1);
+
+        Ok(())
     }
 
     #[test]
-    fn test_load_products_fixture_key_mapping() {
+    fn test_load_products_fixture_key_mapping() -> TestResult {
         let yaml = r#"
 products:
   my-product-key:
@@ -716,7 +726,7 @@ products:
 
         assert!(result.is_ok());
 
-        let loaded = result.ok().unwrap();
+        let loaded = result?;
 
         assert!(
             loaded
@@ -724,10 +734,12 @@ products:
                 .contains_key("my-product-key")
         );
         assert_eq!(loaded.products[0].fixture_key, "my-product-key");
+
+        Ok(())
     }
 
     #[test]
-    fn test_load_products_currency_extraction() {
+    fn test_load_products_currency_extraction() -> TestResult {
         let yaml = r#"
 products:
   product1:
@@ -740,8 +752,10 @@ products:
 
         assert!(result.is_ok());
 
-        let loaded = result.ok().unwrap();
+        let loaded = result?;
 
         assert_eq!(loaded.currency.iso_alpha_code, "EUR");
+
+        Ok(())
     }
 }

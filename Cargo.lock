@@ -1579,6 +1579,7 @@ dependencies = [
  "rusty-money",
  "serde_norway",
  "slotmap",
+ "testresult",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

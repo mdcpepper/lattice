@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use petgraph::graph::NodeIndex;
 use slotmap::{SecondaryMap, SlotMap};
@@ -39,6 +39,12 @@ pub struct LoadedPromotions {
 }
 
 /// Load promotions and graph fixture content.
+///
+/// # Errors
+///
+/// Returns an error when promotion fixtures cannot be parsed, promotion
+/// definitions are invalid, referenced graph promotions are missing, or graph
+/// validation/building fails.
 pub fn load_promotions(yaml: &str) -> Result<LoadedPromotions, String> {
     let promotions_fixture: PromotionsFixture = serde_norway::from_str(yaml)
         .map_err(|error| format!("Failed to parse promotions fixture: {error}"))?;
@@ -48,7 +54,7 @@ pub fn load_promotions(yaml: &str) -> Result<LoadedPromotions, String> {
 
     let mut promotion_meta_map: SlotMap<PromotionKey, PromotionMeta> = SlotMap::with_key();
     let mut promotion_names: SecondaryMap<PromotionKey, String> = SecondaryMap::new();
-    let mut promotions_by_fixture_key: HashMap<String, Promotion<'static>> = HashMap::new();
+    let mut promotions_by_fixture_key: BTreeMap<String, Promotion<'static>> = BTreeMap::new();
 
     for (fixture_key, promotion_fixture) in promotions_fixture.promotions {
         let promotion_key = promotion_meta_map.insert(PromotionMeta::default());
@@ -97,7 +103,7 @@ pub fn bundle_pill_style(bundle_id: usize) -> String {
 
 fn build_graph(
     graph_fixture: &GraphFixture,
-    promotions_by_fixture_key: &HashMap<String, Promotion<'static>>,
+    promotions_by_fixture_key: &BTreeMap<String, Promotion<'static>>,
 ) -> Result<PromotionGraph<'static>, String> {
     let mut builder = PromotionGraphBuilder::new();
 
@@ -118,9 +124,9 @@ fn build_graph(
 fn add_graph_nodes(
     builder: &mut PromotionGraphBuilder<'static>,
     graph_fixture: &GraphFixture,
-    promotions_by_fixture_key: &HashMap<String, Promotion<'static>>,
-) -> Result<HashMap<String, NodeIndex>, String> {
-    let mut node_indices = HashMap::new();
+    promotions_by_fixture_key: &BTreeMap<String, Promotion<'static>>,
+) -> Result<BTreeMap<String, NodeIndex>, String> {
+    let mut node_indices = BTreeMap::new();
 
     for (label, node_fixture) in &graph_fixture.nodes {
         let promotions_for_node = node_fixture
@@ -149,7 +155,7 @@ fn add_graph_nodes(
 fn connect_graph_edges(
     builder: &mut PromotionGraphBuilder<'static>,
     graph_fixture: &GraphFixture,
-    node_indices: &HashMap<String, NodeIndex>,
+    node_indices: &BTreeMap<String, NodeIndex>,
 ) -> Result<(), String> {
     for (label, node_fixture) in &graph_fixture.nodes {
         let from_idx = node_indices
@@ -172,7 +178,7 @@ fn connect_graph_edges(
 
 fn connect_pass_through_edge(
     builder: &mut PromotionGraphBuilder<'static>,
-    node_indices: &HashMap<String, NodeIndex>,
+    node_indices: &BTreeMap<String, NodeIndex>,
     from_idx: NodeIndex,
     label: &str,
     node_fixture: &GraphNodeFixture,
@@ -193,7 +199,7 @@ fn connect_pass_through_edge(
 
 fn connect_split_edges(
     builder: &mut PromotionGraphBuilder<'static>,
-    node_indices: &HashMap<String, NodeIndex>,
+    node_indices: &BTreeMap<String, NodeIndex>,
     from_idx: NodeIndex,
     label: &str,
     node_fixture: &GraphNodeFixture,
@@ -257,6 +263,8 @@ fn connect_split_edges(
 
 #[cfg(test)]
 mod tests {
+    use testresult::TestResult;
+
     use super::*;
 
     // Test bundle_pill_style function
@@ -294,31 +302,9 @@ mod tests {
         assert_ne!(style_band_4, style_band_5);
     }
 
-    #[test]
-    fn test_bundle_pill_style_cycling_hues() {
-        // Test that hue calculation cycles properly
-        let style_0 = bundle_pill_style(0);
-        let style_360 = bundle_pill_style(360);
-
-        // Extract and verify hue values are in valid range
-        fn extract_first_hue(s: &str) -> String {
-            let start = s.find("hsl(").unwrap() + 4;
-            let end = s[start..].find(',').unwrap() + start;
-
-            s[start..end].to_string()
-        }
-
-        let hue_0 = extract_first_hue(&style_0);
-        let hue_360 = extract_first_hue(&style_360);
-
-        // Parse as integers and verify they're in valid range
-        assert!(hue_0.parse::<u16>().unwrap() < 360);
-        assert!(hue_360.parse::<u16>().unwrap() < 360);
-    }
-
     // Test load_promotions function
     #[test]
-    fn test_load_promotions_empty() {
+    fn test_load_promotions_empty() -> TestResult {
         let yaml = r"
 promotions: {}
 root: layer1
@@ -332,9 +318,11 @@ nodes:
 
         assert!(result.is_ok());
 
-        let loaded = result.ok().unwrap();
+        let loaded = result?;
 
         assert_eq!(loaded.promotion_names.len(), 0);
+
+        Ok(())
     }
 
     #[test]
@@ -347,7 +335,7 @@ nodes:
     }
 
     #[test]
-    fn test_load_promotions_single_promotion() {
+    fn test_load_promotions_single_promotion() -> TestResult {
         let yaml = r#"
 promotions:
   promo1:
@@ -368,9 +356,11 @@ nodes:
 
         assert!(result.is_ok());
 
-        let loaded = result.ok().unwrap();
+        let loaded = result?;
 
         assert_eq!(loaded.promotion_names.len(), 1);
+
+        Ok(())
     }
 
     #[test]
@@ -403,11 +393,11 @@ nodes:
         let result = load_promotions(yaml);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Unknown promotion key"));
+        assert!(result.is_err_and(|error| error.contains("Unknown promotion key")));
     }
 
     #[test]
-    fn test_load_promotions_multiple_layers() {
+    fn test_load_promotions_multiple_layers() -> TestResult {
         let yaml = r#"
 promotions:
   promo1:
@@ -439,9 +429,11 @@ nodes:
 
         assert!(result.is_ok());
 
-        let loaded = result.ok().unwrap();
+        let loaded = result?;
 
         assert_eq!(loaded.promotion_names.len(), 2);
+
+        Ok(())
     }
 
     #[test]

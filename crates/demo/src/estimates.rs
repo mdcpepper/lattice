@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[cfg(target_arch = "wasm32")]
 use std::sync::OnceLock;
@@ -19,7 +19,7 @@ const PRODUCTS_FIXTURE_YAML: &str = include_str!("../../../fixtures/products/dem
 #[cfg(target_arch = "wasm32")]
 const PROMOTIONS_FIXTURE_YAML: &str = include_str!("../../../fixtures/promotions/demo.yml");
 
-const ESTIMATE_DEBOUNCE_MS: i32 = 220;
+const ESTIMATE_DEBOUNCE_MS: i32 = 50;
 
 #[cfg(target_arch = "wasm32")]
 const SPINNER_DELAY_MS: i32 = 100;
@@ -31,7 +31,7 @@ const WORKER_ERROR_PREFIX: &str = "ERR:\t";
 #[derive(Debug, Clone, Copy)]
 pub struct EstimateUiSignals {
     /// Map of product fixture key to current estimate.
-    pub estimates: RwSignal<HashMap<String, ProductEstimate>>,
+    pub estimates: RwSignal<BTreeMap<String, ProductEstimate>>,
 
     /// Whether the product panel should show its estimating spinner.
     pub show_spinner: RwSignal<bool>,
@@ -39,7 +39,7 @@ pub struct EstimateUiSignals {
 
 #[derive(Debug, Clone, Copy)]
 struct EstimateSignals {
-    estimates: RwSignal<HashMap<String, ProductEstimate>>,
+    estimates: RwSignal<BTreeMap<String, ProductEstimate>>,
     estimating: RwSignal<bool>,
     show_spinner: RwSignal<bool>,
     generation: RwSignal<u64>,
@@ -65,7 +65,7 @@ static WORKER_DATA: OnceLock<Result<WorkerData, String>> = OnceLock::new();
 /// Install estimation effects tied to cart changes and return UI-facing signals.
 pub fn install(cart_items: RwSignal<Vec<String>>) -> EstimateUiSignals {
     let signals = EstimateSignals {
-        estimates: RwSignal::new(HashMap::new()),
+        estimates: RwSignal::new(BTreeMap::new()),
         estimating: RwSignal::new(false),
         show_spinner: RwSignal::new(false),
         generation: RwSignal::new(0_u64),
@@ -143,8 +143,8 @@ fn finish_estimation(signals: EstimateSignals) {
     signals.show_spinner.set(false);
 }
 
-fn parse_worker_result(result_text: &str) -> HashMap<String, ProductEstimate> {
-    let mut map = HashMap::<String, ProductEstimate>::new();
+fn parse_worker_result(result_text: &str) -> BTreeMap<String, ProductEstimate> {
+    let mut map = BTreeMap::<String, ProductEstimate>::new();
 
     for line in result_text.lines() {
         let mut parts = line.splitn(3, '\t');
@@ -311,8 +311,6 @@ async fn wait_for_timeout(_delay_ms: i32) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use leptos::prelude::*;
 
     use super::*;
@@ -331,9 +329,13 @@ mod tests {
         let result = parse_worker_result(input);
 
         assert_eq!(result.len(), 1);
-        let estimate = result.get("product1").unwrap();
-        assert_eq!(estimate.marginal_minor, 100);
-        assert_eq!(estimate.savings_minor, 50);
+        assert_eq!(
+            result.get("product1").copied(),
+            Some(ProductEstimate {
+                marginal_minor: 100,
+                savings_minor: 50
+            })
+        );
     }
 
     #[test]
@@ -344,17 +346,27 @@ mod tests {
 
         assert_eq!(result.len(), 3);
 
-        let estimate1 = result.get("product1").unwrap();
-        assert_eq!(estimate1.marginal_minor, 100);
-        assert_eq!(estimate1.savings_minor, 50);
-
-        let estimate2 = result.get("product2").unwrap();
-        assert_eq!(estimate2.marginal_minor, 200);
-        assert_eq!(estimate2.savings_minor, 75);
-
-        let estimate3 = result.get("product3").unwrap();
-        assert_eq!(estimate3.marginal_minor, 150);
-        assert_eq!(estimate3.savings_minor, 25);
+        assert_eq!(
+            result.get("product1").copied(),
+            Some(ProductEstimate {
+                marginal_minor: 100,
+                savings_minor: 50
+            })
+        );
+        assert_eq!(
+            result.get("product2").copied(),
+            Some(ProductEstimate {
+                marginal_minor: 200,
+                savings_minor: 75
+            })
+        );
+        assert_eq!(
+            result.get("product3").copied(),
+            Some(ProductEstimate {
+                marginal_minor: 150,
+                savings_minor: 25
+            })
+        );
     }
 
     #[test]
@@ -364,9 +376,13 @@ mod tests {
         let result = parse_worker_result(input);
 
         assert_eq!(result.len(), 1);
-        let estimate = result.get("product1").unwrap();
-        assert_eq!(estimate.marginal_minor, -50);
-        assert_eq!(estimate.savings_minor, 150);
+        assert_eq!(
+            result.get("product1").copied(),
+            Some(ProductEstimate {
+                marginal_minor: -50,
+                savings_minor: 150
+            })
+        );
     }
 
     #[test]
@@ -376,9 +392,13 @@ mod tests {
         let result = parse_worker_result(input);
 
         assert_eq!(result.len(), 1);
-        let estimate = result.get("product1").unwrap();
-        assert_eq!(estimate.marginal_minor, 0);
-        assert_eq!(estimate.savings_minor, 0);
+        assert_eq!(
+            result.get("product1").copied(),
+            Some(ProductEstimate {
+                marginal_minor: 0,
+                savings_minor: 0
+            })
+        );
     }
 
     #[test]
@@ -447,10 +467,13 @@ mod tests {
 
         assert_eq!(result.len(), 1);
 
-        let estimate = result.get("product1").unwrap();
-
-        assert_eq!(estimate.marginal_minor, 999_999_999);
-        assert_eq!(estimate.savings_minor, 888_888_888);
+        assert_eq!(
+            result.get("product1").copied(),
+            Some(ProductEstimate {
+                marginal_minor: 999_999_999,
+                savings_minor: 888_888_888
+            })
+        );
     }
 
     #[test]
@@ -499,7 +522,7 @@ mod tests {
     #[test]
     fn test_is_current_returns_true_for_matching_id() {
         let signals = EstimateSignals {
-            estimates: RwSignal::new(HashMap::new()),
+            estimates: RwSignal::new(BTreeMap::new()),
             estimating: RwSignal::new(false),
             show_spinner: RwSignal::new(false),
             generation: RwSignal::new(42),
@@ -511,7 +534,7 @@ mod tests {
     #[test]
     fn test_is_current_returns_false_for_different_id() {
         let signals = EstimateSignals {
-            estimates: RwSignal::new(HashMap::new()),
+            estimates: RwSignal::new(BTreeMap::new()),
             estimating: RwSignal::new(false),
             show_spinner: RwSignal::new(false),
             generation: RwSignal::new(42),
@@ -523,7 +546,7 @@ mod tests {
     #[test]
     fn test_begin_estimation_sets_estimating() {
         let signals = EstimateSignals {
-            estimates: RwSignal::new(HashMap::new()),
+            estimates: RwSignal::new(BTreeMap::new()),
             estimating: RwSignal::new(false),
             show_spinner: RwSignal::new(false),
             generation: RwSignal::new(1),
@@ -537,7 +560,7 @@ mod tests {
     #[test]
     fn test_finish_estimation_clears_state() {
         let signals = EstimateSignals {
-            estimates: RwSignal::new(HashMap::new()),
+            estimates: RwSignal::new(BTreeMap::new()),
             estimating: RwSignal::new(true),
             show_spinner: RwSignal::new(true),
             generation: RwSignal::new(1),
