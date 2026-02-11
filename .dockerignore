@@ -1,0 +1,8 @@
+.git
+.claude
+.DS_Store
+target
+**/target
+mutants.out
+mutants.out.old
+tarpaulin-report.html
