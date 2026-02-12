@@ -2572,6 +2572,7 @@ dependencies = [
 name = "lattice-php-ext"
 version = "0.1.0"
 dependencies = [
+ "decimal-percentage",
  "ext-php-rs",
  "lattice",
  "rusty-money",

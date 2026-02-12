@@ -139,6 +139,7 @@ mod tests {
     #[test]
     fn money_from_money_failure() -> TestResult {
         let input = Money::__construct(123, "XXX".to_string());
+
         assert!(input.is_err());
 
         Ok(())

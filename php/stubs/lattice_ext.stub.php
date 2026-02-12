@@ -18,7 +18,7 @@ if (!class_exists(Product::class)) {
     {
         public mixed $reference;
         public string $name;
-        public int $price;
+        public \FeedCode\Lattice\Money $price;
 
         /** @var string[] */
         public array $tags;
@@ -29,7 +29,7 @@ if (!class_exists(Product::class)) {
         public function __construct(
             mixed $reference,
             string $name,
-            int $price,
+            \FeedCode\Lattice\Money $price,
             ?array $tags = [],
         ) {}
     }
@@ -40,7 +40,7 @@ if (!class_exists(Item::class)) {
     {
         public mixed $id;
         public string $name;
-        public int $price;
+        public \FeedCode\Lattice\Money $price;
         public Product $product;
 
         /** @var string[] */
@@ -52,7 +52,7 @@ if (!class_exists(Item::class)) {
         public function __construct(
             mixed $id,
             string $name,
-            int $price,
+            \FeedCode\Lattice\Money $price,
             Product $product,
             ?array $tags = [],
         ) {}
@@ -147,5 +147,60 @@ if (!class_exists(Rule::class)) {
          * @param string[]|null $item_tags
          */
         public function matches(?array $item_tags = []): bool {}
+    }
+}
+
+namespace FeedCode\Lattice\Discount;
+
+if (!class_exists(InvalidPercentageException::class)) {
+    class InvalidPercentageException extends \Exception {}
+}
+
+if (!class_exists(PercentageOutOfRangeException::class)) {
+    class PercentageOutOfRangeException extends \Exception {}
+}
+
+if (!class_exists(InvalidDiscountException::class)) {
+    class InvalidDiscountException extends \Exception {}
+}
+
+if (!class_exists(Percentage::class)) {
+    class Percentage
+    {
+        public readonly float $value;
+
+        public function __construct(string $value) {}
+
+        public static function fromDecimal(float $value): self {}
+
+        public function value(): float {}
+    }
+}
+
+if (!enum_exists(DiscountKind::class)) {
+    enum DiscountKind: string
+    {
+        case PercentageOff = "percentage_off";
+        case AmountOverride = "amount_override";
+        case AmountOff = "amount_off";
+    }
+}
+
+if (!class_exists(SimpleDiscount::class)) {
+    class SimpleDiscount
+    {
+        public DiscountKind $kind;
+        public ?Percentage $percentage;
+        public ?\FeedCode\Lattice\Money $amount;
+
+        public static function percentageOff(Percentage $percentage): self {}
+
+        public static function amountOverride(
+            \FeedCode\Lattice\Money $amount,
+        ): self {}
+
+        public static function amountOff(
+            \FeedCode\Lattice\Money $amount,
+        ): self {}
     }
 }

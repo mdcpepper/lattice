@@ -14,6 +14,7 @@ it(
         $product = new Product(1, "Test Product", new Money(123, "GBP"), [
             "test-tag",
         ]);
+
         $item = new Item(2, "Test Item", new Money(123, "GBP"), $product);
 
         expect($item)->toBeInstanceOf(Item::class);
@@ -53,6 +54,7 @@ it("removes duplicate item tags", function (): void {
     assertLatticeExtensionLoaded();
 
     $product = new Product(1, "Test Product", new Money(123, "GBP"));
+
     $item = new Item(1, "Test Item", new Money(123, "GBP"), $product, [
         "test-tag",
         "test-tag",

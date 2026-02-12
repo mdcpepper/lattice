@@ -21,7 +21,7 @@ testresult.workspace = true
 
 [dependencies]
 clap = { version = "4.5.57", features = ["derive"] }
-decimal-percentage = "0.1.4"
+decimal-percentage.workspace = true
 good_lp = { version = "1.14.2", default-features = false }
 humanize-duration = "0.0.7"
 num-traits = "0.2.19"

@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 testresult.workspace = true
 
 [dependencies]
+decimal-percentage.workspace = true
 ext-php-rs = "*"
 lattice = { path = "../core" }
 rusty-money.workspace = true
@@ -19,3 +20,6 @@ thiserror.workspace = true
 
 [profile.release]
 strip = "debuginfo"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(php82)"] }
