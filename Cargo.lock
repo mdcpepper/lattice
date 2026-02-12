@@ -2575,6 +2575,7 @@ dependencies = [
  "ext-php-rs",
  "lattice",
  "rusty-money",
+ "smallvec",
  "testresult",
  "thiserror 2.0.18",
 ]

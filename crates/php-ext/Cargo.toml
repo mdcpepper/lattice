@@ -13,6 +13,7 @@ testresult.workspace = true
 ext-php-rs = "*"
 lattice = { path = "../core" }
 rusty-money.workspace = true
+smallvec.workspace = true
 testresult.workspace = true
 thiserror.workspace = true
 

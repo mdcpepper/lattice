@@ -17,7 +17,7 @@ it(
         $item = new Item(2, "Test Item", new Money(123, "GBP"), $product);
 
         expect($item)->toBeInstanceOf(Item::class);
-        expect($item->id)->toBe(2);
+        expect($item->key)->toBe(2);
         expect($item->name)->toBe("Test Item");
         expect($item->price)->toEqual(new Money(123, "GBP"));
         expect($item->tags)->toBe([]); // doesn't inherit tags automatically
@@ -39,14 +39,14 @@ it("builds an item from product", function (): void {
         ["test-tag"],
     );
 
-    $item = Item::from_product($itemReference, $product);
+    $item = Item::fromProduct($itemReference, $product);
 
-    expect($item->id)->toBe($itemReference);
+    expect($item->key)->toBe($itemReference);
     expect($item->name)->toBe("Test Product");
     expect($item->price)->toEqual(new Money(123, "GBP"));
     expect($item->tags)->toBe(["test-tag"]);
     expect($item->product)->toBeInstanceOf(Product::class);
-    expect($item->product->reference)->toBe($productReference);
+    expect($item->product->key)->toBe($productReference);
 });
 
 it("removes duplicate item tags", function (): void {

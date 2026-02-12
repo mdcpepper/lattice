@@ -10,17 +10,14 @@ use ext_php_rs::{
     types::Zval,
 };
 
-use crate::{
-    money::{Money, MoneyRef},
-    reference_value::ReferenceValue,
-};
+use crate::{money::MoneyRef, reference_value::ReferenceValue};
 
 #[derive(Debug, Clone)]
 #[php_class]
 #[php(name = "FeedCode\\Lattice\\Product")]
 pub struct Product {
     #[php(prop)]
-    reference: ReferenceValue,
+    key: ReferenceValue,
 
     #[php(prop)]
     name: String,
@@ -35,13 +32,13 @@ pub struct Product {
 #[php_impl]
 impl Product {
     pub fn __construct(
-        reference: ReferenceValue,
+        key: ReferenceValue,
         name: String,
         price: MoneyRef,
         tags: Option<HashSet<String>>,
     ) -> Self {
         Self {
-            reference,
+            key,
             name,
             price,
             tags: tags.unwrap_or_default(),
@@ -74,11 +71,7 @@ impl ProductRef {
         self.0
             .object()
             .and_then(|obj| obj.get_property::<MoneyRef>("price").ok())
-            .unwrap_or_else(|| {
-                let fallback = Money::__construct(0, "GBP".to_string())
-                    .expect("fallback currency should always be valid");
-                MoneyRef::from_money(fallback)
-            })
+            .expect("product object is missing valid Money price property")
     }
 
     pub fn tags(&self) -> HashSet<String> {
