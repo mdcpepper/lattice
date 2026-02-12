@@ -3,6 +3,16 @@ declare(strict_types=1);
 
 namespace FeedCode\Lattice;
 
+if (!class_exists(Money::class)) {
+    class Money
+    {
+        public int $amount;
+        public string $currency;
+
+        public function __construct(int $amount, string $currency) {}
+    }
+}
+
 if (!class_exists(Product::class)) {
     class Product
     {

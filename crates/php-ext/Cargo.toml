@@ -6,8 +6,15 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib"]
 
+[dev-dependencies]
+testresult.workspace = true
+
 [dependencies]
 ext-php-rs = "*"
+lattice = { path = "../core" }
+rusty-money.workspace = true
+testresult.workspace = true
+thiserror.workspace = true
 
 [profile.release]
 strip = "debuginfo"

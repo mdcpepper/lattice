@@ -10,7 +10,10 @@ use ext_php_rs::{
     types::Zval,
 };
 
-use crate::reference_value::ReferenceValue;
+use crate::{
+    money::{Money, MoneyRef},
+    reference_value::ReferenceValue,
+};
 
 #[derive(Debug, Clone)]
 #[php_class]
@@ -23,7 +26,7 @@ pub struct Product {
     name: String,
 
     #[php(prop)]
-    price: i64,
+    price: MoneyRef,
 
     #[php(prop)]
     tags: HashSet<String>,
@@ -34,7 +37,7 @@ impl Product {
     pub fn __construct(
         reference: ReferenceValue,
         name: String,
-        price: i64,
+        price: MoneyRef,
         tags: Option<HashSet<String>>,
     ) -> Self {
         Self {
@@ -67,11 +70,15 @@ impl ProductRef {
             .unwrap_or_default()
     }
 
-    pub fn price(&self) -> i64 {
+    pub fn price(&self) -> MoneyRef {
         self.0
             .object()
-            .and_then(|obj| obj.get_property::<i64>("price").ok())
-            .unwrap_or_default()
+            .and_then(|obj| obj.get_property::<MoneyRef>("price").ok())
+            .unwrap_or_else(|| {
+                let fallback = Money::__construct(0, "GBP".to_string())
+                    .expect("fallback currency should always be valid");
+                MoneyRef::from_money(fallback)
+            })
     }
 
     pub fn tags(&self) -> HashSet<String> {

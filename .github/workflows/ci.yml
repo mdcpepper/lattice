@@ -57,7 +57,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run tests
-        run: cargo test --all-features --workspace
+        run: cargo test --all-features --workspace --exclude lattice-php-ext
 
   php_extension:
     runs-on: ubuntu-latest
@@ -78,7 +78,7 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Install PHP demo dependencies
+      - name: Install PHP test dependencies
         working-directory: php
         run: composer install --no-interaction --prefer-dist
 
@@ -121,7 +121,7 @@ jobs:
       - name: Run tests with coverage
         run: |
           # Run tarpaulin and capture output for coverage parsing
-          cargo tarpaulin --engine llvm --verbose --all-features --workspace --timeout 600 --out Lcov | tee coverage_output.txt
+          cargo tarpaulin --engine llvm --verbose --all-features --workspace --exclude lattice-php-ext --timeout 600 --out Lcov | tee coverage_output.txt
 
       - name: Check coverage threshold
         run: |

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use ext_php_rs::prelude::*;
 
-use crate::{products::ProductRef, reference_value::ReferenceValue};
+use crate::{money::MoneyRef, products::ProductRef, reference_value::ReferenceValue};
 
 #[derive(Debug)]
 #[php_class]
@@ -17,7 +17,7 @@ pub struct Item {
     name: String,
 
     #[php(prop)]
-    price: i64,
+    price: MoneyRef,
 
     #[php(prop)]
     product: ProductRef,
@@ -31,7 +31,7 @@ impl Item {
     pub fn __construct(
         id: ReferenceValue,
         name: String,
-        price: i64,
+        price: MoneyRef,
         product: ProductRef,
         tags: Option<HashSet<String>>,
     ) -> Self {

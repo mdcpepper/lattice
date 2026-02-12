@@ -2573,6 +2573,10 @@ name = "lattice-php-ext"
 version = "0.1.0"
 dependencies = [
  "ext-php-rs",
+ "lattice",
+ "rusty-money",
+ "testresult",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
