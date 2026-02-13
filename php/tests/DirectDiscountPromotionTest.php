@@ -10,8 +10,6 @@ use Lattice\Promotions\Promotion;
 use Lattice\Qualification;
 
 it("implements Promotion interface", function () {
-    assertLatticeExtensionLoaded();
-
     $promotion = new DirectDiscount(
         reference: 123,
         qualification: Qualification::matchAll(),
@@ -23,8 +21,6 @@ it("implements Promotion interface", function () {
 });
 
 it("can be instantiated", function () {
-    assertLatticeExtensionLoaded();
-
     $promotion = new DirectDiscount(
         reference: 123,
         qualification: Qualification::matchAll(),

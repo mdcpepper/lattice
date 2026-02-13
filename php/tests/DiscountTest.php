@@ -10,16 +10,12 @@ use Lattice\Discount\SimpleDiscount;
 use Lattice\Money;
 
 it("can create percentage from decimal value", function (): void {
-    assertLatticeExtensionLoaded();
-
     $percentage = Percentage::fromDecimal(0.25);
 
     expect($percentage->value)->toBe(0.25);
 });
 
 it("can create percentage from string representation", function (): void {
-    assertLatticeExtensionLoaded();
-
     $percentage = new Percentage("0.25");
 
     expect($percentage->value)->toBe(0.25);
@@ -28,8 +24,6 @@ it("can create percentage from string representation", function (): void {
 it(
     "can create percentage from percentage string with % symbol",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         $percentage = new Percentage("25%");
 
         expect($percentage->value)->toBe(0.25);
@@ -39,8 +33,6 @@ it(
 it(
     "throws InvalidPercentageException for invalid percentage string",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         new Percentage("invalid");
     },
 )->throws(
@@ -51,8 +43,6 @@ it(
 it(
     "throws InvalidPercentageException for non-finite percentage decimal",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         Percentage::fromDecimal(INF);
     },
 )->throws(InvalidPercentageException::class, "Percentage value must be finite");
@@ -60,8 +50,6 @@ it(
 it(
     "throws PercentageOutOfRangeException for negative percentage from string",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         new Percentage("-10%");
     },
 )->throws(
@@ -72,8 +60,6 @@ it(
 it(
     "throws PercentageOutOfRangeException for negative percentage from decimal",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         Percentage::fromDecimal(-0.1);
     },
 )->throws(
@@ -84,8 +70,6 @@ it(
 it(
     "throws PercentageOutOfRangeException for percentage over 100% from string",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         new Percentage("150%");
     },
 )->throws(
@@ -96,8 +80,6 @@ it(
 it(
     "throws PercentageOutOfRangeException for whole number without percent symbol",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         new Percentage("25");
     },
 )->throws(
@@ -108,8 +90,6 @@ it(
 it(
     "throws PercentageOutOfRangeException for percentage over 100% from decimal",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         Percentage::fromDecimal(1.5);
     },
 )->throws(
@@ -118,24 +98,18 @@ it(
 );
 
 it("accepts 0% discount", function (): void {
-    assertLatticeExtensionLoaded();
-
     $percentage = new Percentage("0%");
 
     expect($percentage->value)->toBe(0.0);
 });
 
 it("accepts 100% discount", function (): void {
-    assertLatticeExtensionLoaded();
-
     $percentage = new Percentage("100%");
 
     expect($percentage->value)->toBe(1.0);
 });
 
 it("can create percentage off discount", function (): void {
-    assertLatticeExtensionLoaded();
-
     $percentage = new Percentage("0.25");
     $discount = SimpleDiscount::percentageOff($percentage);
 
@@ -145,8 +119,6 @@ it("can create percentage off discount", function (): void {
 });
 
 it("can create amount override discount", function (): void {
-    assertLatticeExtensionLoaded();
-
     $amount = new Money(500, "GBP");
     $discount = SimpleDiscount::amountOverride($amount);
 
@@ -156,8 +128,6 @@ it("can create amount override discount", function (): void {
 });
 
 it("can create amount off discount", function (): void {
-    assertLatticeExtensionLoaded();
-
     $amount = new Money(200, "GBP");
     $discount = SimpleDiscount::amountOff($amount);
 
@@ -167,8 +137,6 @@ it("can create amount off discount", function (): void {
 });
 
 it("percentage off discount uses correct discount kind", function (): void {
-    assertLatticeExtensionLoaded();
-
     $percentage = Percentage::fromDecimal(0.5);
     $discount = SimpleDiscount::percentageOff($percentage);
 
@@ -176,8 +144,6 @@ it("percentage off discount uses correct discount kind", function (): void {
 });
 
 it("amount override discount uses correct discount kind", function (): void {
-    assertLatticeExtensionLoaded();
-
     $amount = new Money(1000, "USD");
     $discount = SimpleDiscount::amountOverride($amount);
 
@@ -185,8 +151,6 @@ it("amount override discount uses correct discount kind", function (): void {
 });
 
 it("amount off discount uses correct discount kind", function (): void {
-    assertLatticeExtensionLoaded();
-
     $amount = new Money(300, "EUR");
     $discount = SimpleDiscount::amountOff($amount);
 

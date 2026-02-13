@@ -19,8 +19,6 @@ use Lattice\StackBuilder;
 use Lattice\Stack\InvalidStackException;
 
 it("validates a linear stack as a promotion graph", function (): void {
-    assertLatticeExtensionLoaded();
-
     $promotion = new DirectDiscount(
         reference: "promo-1",
         qualification: Qualification::matchAny(["food"]),
@@ -40,8 +38,6 @@ it("validates a linear stack as a promotion graph", function (): void {
 });
 
 it("throws when validating an empty stack", function (): void {
-    assertLatticeExtensionLoaded();
-
     $stack = new Stack();
 
     $thrown = null;
@@ -59,8 +55,6 @@ it("throws when validating an empty stack", function (): void {
 it(
     "throws when a layer uses split output in linear stack mode",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         $stack = new Stack([
             new Layer(
                 reference: "split-layer",
@@ -83,8 +77,6 @@ it(
 );
 
 it("builds and processes a single-layer stack", function (): void {
-    assertLatticeExtensionLoaded();
-
     $item = Item::fromProduct(
         reference: "item",
         product: new Product(
@@ -124,8 +116,6 @@ it("builds and processes a single-layer stack", function (): void {
 it(
     "builds and processes a two-layer stack and applies only the best layer-two discount",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         $sandwich = new Product(
             reference: "p-main",
             name: "Sandwich",
@@ -212,15 +202,15 @@ it(
         expect($firstApplication->promotion)->toBe($elevenOff);
         expect($firstApplication->item)->toBe($sandwichItem);
         expect($firstApplication->originalPrice)->toEqual(
-            new Money(10000, "GBP"),
+            new Money(100_00, "GBP"),
         );
-        expect($firstApplication->finalPrice)->toEqual(new Money(8900, "GBP"));
+        expect($firstApplication->finalPrice)->toEqual(new Money(89_00, "GBP"));
 
         expect($secondApplication)->toBeInstanceOf(PromotionApplication::class);
         expect($secondApplication->promotion)->toBe($seventeenOff);
         expect($secondApplication->item)->toBe($sandwichItem);
         expect($secondApplication->originalPrice)->toEqual(
-            new Money(8900, "GBP"),
+            new Money(89_00, "GBP"),
         );
         expect($secondApplication->finalPrice)->toEqual(new Money(7387, "GBP"));
     },

@@ -7,16 +7,12 @@ use Lattice\Qualification\BoolOp;
 use Lattice\Qualification\Rule;
 
 it("empty qualification matches all", function (): void {
-    assertLatticeExtensionLoaded();
-
     $qualification = Qualification::matchAll();
 
     expect($qualification->matches(["peak", "snack"]))->toBeTrue();
 });
 
 it("matches hasAny tags", function (): void {
-    assertLatticeExtensionLoaded();
-
     $qualification = new Qualification(BoolOp::AndOp, [
         Rule::hasAny(["member", "staff"]),
     ]);
@@ -27,8 +23,6 @@ it("matches hasAny tags", function (): void {
 });
 
 it("matches hasAll tags", function (): void {
-    assertLatticeExtensionLoaded();
-
     $qualification = new Qualification(BoolOp::AndOp, [
         Rule::hasAll(["peak", "snack"]),
     ]);
@@ -39,8 +33,6 @@ it("matches hasAll tags", function (): void {
 });
 
 it("matches hasNone tags", function (): void {
-    assertLatticeExtensionLoaded();
-
     $qualification = new Qualification(BoolOp::AndOp, [
         Rule::hasNone(["excluded", "blocked"]),
     ]);
@@ -51,8 +43,6 @@ it("matches hasNone tags", function (): void {
 });
 
 it("supports nested boolean groups", function (): void {
-    assertLatticeExtensionLoaded();
-
     $qualification = new Qualification(BoolOp::AndOp, [
         Rule::hasAll(["peak", "snack"]),
         Rule::group(

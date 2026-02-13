@@ -9,8 +9,6 @@ use Lattice\Product;
 it(
     "creates an item that points to the same product instance",
     function (): void {
-        assertLatticeExtensionLoaded();
-
         $product = new Product(1, "Test Product", new Money(123, "GBP"), [
             "test-tag",
         ]);
@@ -28,8 +26,6 @@ it(
 );
 
 it("builds an item from product", function (): void {
-    assertLatticeExtensionLoaded();
-
     $productReference = (object) ["sku" => "ABC-123"];
     $itemReference = ["external_item_id" => 99];
 
@@ -51,8 +47,6 @@ it("builds an item from product", function (): void {
 });
 
 it("removes duplicate item tags", function (): void {
-    assertLatticeExtensionLoaded();
-
     $product = new Product(1, "Test Product", new Money(123, "GBP"));
 
     $item = new Item(1, "Test Item", new Money(123, "GBP"), $product, [

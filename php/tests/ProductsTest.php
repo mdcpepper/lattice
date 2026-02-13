@@ -6,8 +6,6 @@ use Lattice\Money;
 use Lattice\Product;
 
 it("creates a product with expected properties", function (): void {
-    assertLatticeExtensionLoaded();
-
     $product = new Product(1, "Test Product", new Money(123, "GBP"), [
         "test-tag",
     ]);
@@ -20,8 +18,6 @@ it("creates a product with expected properties", function (): void {
 });
 
 it("removes duplicate product tags", function (): void {
-    assertLatticeExtensionLoaded();
-
     $product = new Product(1, "Test Product", new Money(123, "GBP"), [
         "test-tag",
         "test-tag",

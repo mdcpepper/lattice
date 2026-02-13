@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+pest()->beforeEach(function () {
+    assertLatticeExtensionLoaded();
+});
+
 function assertLatticeExtensionLoaded(): void
 {
     if (extension_loaded("lattice-php-ext")) {

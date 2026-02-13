@@ -11,15 +11,11 @@ use Lattice\Promotions\DirectDiscount;
 use Lattice\Qualification;
 
 it("supports layer output enum values", function (): void {
-    assertLatticeExtensionLoaded();
-
     expect(LayerOutput::PassThrough->value)->toBe("pass_through");
     expect(LayerOutput::Split->value)->toBe("split");
 });
 
 it("can build a layer with direct discount promotions", function (): void {
-    assertLatticeExtensionLoaded();
-
     $promotion = new DirectDiscount(
         reference: "meal-deal",
         qualification: Qualification::matchAny(["meal-deal:main"]),
