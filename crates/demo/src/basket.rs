@@ -237,7 +237,7 @@ fn solve_basket(
                         .get(app.promotion_key)
                         .map(|label| PromotionPill {
                             label: label.clone(),
-                            bundle_id: app.bundle_id,
+                            bundle_id: app.bundle_id + 1,
                             style: bundle_pill_style(app.bundle_id),
                         })
                 })
@@ -552,7 +552,7 @@ fn BasketLine(
                                 {promotion_pills
                                     .into_iter()
                                     .map(|pill| {
-                                        let pill_text = pill.label.clone();
+                                        let pill_text = format!("{} (#{})", pill.label.clone(), pill.bundle_id.clone());
 
                                         view! {
                                             <span
@@ -847,13 +847,13 @@ fn BasketPanelMeta(
                     <dd>"Applies first and can stack with later basket promotions."</dd>
 
                     <dt>"£3.80 Meal Deal"</dt>
-                    <dd>"Applies to 1 main + 1 drink + 1 snack as a fixed bundle price."</dd>
+                    <dd>"Applies to 1 "<kbd>"main"</kbd>" + 1 "<kbd>"drink"</kbd>" + 1 "<kbd>"snack"</kbd>" as a fixed bundle price."</dd>
 
                     <dt>"Buy One Get One Free Drinks"</dt>
                     <dd>"Makes every second drink free."</dd>
 
                     <dt>"3-for-2 Vitamins"</dt>
-                    <dd>"Makes every third vitamin free (items tagged vitamins)."</dd>
+                    <dd>"Makes every third vitamin free (items tagged "<kbd>"vitamins"</kbd>")."</dd>
 
                     <dt>"5% Staff discount"</dt>
                     <dd>
