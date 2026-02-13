@@ -1,0 +1,17 @@
+{
+  "name": "lattice/php-demo",
+  "type": "project",
+  "require-dev": {
+    "pestphp/pest": "^4.3"
+  },
+  "config": {
+    "allow-plugins": {
+      "pestphp/pest-plugin": true
+    }
+  },
+  "autoload-dev": {
+    "files": [
+      "stubs/lattice_ext.stub.php"
+    ]
+  }
+}

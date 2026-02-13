@@ -42,9 +42,9 @@ impl<'a> PromotionBudget<'a> {
 
     /// Create a budget with both limits
     #[must_use]
-    pub const fn with_both_limits(instance: u32, monetary: Money<'a, Currency>) -> Self {
+    pub const fn with_both_limits(application: u32, monetary: Money<'a, Currency>) -> Self {
         Self {
-            application_limit: Some(instance),
+            application_limit: Some(application),
             monetary_limit: Some(monetary),
         }
     }

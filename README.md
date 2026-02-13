@@ -20,6 +20,7 @@ optimisation engine written in Rust.
 * [Global Optimisation](#global-optimisation)
 * [Stacking](#stacking)
 * [Export ILP Formulation](#export-ilp-formulation)
+* [PHP Extension](#php-extension)
 * [Demo](#demo)
 
 ## Promotion Types
@@ -887,6 +888,75 @@ typst compile target/ilp-formulations/layered.typ --open
 
 There is an ready-made example of of a stacked formulation in `assets/demo.typ` (and the rendered
 `assets/demo.pdf`).
+
+## PHP Extension
+
+The `crates/php-ext` crate provides a native PHP extension (`lattice-php-ext`)
+using `ext-php-rs`, and exposes a typed API under the `Lattice`
+namespace.
+
+Build and run the PHP extension tests using the justfile:
+
+```bash
+just build-extension
+cd php
+php -d extension=../target/debug/liblattice.so vendor/bin/pest --configuration=phpunit.xml
+```
+
+or:
+
+```bash
+just test-extension
+```
+
+Minimal usage:
+
+```php
+use Lattice\Discount\Percentage;
+use Lattice\Discount\SimpleDiscount;
+use Lattice\Item;
+use Lattice\Layer;
+use Lattice\LayerOutput;
+use Lattice\Money;
+use Lattice\Product;
+use Lattice\Promotions\Budget;
+use Lattice\Promotions\DirectDiscount;
+use Lattice\Qualification;
+use Lattice\StackBuilder;
+
+$item = Item::fromProduct(
+    reference: "item-1",
+    product: new Product("sku-1", "Sandwich", new Money(300, "GBP"), ["eligible"]),
+);
+
+$promotion = new DirectDiscount(
+    reference: "promo-1",
+    qualification: Qualification::matchAny(["eligible"]),
+    discount: SimpleDiscount::percentageOff(Percentage::fromDecimal(0.10)),
+    budget: Budget::unlimited(),
+);
+
+$builder = new StackBuilder();
+$layer = $builder->addLayer(new Layer("layer-1", LayerOutput::passThrough(), [$promotion]));
+$builder->setRoot($layer);
+
+$receipt = $builder->build()->process([$item]);
+```
+
+How it works:
+
+1. PHP config objects (`Money`, `Product`, `Item`, `Qualification`,
+   `SimpleDiscount`, `Budget`, `DirectDiscount`) are converted into core Rust
+   lattice types.
+2. `Stack` builds a promotion graph from PHP layers and evaluates it against the
+   provided items.
+3. The result is mapped back into a PHP `Receipt` with `subtotal`, `total`,
+   `fullPriceItems`, and `promotionApplications`.
+
+Current limitations:
+
+- Only linear stacks are supported (no split outputs).
+- Only `DirectDiscount` promotions are supported.
 
 ## Demo
 

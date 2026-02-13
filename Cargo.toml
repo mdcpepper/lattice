@@ -1,11 +1,19 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/json-api", "crates/demo", "crates/css-build"]
+members = [
+    "crates/core",
+    "crates/css-build",
+    "crates/demo",
+    "crates/json-api",
+    "crates/php-ext",
+]
 
 [workspace.dependencies]
+decimal-percentage = "0.1.4"
 petgraph = "0.8.3"
 rusty-money = "0.5.0"
 serde_norway = "0.9.42"
 slotmap = "1.1.1"
+smallvec = "1.15.1"
 testresult = "0.4.1"
 thiserror = "2.0.18"

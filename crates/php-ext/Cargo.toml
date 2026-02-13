@@ -1,0 +1,28 @@
+[package]
+name = "lattice-php-ext"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "lattice"
+crate-type = ["cdylib"]
+doc = false
+
+[dev-dependencies]
+testresult.workspace = true
+
+[dependencies]
+decimal-percentage.workspace = true
+ext-php-rs = "0.15.6"
+lattice = { path = "../core" }
+rusty-money.workspace = true
+smallvec.workspace = true
+slotmap.workspace = true
+testresult.workspace = true
+thiserror.workspace = true
+
+[profile.release]
+strip = "debuginfo"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(php82)"] }

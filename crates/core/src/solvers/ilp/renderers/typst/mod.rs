@@ -1290,7 +1290,10 @@ mod tests {
     use std::fs;
 
     use decimal_percentage::Percentage;
-    use good_lp::{Expression, ProblemVariables, SolverModel, variable};
+    use good_lp::{
+        Expression, ProblemVariables, SolverModel, solvers::microlp::microlp as default_solver,
+        variable,
+    };
     use rusty_money::{Money, iso::GBP};
     use slotmap::SlotMap;
     use smallvec::{SmallVec, smallvec};
@@ -1641,11 +1644,6 @@ mod tests {
 
     #[test]
     fn observer_captures_full_formulation_from_solve() -> TestResult {
-        #[cfg(feature = "solver-highs")]
-        use good_lp::solvers::highs::highs as default_solver;
-        #[cfg(all(not(feature = "solver-highs"), feature = "solver-microlp"))]
-        use good_lp::solvers::microlp::microlp as default_solver;
-
         // Create a simple basket with items
         let items: SmallVec<[Item<'_>; 10]> = smallvec![
             Item::with_tags(
