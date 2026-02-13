@@ -770,7 +770,7 @@ fn BasketPanelMeta(
     move || {
         let value = solve_time_text.get();
 
-        if value.is_empty() {
+        let solve_meta = if value.is_empty() {
             ().into_any()
         } else {
             #[cfg(target_arch = "wasm32")]
@@ -837,7 +837,33 @@ fn BasketPanelMeta(
                 </p>
             }
             .into_any()
+        };
+
+        view! {
+            <div class="panel-meta-block">
+                {solve_meta}
+                <dl class="panel-meta-notes">
+                    <dt>"Supplier: 10% Off Coke"</dt>
+                    <dd>"Applies first and can stack with later basket promotions."</dd>
+
+                    <dt>"£3.80 Meal Deal"</dt>
+                    <dd>"Applies to 1 main + 1 drink + 1 snack as a fixed bundle price."</dd>
+
+                    <dt>"Buy One Get One Free Drinks"</dt>
+                    <dd>"Makes every second drink free."</dd>
+
+                    <dt>"3-for-2 Vitamins"</dt>
+                    <dd>"Makes every third vitamin free (items tagged vitamins)."</dd>
+
+                    <dt>"5% Staff discount"</dt>
+                    <dd>
+                        "Applies only to items that are not part of any base promotions above, and does not apply to items tagged "
+                        <kbd>"staff-discount-exempt"</kbd>" (for example, Newspaper and vitamins)."
+                    </dd>
+                </dl>
+            </div>
         }
+        .into_any()
     }
 }
 

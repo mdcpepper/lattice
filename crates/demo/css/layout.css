@@ -114,6 +114,26 @@
     color: var(--color-slate-400);
 }
 
+.panel-meta-notes {
+    padding: 0 var(--space-layout-panel-pad);
+    margin: var(--space-layout-panel-gap) 0 0;
+    display: grid;
+    gap: var(--space-layout-subtle-gap);
+    font-size: var(--step--2);
+    line-height: 1rem;
+    color: var(--color-slate-500);
+}
+
+.panel-meta-notes dt {
+    margin: 0;
+    color: var(--color-slate-600);
+    font-weight: 600;
+}
+
+.panel-meta-notes dd {
+    margin: 0 0 var(--space-layout-subtle-gap);
+}
+
 .panel-meta-download {
     border: none;
     padding: 0;
