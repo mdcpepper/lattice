@@ -64,6 +64,34 @@ if (!class_exists(Item::class)) {
     }
 }
 
+if (!enum_exists(LayerOutput::class)) {
+    enum LayerOutput: string
+    {
+        case PassThrough = "pass_through";
+        case Split = "split";
+    }
+}
+
+if (!class_exists(Layer::class)) {
+    class Layer
+    {
+        public mixed $key;
+        public LayerOutput $output;
+
+        /** @var \FeedCode\Lattice\Promotions\Promotion[] */
+        public array $promotions;
+
+        /**
+         * @param \FeedCode\Lattice\Promotions\Promotion[]|null $promotions
+         */
+        public function __construct(
+            mixed $key,
+            LayerOutput $output,
+            ?array $promotions = [],
+        ) {}
+    }
+}
+
 if (!class_exists(Qualification::class)) {
     class Qualification
     {
@@ -231,8 +259,12 @@ if (!class_exists(Budget::class)) {
     }
 }
 
+if (!interface_exists(Promotion::class)) {
+    interface Promotion {}
+}
+
 if (!class_exists(DirectDiscount::class)) {
-    class DirectDiscount
+    class DirectDiscount implements Promotion
     {
         public mixed $key;
         public Qualification $qualification;

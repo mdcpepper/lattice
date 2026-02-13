@@ -1,19 +1,22 @@
 //! ILP Solver
 
-use good_lp::{Expression, ProblemVariables, Solution, SolverModel, Variable, variable};
+use good_lp::{
+    Expression, ProblemVariables, Solution, SolverModel, Variable,
+    solvers::microlp::microlp as default_solver, variable,
+};
 use rusty_money::{Money, iso::Currency};
 use smallvec::{SmallVec, smallvec};
 
-#[cfg(feature = "solver-highs")]
-use good_lp::solvers::highs::highs as default_solver;
-#[cfg(all(not(feature = "solver-highs"), feature = "solver-microlp"))]
-use good_lp::solvers::microlp::microlp as default_solver;
-
-use crate::solvers::ilp::state::{ConstraintRelation, ILPConstraint};
 use crate::{
     items::groups::ItemGroup,
     promotions::{Promotion, applications::PromotionApplication},
-    solvers::{Solver, SolverError, SolverResult, ilp::promotions::PromotionInstances},
+    solvers::{
+        Solver, SolverError, SolverResult,
+        ilp::{
+            promotions::PromotionInstances,
+            state::{ConstraintRelation, ILPConstraint},
+        },
+    },
 };
 
 pub mod observer;

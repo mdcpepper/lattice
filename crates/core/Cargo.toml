@@ -10,10 +10,6 @@ default = ["solver-microlp"]
 # Use microlp (bundled) as the MILP solver backend.
 solver-microlp = ["good_lp/microlp"]
 
-# Use HiGHS as the MILP solver backend (requires building the `highs` crate).
-# If you enable both, the code will prefer HiGHS.
-solver-highs = ["good_lp/highs"]
-
 [dev-dependencies]
 anyhow = "1.0.100"
 tempfile = "3"

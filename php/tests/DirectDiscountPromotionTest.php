@@ -6,6 +6,7 @@ use FeedCode\Lattice\Discount\SimpleDiscount;
 use FeedCode\Lattice\Money;
 use FeedCode\Lattice\Promotions\Budget;
 use FeedCode\Lattice\Promotions\DirectDiscount;
+use FeedCode\Lattice\Promotions\Promotion;
 use FeedCode\Lattice\Qualification;
 
 it("can be instantiated", function () {
@@ -22,4 +23,5 @@ it("can be instantiated", function () {
     expect($promotion->discount->amount)->toEqual(new Money(123, "GBP"));
     expect($promotion->budget->applicationLimit)->toBeNull();
     expect($promotion->budget->monetaryLimit)->toBeNull();
+    expect($promotion)->toBeInstanceOf(Promotion::class);
 });

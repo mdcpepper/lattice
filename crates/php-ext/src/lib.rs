@@ -10,8 +10,11 @@ use crate::{
     items::Item,
     money::Money,
     products::Product,
-    promotions::{budgets::Budget, direct_discount::DirectDiscountPromotion},
+    promotions::{
+        budgets::Budget, direct_discount::DirectDiscountPromotion, interface::PhpInterfacePromotion,
+    },
     qualification::{BoolOp, Qualification, Rule, RuleKind},
+    stack::layers::{Layer, LayerOutput},
 };
 
 pub mod discounts;
@@ -21,6 +24,7 @@ pub mod products;
 pub mod promotions;
 pub mod qualification;
 pub mod reference_value;
+pub mod stack;
 
 #[php_module]
 pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
@@ -39,5 +43,8 @@ pub fn get_module(module: ModuleBuilder) -> ModuleBuilder {
         .enumeration::<DiscountKind>()
         .class::<SimpleDiscount>()
         .class::<Budget>()
+        .interface::<PhpInterfacePromotion>()
         .class::<DirectDiscountPromotion>()
+        .enumeration::<LayerOutput>()
+        .class::<Layer>()
 }

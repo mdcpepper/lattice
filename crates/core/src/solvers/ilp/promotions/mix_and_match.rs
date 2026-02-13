@@ -1144,9 +1144,6 @@ mod tests {
     use smallvec::{SmallVec, smallvec};
     use testresult::TestResult;
 
-    #[cfg(feature = "solver-highs")]
-    use good_lp::solvers::highs::highs as test_solver;
-    #[cfg(all(not(feature = "solver-highs"), feature = "solver-microlp"))]
     use good_lp::solvers::microlp::microlp as test_solver;
 
     use crate::{

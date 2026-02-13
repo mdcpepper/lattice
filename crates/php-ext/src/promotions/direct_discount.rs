@@ -13,6 +13,7 @@ use lattice::{
     tags::string::StringTagCollection,
 };
 
+use crate::promotions::interface::PhpInterfacePromotion;
 use crate::{
     discounts::SimpleDiscountRef, promotions::budgets::BudgetRef, qualification::QualificationRef,
     reference_value::ReferenceValue,
@@ -21,6 +22,7 @@ use crate::{
 #[derive(Debug, Clone)]
 #[php_class]
 #[php(name = "FeedCode\\Lattice\\Promotions\\DirectDiscount")]
+#[php(implements(PhpInterfacePromotion))]
 pub struct DirectDiscountPromotion {
     #[php(prop)]
     key: ReferenceValue,

@@ -11,7 +11,7 @@ testresult.workspace = true
 
 [dependencies]
 decimal-percentage.workspace = true
-ext-php-rs = "*"
+ext-php-rs = "0.15.6"
 lattice = { path = "../core" }
 rusty-money.workspace = true
 smallvec.workspace = true
