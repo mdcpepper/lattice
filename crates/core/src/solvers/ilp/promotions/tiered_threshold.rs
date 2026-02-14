@@ -9,6 +9,7 @@ use smallvec::SmallVec;
 use crate::{
     discounts::percent_of_minor,
     items::groups::ItemGroup,
+    products::ProductKey,
     promotions::{
         PromotionKey,
         applications::PromotionApplication,
@@ -93,7 +94,7 @@ pub struct TieredThresholdPromotionVars {
     promotion_key: PromotionKey,
 
     /// Qualifying tiers with their solver variables.
-    qualifying_tiers: Vec<QualifyingTier>,
+    qualifying_tiers: SmallVec<[QualifyingTier; 3]>,
 
     /// Budget: optional max applications.
     application_limit: Option<u32>,
@@ -147,6 +148,49 @@ impl ILPPromotionVars for TieredThresholdPromotionVars {
 
         // Cheapest-item variants only alter the targeted item's final price.
         is_item_selected(&active_tier.target_vars, solution, item_idx)
+    }
+
+    fn add_secondary_objective_terms(
+        &self,
+        expr: Expression,
+        _item_group: &ItemGroup<'_>,
+    ) -> Result<Expression, SolverError> {
+        let mut updated_expr = expr;
+
+        // Tie-break upper-capped tiers by preferring earlier (price-descending)
+        // item vars. This does not affect primary optimality because it is used
+        // only in a lexicographic second pass.
+        //
+        // - `qt.item_vars` is created in descending price order.
+        // - rank 1 means "most expensive eligible item for this tier instance".
+        // - minimizing `sum(rank * x_rank)` nudges the solver to use earlier
+        //   variables first when multiple item subsets have identical basket totals.
+        //
+        // This reduces equivalent branch permutations around upper caps while
+        // preserving the exact primary optimum enforced by pass 1.
+        for qt in &self.qualifying_tiers {
+            if qt.upper_monetary_threshold_minor.is_none()
+                && qt.upper_item_count_threshold.is_none()
+            {
+                continue;
+            }
+
+            for (rank, &(_, item_var)) in qt.item_vars.iter().enumerate() {
+                // Rank coefficients are strictly increasing positive integers:
+                // x_0 gets weight 1, x_1 gets weight 2, ... .
+                let rank_coeff =
+                    i64::try_from(rank + 1).map_err(|_err| SolverError::InvariantViolation {
+                        message: "tier item rank overflow",
+                    })?;
+
+                let coeff = i64_to_f64_exact(rank_coeff)
+                    .ok_or(SolverError::MinorUnitsNotRepresentable(rank_coeff))?;
+
+                updated_expr += item_var * coeff;
+            }
+        }
+
+        Ok(updated_expr)
     }
 
     fn add_constraints(
@@ -237,7 +281,7 @@ impl TieredThresholdPromotionVars {
 
         observer.on_promotion_constraint(
             self.promotion_key,
-            "at most one tier",
+            "At most one tier",
             &tier_sum,
             "<=",
             1.0,
@@ -256,10 +300,78 @@ impl TieredThresholdPromotionVars {
         self.add_tier_item_link_constraints(qt, state, observer);
         self.add_lower_threshold_constraints(qt, item_group, state, observer)?;
         self.add_upper_threshold_constraints(qt, item_group, state, observer)?;
+        self.add_upper_cap_symmetry_break_constraints(qt, item_group, state, observer)?;
         self.add_tier_activation_constraint(qt, state, observer);
 
         if !qt.target_vars.is_empty() {
             add_cheapest_constraints(qt, self.promotion_key, state, observer);
+        }
+
+        Ok(())
+    }
+
+    fn add_upper_cap_symmetry_break_constraints(
+        &self,
+        qt: &QualifyingTier,
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        if qt.upper_monetary_threshold_minor.is_none() && qt.upper_item_count_threshold.is_none() {
+            return Ok(());
+        }
+
+        // If multiple identical copies of a product exist, selecting different
+        // permutations can create equivalent branches. Enforce a prefix order
+        // within each equivalent class to break this symmetry.
+        //
+        // Class key fields:
+        // - ProductKey: same underlying SKU
+        // - price_minor: same price point in this basket
+        // - contributes: same role in threshold qualification
+        // - discountable: same role in discount targeting
+        //
+        // If two variables match on all four, swapping them does not change any
+        // business outcome, only solver branch shape.
+        let mut classes: FxHashMap<(ProductKey, i64, bool, bool), SmallVec<[Variable; 10]>> =
+            FxHashMap::default();
+
+        for &(item_idx, item_var) in &qt.item_vars {
+            let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
+            let price_minor = item.price().to_minor_units();
+
+            let contributes = qt.contribution_vars.iter().any(|(idx, _)| *idx == item_idx);
+            let discountable = qt.discount_vars.iter().any(|(idx, _)| *idx == item_idx);
+
+            classes
+                .entry((item.product(), price_minor, contributes, discountable))
+                .or_default()
+                .push(item_var);
+        }
+
+        for vars in classes.values() {
+            for pair in vars.windows(2) {
+                let &[prev, curr] = pair else {
+                    continue;
+                };
+
+                // curr <= prev creates a monotone chain:
+                // if the k-th copy is selected, all earlier identical copies
+                // must also be selected. This removes factorially many
+                // equivalent permutations.
+
+                let expr = Expression::from(curr) - Expression::from(prev);
+
+                observer.on_promotion_constraint(
+                    self.promotion_key,
+                    "Upper cap symmetry break",
+                    &expr,
+                    "<=",
+                    0.0,
+                );
+
+                state.add_leq_constraint(expr, 0.0);
+            }
         }
 
         Ok(())
@@ -277,7 +389,7 @@ impl TieredThresholdPromotionVars {
 
             observer.on_promotion_constraint(
                 self.promotion_key,
-                "tier-item link",
+                "Tier-item link",
                 &link_expr,
                 "<=",
                 0.0,
@@ -307,7 +419,7 @@ impl TieredThresholdPromotionVars {
 
             observer.on_promotion_constraint(
                 self.promotion_key,
-                "lower threshold spend",
+                "Lower threshold spend",
                 &threshold_expr,
                 ">=",
                 0.0,
@@ -328,7 +440,7 @@ impl TieredThresholdPromotionVars {
 
             observer.on_promotion_constraint(
                 self.promotion_key,
-                "lower threshold item count",
+                "Lower threshold item count",
                 &item_count_expr,
                 ">=",
                 0.0,
@@ -349,75 +461,176 @@ impl TieredThresholdPromotionVars {
     ) -> Result<(), SolverError> {
         // Optional upper caps: once reached, additional items stop contributing
         // to this tier instance's qualification and discountable value.
-        if let Some(upper_monetary_threshold_minor) = qt.upper_monetary_threshold_minor {
-            let contribution_expr = weighted_price_sum_expr(item_group, &qt.contribution_vars)?;
-            let discountable_expr = weighted_price_sum_expr(item_group, &qt.discount_vars)?;
+        self.add_upper_monetary_threshold_constraints(qt, item_group, state, observer)?;
+        self.add_upper_item_count_threshold_constraints(qt, state, observer)?;
 
-            let upper_coeff = i64_to_f64_exact(upper_monetary_threshold_minor).ok_or(
-                SolverError::MinorUnitsNotRepresentable(upper_monetary_threshold_minor),
-            )?;
+        Ok(())
+    }
 
-            let contribution_cap_expr =
-                contribution_expr - Expression::from(qt.tier_var) * upper_coeff;
+    fn add_upper_monetary_threshold_constraints(
+        &self,
+        qt: &QualifyingTier,
+        item_group: &ItemGroup<'_>,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        let Some(upper_monetary_threshold_minor) = qt.upper_monetary_threshold_minor else {
+            return Ok(());
+        };
 
-            let discountable_cap_expr =
-                discountable_expr - Expression::from(qt.tier_var) * upper_coeff;
+        let upper_coeff = i64_to_f64_exact(upper_monetary_threshold_minor).ok_or(
+            SolverError::MinorUnitsNotRepresentable(upper_monetary_threshold_minor),
+        )?;
 
-            observer.on_promotion_constraint(
-                self.promotion_key,
-                "upper threshold spend (contribution)",
-                &contribution_cap_expr,
-                "<=",
-                0.0,
-            );
+        // If one variable set is a subset of the other and all involved
+        // prices are non-negative, one spend-cap constraint can imply the
+        // other. We emit only the necessary rows to keep the formulation
+        // tight but smaller.
+        let allow_subset_implication =
+            all_vars_have_non_negative_price(item_group, &qt.contribution_vars)?
+                && all_vars_have_non_negative_price(item_group, &qt.discount_vars)?;
 
-            state.add_leq_constraint(contribution_cap_expr, 0.0);
+        match upper_cap_emission_for_sets(
+            &qt.contribution_vars,
+            &qt.discount_vars,
+            allow_subset_implication,
+        ) {
+            UpperCapEmission::None => {}
+            UpperCapEmission::ContributionOnly => {
+                let contribution_expr = weighted_price_sum_expr(item_group, &qt.contribution_vars)?;
+                let contribution_cap_expr =
+                    contribution_expr - Expression::from(qt.tier_var) * upper_coeff;
 
-            observer.on_promotion_constraint(
-                self.promotion_key,
-                "upper threshold spend (discountable)",
-                &discountable_cap_expr,
-                "<=",
-                0.0,
-            );
+                observer.on_promotion_constraint(
+                    self.promotion_key,
+                    "Upper threshold spend (contribution)",
+                    &contribution_cap_expr,
+                    "<=",
+                    0.0,
+                );
+                state.add_leq_constraint(contribution_cap_expr, 0.0);
+            }
+            UpperCapEmission::DiscountableOnly => {
+                let discountable_expr = weighted_price_sum_expr(item_group, &qt.discount_vars)?;
+                let discountable_cap_expr =
+                    discountable_expr - Expression::from(qt.tier_var) * upper_coeff;
 
-            state.add_leq_constraint(discountable_cap_expr, 0.0);
+                observer.on_promotion_constraint(
+                    self.promotion_key,
+                    "Upper threshold spend (discountable)",
+                    &discountable_cap_expr,
+                    "<=",
+                    0.0,
+                );
+                state.add_leq_constraint(discountable_cap_expr, 0.0);
+            }
+            UpperCapEmission::Both => {
+                let contribution_expr = weighted_price_sum_expr(item_group, &qt.contribution_vars)?;
+                let discountable_expr = weighted_price_sum_expr(item_group, &qt.discount_vars)?;
+
+                let contribution_cap_expr =
+                    contribution_expr - Expression::from(qt.tier_var) * upper_coeff;
+                let discountable_cap_expr =
+                    discountable_expr - Expression::from(qt.tier_var) * upper_coeff;
+
+                observer.on_promotion_constraint(
+                    self.promotion_key,
+                    "Upper threshold spend (contribution)",
+                    &contribution_cap_expr,
+                    "<=",
+                    0.0,
+                );
+                state.add_leq_constraint(contribution_cap_expr, 0.0);
+
+                observer.on_promotion_constraint(
+                    self.promotion_key,
+                    "Upper threshold spend (discountable)",
+                    &discountable_cap_expr,
+                    "<=",
+                    0.0,
+                );
+                state.add_leq_constraint(discountable_cap_expr, 0.0);
+            }
         }
 
-        if let Some(upper_item_count_threshold) = qt.upper_item_count_threshold {
-            let contribution_count_expr: Expression =
-                qt.contribution_vars.iter().map(|(_, v)| *v).sum();
+        Ok(())
+    }
 
-            let discountable_count_expr: Expression =
-                qt.discount_vars.iter().map(|(_, v)| *v).sum();
+    fn add_upper_item_count_threshold_constraints(
+        &self,
+        qt: &QualifyingTier,
+        state: &mut ILPState,
+        observer: &mut dyn ILPObserver,
+    ) -> Result<(), SolverError> {
+        let Some(upper_item_count_threshold) = qt.upper_item_count_threshold else {
+            return Ok(());
+        };
 
-            let upper_count_coeff = u32_to_f64_exact(upper_item_count_threshold)?;
+        let upper_count_coeff = u32_to_f64_exact(upper_item_count_threshold)?;
 
-            let contribution_count_cap_expr =
-                contribution_count_expr - Expression::from(qt.tier_var) * upper_count_coeff;
+        // Count caps always use non-negative unit coefficients, so subset
+        // implication is always safe here.
+        match upper_cap_emission_for_sets(&qt.contribution_vars, &qt.discount_vars, true) {
+            UpperCapEmission::None => {}
+            UpperCapEmission::ContributionOnly => {
+                let contribution_count_expr: Expression =
+                    qt.contribution_vars.iter().map(|(_, v)| *v).sum();
+                let contribution_count_cap_expr =
+                    contribution_count_expr - Expression::from(qt.tier_var) * upper_count_coeff;
 
-            let discountable_count_cap_expr =
-                discountable_count_expr - Expression::from(qt.tier_var) * upper_count_coeff;
+                observer.on_promotion_constraint(
+                    self.promotion_key,
+                    "Upper threshold item count (contribution)",
+                    &contribution_count_cap_expr,
+                    "<=",
+                    0.0,
+                );
+                state.add_leq_constraint(contribution_count_cap_expr, 0.0);
+            }
+            UpperCapEmission::DiscountableOnly => {
+                let discountable_count_expr: Expression =
+                    qt.discount_vars.iter().map(|(_, v)| *v).sum();
+                let discountable_count_cap_expr =
+                    discountable_count_expr - Expression::from(qt.tier_var) * upper_count_coeff;
 
-            observer.on_promotion_constraint(
-                self.promotion_key,
-                "upper threshold item count (contribution)",
-                &contribution_count_cap_expr,
-                "<=",
-                0.0,
-            );
+                observer.on_promotion_constraint(
+                    self.promotion_key,
+                    "Upper threshold item count (discountable)",
+                    &discountable_count_cap_expr,
+                    "<=",
+                    0.0,
+                );
+                state.add_leq_constraint(discountable_count_cap_expr, 0.0);
+            }
+            UpperCapEmission::Both => {
+                let contribution_count_expr: Expression =
+                    qt.contribution_vars.iter().map(|(_, v)| *v).sum();
+                let discountable_count_expr: Expression =
+                    qt.discount_vars.iter().map(|(_, v)| *v).sum();
 
-            state.add_leq_constraint(contribution_count_cap_expr, 0.0);
+                let contribution_count_cap_expr =
+                    contribution_count_expr - Expression::from(qt.tier_var) * upper_count_coeff;
+                let discountable_count_cap_expr =
+                    discountable_count_expr - Expression::from(qt.tier_var) * upper_count_coeff;
 
-            observer.on_promotion_constraint(
-                self.promotion_key,
-                "upper threshold item count (discountable)",
-                &discountable_count_cap_expr,
-                "<=",
-                0.0,
-            );
+                observer.on_promotion_constraint(
+                    self.promotion_key,
+                    "Upper threshold item count (contribution)",
+                    &contribution_count_cap_expr,
+                    "<=",
+                    0.0,
+                );
+                state.add_leq_constraint(contribution_count_cap_expr, 0.0);
 
-            state.add_leq_constraint(discountable_count_cap_expr, 0.0);
+                observer.on_promotion_constraint(
+                    self.promotion_key,
+                    "Upper threshold item count (discountable)",
+                    &discountable_count_cap_expr,
+                    "<=",
+                    0.0,
+                );
+                state.add_leq_constraint(discountable_count_cap_expr, 0.0);
+            }
         }
 
         Ok(())
@@ -525,6 +738,84 @@ impl TieredThresholdPromotionVars {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpperCapEmission {
+    /// No cap row is needed (no variables on either side).
+    None,
+
+    /// Emit only the contribution-side cap row.
+    ContributionOnly,
+
+    /// Emit only the discountable-side cap row.
+    DiscountableOnly,
+
+    /// Emit both cap rows because neither implies the other.
+    Both,
+}
+
+fn upper_cap_emission_for_sets(
+    contribution_vars: &SmallVec<[(usize, Variable); 10]>,
+    discount_vars: &SmallVec<[(usize, Variable); 10]>,
+    allow_subset_implication: bool,
+) -> UpperCapEmission {
+    // Decide the minimal set of upper-cap constraints that preserves semantics.
+    //
+    // When the two variable sets are identical, one row is enough.
+    // When one is a subset of the other, implication can remove one row if
+    // coefficients are non-negative (for spend caps this is guarded by caller).
+    if contribution_vars.is_empty() && discount_vars.is_empty() {
+        return UpperCapEmission::None;
+    }
+
+    let contribution_subset_discount = vars_subset(contribution_vars, discount_vars);
+    let discount_subset_contribution = vars_subset(discount_vars, contribution_vars);
+
+    if contribution_subset_discount && discount_subset_contribution {
+        return UpperCapEmission::ContributionOnly;
+    }
+
+    if allow_subset_implication {
+        if contribution_subset_discount {
+            return UpperCapEmission::DiscountableOnly;
+        }
+
+        if discount_subset_contribution {
+            return UpperCapEmission::ContributionOnly;
+        }
+    }
+
+    UpperCapEmission::Both
+}
+
+fn vars_subset(
+    subset: &SmallVec<[(usize, Variable); 10]>,
+    superset: &SmallVec<[(usize, Variable); 10]>,
+) -> bool {
+    // Set inclusion over (item_idx, variable) pairs; both parts must match.
+    subset.iter().all(|(idx, var)| {
+        superset
+            .iter()
+            .any(|(other_idx, other_var)| idx == other_idx && var == other_var)
+    })
+}
+
+fn all_vars_have_non_negative_price(
+    item_group: &ItemGroup<'_>,
+    vars: &SmallVec<[(usize, Variable); 10]>,
+) -> Result<bool, SolverError> {
+    // Needed before relying on spend-cap subset implication:
+    // negative prices can invert inequalities and break implication.
+    for &(item_idx, _) in vars {
+        let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
+
+        if item.price().to_minor_units() < 0 {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
 }
 
 fn weighted_price_sum_expr(
@@ -936,7 +1227,7 @@ impl ILPPromotion for TieredThresholdPromotion<'_> {
         observer: &mut dyn ILPObserver,
     ) -> Result<PromotionVars, SolverError> {
         let promotion_key = self.key();
-        let mut qualifying_tiers = Vec::new();
+        let mut qualifying_tiers = SmallVec::new();
 
         for (tier_idx, tier) in self.tiers().iter().enumerate() {
             let lower_monetary_threshold_minor = tier
@@ -1063,6 +1354,10 @@ impl ILPPromotion for TieredThresholdPromotion<'_> {
             let mut discount_eligible: SmallVec<[(usize, i64); 10]> = SmallVec::new();
             let mut discounted_minor_by_item = FxHashMap::default();
 
+            // Build item variables in deterministic price-descending order to
+            // reduce branching symmetry when caps are active.
+            let mut eligible_items: SmallVec<[(usize, i64, bool, bool); 10]> = SmallVec::new();
+
             for (item_idx, item) in item_group.iter().enumerate() {
                 let price = item.price().to_minor_units();
 
@@ -1072,6 +1367,18 @@ impl ILPPromotion for TieredThresholdPromotion<'_> {
                 if !contributes && !discountable {
                     continue;
                 }
+
+                eligible_items.push((item_idx, price, contributes, discountable));
+            }
+
+            eligible_items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+            // Materialize variables in this sorted order so:
+            // 1) upper-cap tie-break ranks map directly to `item_vars` position
+            // 2) same-price ties are deterministic by item index
+            // 3) observer output remains stable between runs.
+            for (item_idx, price, contributes, discountable) in eligible_items {
+                let item = item_group.get_item(item_idx).map_err(SolverError::from)?;
 
                 let item_var = state.problem_variables_mut().add(variable().binary());
                 item_vars.push((item_idx, item_var));
@@ -1458,6 +1765,128 @@ mod tests {
 
         // Only the item var contributes to the objective
         assert_eq!(observer.objective_terms, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn add_variables_orders_eligible_items_by_price_desc_then_index() -> TestResult {
+        let items = [
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(100, GBP),
+                StringTagCollection::from_strs(&["wine", "cheese"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(300, GBP),
+                StringTagCollection::from_strs(&["wine", "cheese"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(300, GBP),
+                StringTagCollection::from_strs(&["wine", "cheese"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(200, GBP),
+                StringTagCollection::from_strs(&["wine", "cheese"]),
+            ),
+        ];
+
+        let item_group = item_group_from_items(items);
+
+        let promo = TieredThresholdPromotion::new(
+            PromotionKey::default(),
+            vec![make_tier_with_tags(
+                50,
+                &["wine"],
+                &["cheese"],
+                ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
+            )],
+            PromotionBudget::unlimited(),
+        );
+
+        let mut state = ILPState::new(ProblemVariables::new(), Expression::default());
+        let mut observer = NoopObserver;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<TieredThresholdPromotionVars>())
+            .ok_or("Expected tiered vars")?;
+
+        let ordered_indices: Vec<usize> = vars.qualifying_tiers[0]
+            .item_vars
+            .iter()
+            .map(|(idx, _)| *idx)
+            .collect();
+
+        assert_eq!(ordered_indices, vec![1, 2, 3, 0]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn secondary_objective_terms_include_only_upper_capped_tier_items() -> TestResult {
+        let items = [
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(5000, GBP),
+                StringTagCollection::from_strs(&["wine", "cheese"]),
+            ),
+            Item::with_tags(
+                ProductKey::default(),
+                Money::from_minor(5000, GBP),
+                StringTagCollection::from_strs(&["wine", "cheese"]),
+            ),
+        ];
+
+        let item_group = item_group_from_items(items);
+
+        let upper_capped_tier = ThresholdTier::new(
+            TierThreshold::with_monetary_threshold(Money::from_minor(1000, GBP)),
+            Some(TierThreshold::with_monetary_threshold(Money::from_minor(
+                6000, GBP,
+            ))),
+            Qualification::match_any(StringTagCollection::from_strs(&["wine"])),
+            Qualification::match_any(StringTagCollection::from_strs(&["cheese"])),
+            ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
+        );
+
+        let uncapped_tier = ThresholdTier::new(
+            TierThreshold::with_monetary_threshold(Money::from_minor(1000, GBP)),
+            None,
+            Qualification::match_any(StringTagCollection::from_strs(&["wine"])),
+            Qualification::match_any(StringTagCollection::from_strs(&["cheese"])),
+            ThresholdDiscount::PercentEachItem(Percentage::from(0.05)),
+        );
+
+        let promo = TieredThresholdPromotion::new(
+            PromotionKey::default(),
+            vec![upper_capped_tier, uncapped_tier],
+            PromotionBudget::unlimited(),
+        );
+
+        let mut state = ILPState::new(ProblemVariables::new(), Expression::default());
+        let mut observer = NoopObserver;
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        let vars = ((vars.as_ref() as &dyn Any).downcast_ref::<TieredThresholdPromotionVars>())
+            .ok_or("Expected tiered vars")?;
+
+        let expr = vars.add_secondary_objective_terms(Expression::default(), &item_group)?;
+
+        let tie_break_terms = IntoAffineExpression::linear_coefficients(&expr).count();
+        let expected_terms: usize = vars
+            .qualifying_tiers
+            .iter()
+            .filter(|qt| {
+                qt.upper_monetary_threshold_minor.is_some()
+                    || qt.upper_item_count_threshold.is_some()
+            })
+            .map(|qt| qt.item_vars.len())
+            .sum();
+
+        assert_eq!(tie_break_terms, expected_terms);
 
         Ok(())
     }
@@ -1896,8 +2325,155 @@ mod tests {
             observer
                 .promotion_constraints
                 .iter()
-                .any(|record| record.constraint_type == "lower threshold item count")
+                .any(|record| record.constraint_type == "Lower threshold item count")
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn upper_spend_constraints_are_deduplicated_when_sets_match() -> TestResult {
+        let items = [Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(5000, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        )];
+
+        let item_group = item_group_from_items(items);
+
+        let tier = ThresholdTier::new(
+            TierThreshold::with_monetary_threshold(Money::from_minor(1000, GBP)),
+            Some(TierThreshold::with_monetary_threshold(Money::from_minor(
+                6000, GBP,
+            ))),
+            Qualification::match_any(StringTagCollection::from_strs(&["wine"])),
+            Qualification::match_any(StringTagCollection::from_strs(&["wine"])),
+            ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
+        );
+
+        let promo = TieredThresholdPromotion::new(
+            PromotionKey::default(),
+            vec![tier],
+            PromotionBudget::unlimited(),
+        );
+
+        let mut state = ILPState::new(ProblemVariables::new(), Expression::default());
+        let mut observer = RecordingObserver::default();
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        vars.add_constraints(promo.key(), &item_group, &mut state, &mut observer)?;
+
+        let upper_spend_constraints: Vec<&str> = observer
+            .promotion_constraints
+            .iter()
+            .filter(|record| record.constraint_type.starts_with("Upper threshold spend"))
+            .map(|record| record.constraint_type.as_str())
+            .collect();
+
+        assert_eq!(
+            upper_spend_constraints,
+            vec!["Upper threshold spend (contribution)"]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn upper_item_count_constraints_are_deduplicated_when_sets_match() -> TestResult {
+        let items = [Item::with_tags(
+            ProductKey::default(),
+            Money::from_minor(5000, GBP),
+            StringTagCollection::from_strs(&["wine"]),
+        )];
+
+        let item_group = item_group_from_items(items);
+
+        let tier = ThresholdTier::new(
+            TierThreshold::with_item_count_threshold(1),
+            Some(TierThreshold::with_item_count_threshold(2)),
+            Qualification::match_any(StringTagCollection::from_strs(&["wine"])),
+            Qualification::match_any(StringTagCollection::from_strs(&["wine"])),
+            ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
+        );
+
+        let promo = TieredThresholdPromotion::new(
+            PromotionKey::default(),
+            vec![tier],
+            PromotionBudget::unlimited(),
+        );
+
+        let mut state = ILPState::new(ProblemVariables::new(), Expression::default());
+        let mut observer = RecordingObserver::default();
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        vars.add_constraints(promo.key(), &item_group, &mut state, &mut observer)?;
+
+        let upper_count_constraints: Vec<&str> = observer
+            .promotion_constraints
+            .iter()
+            .filter(|record| {
+                record
+                    .constraint_type
+                    .starts_with("Upper threshold item count")
+            })
+            .map(|record| record.constraint_type.as_str())
+            .collect();
+
+        assert_eq!(
+            upper_count_constraints,
+            vec!["Upper threshold item count (contribution)"]
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn upper_cap_symmetry_break_constraints_are_emitted_for_identical_items() -> TestResult {
+        let same_product = ProductKey::default();
+        let items = [
+            Item::with_tags(
+                same_product,
+                Money::from_minor(5000, GBP),
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+            Item::with_tags(
+                same_product,
+                Money::from_minor(5000, GBP),
+                StringTagCollection::from_strs(&["wine"]),
+            ),
+        ];
+
+        let item_group = item_group_from_items(items);
+
+        let tier = ThresholdTier::new(
+            TierThreshold::with_monetary_threshold(Money::from_minor(1000, GBP)),
+            Some(TierThreshold::with_monetary_threshold(Money::from_minor(
+                8000, GBP,
+            ))),
+            Qualification::match_any(StringTagCollection::from_strs(&["wine"])),
+            Qualification::match_any(StringTagCollection::from_strs(&["wine"])),
+            ThresholdDiscount::PercentEachItem(Percentage::from(0.10)),
+        );
+
+        let promo = TieredThresholdPromotion::new(
+            PromotionKey::default(),
+            vec![tier],
+            PromotionBudget::unlimited(),
+        );
+
+        let mut state = ILPState::new(ProblemVariables::new(), Expression::default());
+        let mut observer = RecordingObserver::default();
+
+        let vars = promo.add_variables(&item_group, &mut state, &mut observer)?;
+        vars.add_constraints(promo.key(), &item_group, &mut state, &mut observer)?;
+
+        let symmetry_break_count = observer
+            .promotion_constraints
+            .iter()
+            .filter(|record| record.constraint_type == "Upper cap symmetry break")
+            .count();
+
+        assert_eq!(symmetry_break_count, 1);
 
         Ok(())
     }
@@ -2375,7 +2951,7 @@ mod tests {
         let has_at_most_one = observer
             .promotion_constraints
             .iter()
-            .any(|record| record.constraint_type == "at most one tier");
+            .any(|record| record.constraint_type == "At most one tier");
 
         assert!(!has_at_most_one);
 

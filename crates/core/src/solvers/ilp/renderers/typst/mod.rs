@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use good_lp::{Expression, IntoAffineExpression, Variable};
 use petgraph::graph::NodeIndex;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use slotmap::SlotMap;
 use smallvec::SmallVec;
 
@@ -182,6 +182,8 @@ pub struct TypstRenderer {
 }
 
 impl TypstRenderer {
+    const CONSTRAINT_TERMS_PER_LINE: usize = 5;
+
     /// Create a new Typst renderer.
     #[must_use]
     pub fn new(output_path: PathBuf) -> Self {
@@ -466,15 +468,19 @@ impl TypstRenderer {
     }
 
     /// Render an Expression to Typst math notation.
+    #[cfg(test)]
     fn render_expression(formulation: &ILPFormulation, expr: &Expression) -> String {
+        Self::expression_tokens(formulation, expr).join(" ")
+    }
+
+    fn expression_tokens(formulation: &ILPFormulation, expr: &Expression) -> Vec<String> {
         let mut terms: Vec<(Variable, f64)> = expr.linear_coefficients().collect();
 
         terms.sort_by(|(a_var, _), (b_var, _)| {
             Self::var_sort_key(formulation, *a_var).cmp(&Self::var_sort_key(formulation, *b_var))
         });
 
-        let mut out = String::new();
-        let mut first = true;
+        let mut tokens = Vec::new();
 
         for (var, coeff) in terms {
             if coeff.abs() < f64::EPSILON {
@@ -493,21 +499,19 @@ impl TypstRenderer {
                 )
             };
 
-            if first {
+            let token = if tokens.is_empty() {
                 if coeff < 0.0 {
-                    out.push_str("- ");
+                    format!("- {term}")
+                } else {
+                    term
                 }
-
-                out.push_str(&term);
-
-                first = false;
             } else if coeff < 0.0 {
-                out.push_str(" - ");
-                out.push_str(&term);
+                format!("- {term}")
             } else {
-                out.push_str(" + ");
-                out.push_str(&term);
-            }
+                format!("+ {term}")
+            };
+
+            tokens.push(token);
         }
 
         let constant = expr.constant();
@@ -515,27 +519,61 @@ impl TypstRenderer {
         if constant.abs() >= f64::EPSILON {
             let constant_abs = constant.abs();
             let constant_str = Self::render_number(constant_abs);
-
-            if first {
+            let token = if tokens.is_empty() {
                 if constant < 0.0 {
-                    out.push('-');
+                    format!("-{constant_str}")
+                } else {
+                    constant_str
                 }
-
-                out.push_str(&constant_str);
             } else if constant < 0.0 {
-                out.push_str(" - ");
-                out.push_str(&constant_str);
+                format!("- {constant_str}")
             } else {
-                out.push_str(" + ");
-                out.push_str(&constant_str);
-            }
+                format!("+ {constant_str}")
+            };
+
+            tokens.push(token);
         }
 
-        if out.is_empty() {
-            out.push('0');
+        if tokens.is_empty() {
+            tokens.push(String::from("0"));
         }
 
-        out
+        tokens
+    }
+
+    fn render_expression_lines(
+        formulation: &ILPFormulation,
+        expr: &Expression,
+        per_line: usize,
+    ) -> Vec<String> {
+        let tokens = Self::expression_tokens(formulation, expr);
+        let per_line = per_line.max(1);
+        let mut lines = Vec::new();
+
+        for chunk in tokens.chunks(per_line) {
+            lines.push(chunk.join(" "));
+        }
+
+        lines
+    }
+
+    fn render_constraint_lines(
+        formulation: &ILPFormulation,
+        expr: &Expression,
+        relation: &str,
+        rhs: f64,
+        per_line: usize,
+    ) -> Vec<String> {
+        let mut lines = Self::render_expression_lines(formulation, expr, per_line);
+
+        if let Some(last) = lines.last_mut() {
+            last.push(' ');
+            last.push_str(relation);
+            last.push(' ');
+            last.push_str(&Self::render_number(rhs));
+        }
+
+        lines
     }
 
     fn objective_terms(formulation: &ILPFormulation) -> Vec<(Variable, f64)> {
@@ -748,11 +786,32 @@ impl TypstRenderer {
         exclusivity_items.sort_by_key(|(item_idx, _)| *item_idx);
 
         for (item_idx, expr) in exclusivity_items {
-            output.push_str("$ ");
-            output.push_str(&Self::render_expression(formulation, expr));
-            output.push_str(" = 1 $ ");
-            output.push_str(&self.item_label(*item_idx, true));
-            output.push_str("\n\n");
+            let lines = Self::render_constraint_lines(
+                formulation,
+                expr,
+                "=",
+                1.0,
+                Self::CONSTRAINT_TERMS_PER_LINE,
+            );
+
+            for (line_idx, line) in lines.iter().enumerate() {
+                output.push_str("$ ");
+                if line_idx > 0 {
+                    output.push_str("quad ");
+                }
+
+                output.push_str(line);
+                output.push_str(" $");
+
+                if line_idx == lines.len() - 1 {
+                    output.push(' ');
+                    output.push_str(&self.item_label(*item_idx, true));
+                }
+
+                output.push('\n');
+            }
+
+            output.push('\n');
         }
 
         if !formulation.promotion_constraints.is_empty() {
@@ -761,17 +820,35 @@ impl TypstRenderer {
             for (promo_key, constraint_type, expr, relation, rhs) in
                 &formulation.promotion_constraints
             {
-                output.push_str("$ ");
-                output.push_str(&Self::render_expression(formulation, expr));
-                output.push(' ');
-                output.push_str(relation);
-                output.push(' ');
-                output.push_str(&Self::render_number(*rhs));
-                output.push_str(" $ ");
-                output.push_str(constraint_type);
-                output.push_str(" for promotion \"");
-                output.push_str(&self.promotion_label(*promo_key));
-                output.push_str("\"\n\n");
+                let lines = Self::render_constraint_lines(
+                    formulation,
+                    expr,
+                    relation,
+                    *rhs,
+                    Self::CONSTRAINT_TERMS_PER_LINE,
+                );
+
+                for (line_idx, line) in lines.iter().enumerate() {
+                    output.push_str("$ ");
+                    if line_idx > 0 {
+                        output.push_str("quad ");
+                    }
+
+                    output.push_str(line);
+                    output.push_str(" $");
+
+                    if line_idx == lines.len() - 1 {
+                        output.push(' ');
+                        output.push_str(constraint_type);
+                        output.push_str(" for promotion \"");
+                        output.push_str(&self.promotion_label(*promo_key));
+                        output.push('"');
+                    }
+
+                    output.push('\n');
+                }
+
+                output.push('\n');
             }
         }
     }
@@ -800,38 +877,51 @@ impl TypstRenderer {
         exclusivity_items.sort_by_key(|(item_idx, _)| *item_idx);
 
         for (_item_idx, expr) in exclusivity_items {
-            let line = format!("{} = 1", Self::render_expression(formulation, expr));
+            let lines = Self::render_constraint_lines(
+                formulation,
+                expr,
+                "=",
+                1.0,
+                Self::CONSTRAINT_TERMS_PER_LINE,
+            );
 
-            if wrote_constraint {
-                output.push_str("$ quad ");
-                output.push_str(&line);
-                output.push_str(" $\n");
-            } else {
-                output.push_str(&line);
-                output.push_str(" $\n");
-                wrote_constraint = true;
+            for (line_idx, line) in lines.iter().enumerate() {
+                if wrote_constraint || line_idx > 0 {
+                    output.push_str("$ quad ");
+                    output.push_str(line);
+                    output.push_str(" $\n");
+                } else {
+                    output.push_str(line);
+                    output.push_str(" $\n");
+                }
             }
+
+            wrote_constraint = true;
         }
 
         for (_promo_key, _constraint_type, expr, relation, rhs) in
             &formulation.promotion_constraints
         {
-            let line = format!(
-                "{} {} {}",
-                Self::render_expression(formulation, expr),
+            let lines = Self::render_constraint_lines(
+                formulation,
+                expr,
                 relation,
-                Self::render_number(*rhs)
+                *rhs,
+                Self::CONSTRAINT_TERMS_PER_LINE,
             );
 
-            if wrote_constraint {
-                output.push_str("$ quad ");
-                output.push_str(&line);
-                output.push_str(" $\n");
-            } else {
-                output.push_str(&line);
-                output.push_str(" $\n");
-                wrote_constraint = true;
+            for (line_idx, line) in lines.iter().enumerate() {
+                if wrote_constraint || line_idx > 0 {
+                    output.push_str("$ quad ");
+                    output.push_str(line);
+                    output.push_str(" $\n");
+                } else {
+                    output.push_str(line);
+                    output.push_str(" $\n");
+                }
             }
+
+            wrote_constraint = true;
         }
 
         if !wrote_constraint {
@@ -979,6 +1069,13 @@ pub struct MultiLayerRenderer {
 }
 
 impl MultiLayerRenderer {
+    fn promotion_label(&self, promotion_key: PromotionKey) -> String {
+        self.promotion_names
+            .get(&promotion_key)
+            .cloned()
+            .unwrap_or_else(|| format!("{promotion_key:?}"))
+    }
+
     /// Create new multi-layer renderer
     #[must_use]
     pub fn new(output_path: PathBuf) -> Self {
@@ -1069,6 +1166,29 @@ impl MultiLayerRenderer {
             output.push_str("== Layer ");
             output.push_str(&(layer.solve_order + 1).to_string());
             output.push_str("\n\n");
+
+            let mut promotion_keys: SmallVec<[PromotionKey; 10]> = SmallVec::new();
+            let mut seen_promotions: FxHashSet<PromotionKey> = FxHashSet::default();
+
+            for promo_var in &layer.formulation.promotion_vars {
+                if seen_promotions.insert(promo_var.promotion_key) {
+                    promotion_keys.push(promo_var.promotion_key);
+                }
+            }
+
+            promotion_keys.sort_by(|a, b| {
+                self.promotion_label(*a)
+                    .cmp(&self.promotion_label(*b))
+                    .then_with(|| format!("{a:?}").cmp(&format!("{b:?}")))
+            });
+
+            for promotion_key in promotion_keys {
+                output.push_str("- ");
+                output.push_str(&self.promotion_label(promotion_key));
+                output.push('\n');
+            }
+
+            output.push('\n');
 
             // Render formulation using existing rendering logic
             let renderer = TypstRenderer {
@@ -1531,6 +1651,56 @@ mod tests {
     }
 
     #[test]
+    fn render_wraps_long_constraints_at_five_terms() {
+        let mut renderer = TypstRenderer::new(PathBuf::from("test.typ"));
+        let mut pb = ProblemVariables::new();
+        let mut vars = Vec::new();
+
+        for item_idx in 0..6 {
+            let var = pb.add(variable().binary());
+            renderer.on_presence_variable(item_idx, var, 100);
+            vars.push(var);
+        }
+
+        let expr = vars
+            .iter()
+            .copied()
+            .fold(Expression::default(), |acc, var| acc + var);
+
+        renderer.on_promotion_constraint(PromotionKey::default(), "wrap-test", &expr, "<=", 3.0);
+
+        let output = renderer.render();
+
+        assert!(output.contains("$ x_1 + x_2 + x_3 + x_4 + x_5 $"));
+        assert!(output.contains("$ quad + x_6 <= 3 $"));
+    }
+
+    #[test]
+    fn render_standard_form_wraps_long_exclusivity_constraints() {
+        let mut renderer = TypstRenderer::new(PathBuf::from("test.typ"));
+        let mut pb = ProblemVariables::new();
+        let mut vars = Vec::new();
+
+        for item_idx in 0..6 {
+            let var = pb.add(variable().binary());
+            renderer.on_presence_variable(item_idx, var, 100);
+            vars.push(var);
+        }
+
+        let expr = vars
+            .iter()
+            .copied()
+            .fold(Expression::default(), |acc, var| acc + var);
+
+        renderer.on_exclusivity_constraint(0, &expr);
+
+        let output = renderer.render();
+
+        assert!(output.contains("$ \"subject to\" quad x_1 + x_2 + x_3 + x_4 + x_5 $"));
+        assert!(output.contains("$ quad + x_6 = 1 $\n"));
+    }
+
+    #[test]
     fn renderer_orders_promotions_by_name_in_render_output() {
         let mut products = SlotMap::<ProductKey, Product<'_>>::with_key();
         let item_a = products.insert(Product {
@@ -1784,5 +1954,53 @@ mod tests {
         assert!(content.contains("ILP Formulation"));
 
         Ok(())
+    }
+
+    #[test]
+    fn multi_layer_render_lists_promotions_per_layer() {
+        let mut renderer = MultiLayerRenderer::new(PathBuf::from("layers.typ"));
+        let mut pb = ProblemVariables::new();
+        let var_a = pb.add(variable().binary());
+        let var_b = pb.add(variable().binary());
+        let var_c = pb.add(variable().binary());
+
+        let mut promotions = SlotMap::<PromotionKey, PromotionMeta>::with_key();
+        let promo_b = promotions.insert(PromotionMeta {
+            name: "B promo".to_string(),
+            ..Default::default()
+        });
+        let promo_a = promotions.insert(PromotionMeta {
+            name: "A promo".to_string(),
+            ..Default::default()
+        });
+
+        renderer
+            .promotion_names
+            .insert(promo_a, String::from("A promo"));
+        renderer
+            .promotion_names
+            .insert(promo_b, String::from("B promo"));
+
+        renderer.on_layer_begin(
+            crate::graph::PromotionLayerKey::default(),
+            petgraph::graph::NodeIndex::new(0),
+        );
+        renderer.on_promotion_variable(promo_b, 0, var_a, 100, None);
+        renderer.on_promotion_variable(promo_a, 0, var_b, 90, None);
+        renderer.on_promotion_variable(promo_a, 1, var_c, 80, Some("discount"));
+        renderer.on_layer_end();
+
+        let output = renderer.render();
+
+        assert!(output.contains("== Layer 1"));
+        assert!(output.contains("- A promo"));
+        assert!(output.contains("- B promo"));
+
+        assert_eq!(output.matches("- A promo").count(), 1);
+        assert_eq!(output.matches("- B promo").count(), 1);
+
+        let a_idx = output.find("- A promo").expect("Missing A promo bullet");
+        let b_idx = output.find("- B promo").expect("Missing B promo bullet");
+        assert!(a_idx < b_idx);
     }
 }

@@ -56,6 +56,7 @@ pub struct TierThreshold<'a> {
 
 impl<'a> TierThreshold<'a> {
     /// Create a new threshold with monetary and/or item count requirements, or none.
+    #[must_use]
     pub fn new(
         monetary_threshold: Option<Money<'a, Currency>>,
         item_count_threshold: Option<u32>,
@@ -67,6 +68,7 @@ impl<'a> TierThreshold<'a> {
     }
 
     /// Create a threshold with a monetary requirement only.
+    #[must_use]
     pub fn with_monetary_threshold(monetary: Money<'a, Currency>) -> Self {
         Self {
             monetary_threshold: Some(monetary),
@@ -75,6 +77,7 @@ impl<'a> TierThreshold<'a> {
     }
 
     /// Create a threshold with an item-count requirement only.
+    #[must_use]
     pub const fn with_item_count_threshold(item_count: u32) -> Self {
         Self {
             monetary_threshold: None,
@@ -83,6 +86,7 @@ impl<'a> TierThreshold<'a> {
     }
 
     /// Create a threshold with both monetary and item-count requirements.
+    #[must_use]
     pub fn with_both_thresholds(monetary: Money<'a, Currency>, item_count: u32) -> Self {
         Self {
             monetary_threshold: Some(monetary),
@@ -91,11 +95,13 @@ impl<'a> TierThreshold<'a> {
     }
 
     /// Return the optional monetary threshold.
+    #[must_use]
     pub fn monetary_threshold(&self) -> Option<&Money<'a, Currency>> {
         self.monetary_threshold.as_ref()
     }
 
     /// Return the optional item-count threshold.
+    #[must_use]
     pub const fn item_count_threshold(&self) -> Option<u32> {
         self.item_count_threshold
     }
@@ -174,6 +180,7 @@ pub struct TieredThresholdPromotion<'a, T: TagCollection = StringTagCollection> 
 
 impl<'a, T: TagCollection> TieredThresholdPromotion<'a, T> {
     /// Create a new tiered threshold promotion.
+    #[must_use]
     pub fn new(
         key: PromotionKey,
         tiers: Vec<ThresholdTier<'a, T>>,
@@ -183,16 +190,19 @@ impl<'a, T: TagCollection> TieredThresholdPromotion<'a, T> {
     }
 
     /// Return the promotion key.
+    #[must_use]
     pub fn key(&self) -> PromotionKey {
         self.key
     }
 
     /// Return the tiers.
+    #[must_use]
     pub fn tiers(&self) -> &[ThresholdTier<'a, T>] {
         &self.tiers
     }
 
     /// Return the budget.
+    #[must_use]
     pub const fn budget(&self) -> &PromotionBudget<'a> {
         &self.budget
     }

@@ -72,6 +72,28 @@ impl<'a> PromotionInstances<'a> {
 
         updated_expr
     }
+
+    /// Contribute optional lexicographic tie-break terms from all promotion instances.
+    ///
+    /// These terms are used only in a second-pass solve after the primary objective
+    /// optimum is fixed, so they cannot change the primary optimum value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SolverError`] if any promotion fails to build its tie-break expression.
+    pub(crate) fn add_secondary_objective_terms(
+        &self,
+        expr: Expression,
+        item_group: &ItemGroup<'_>,
+    ) -> Result<Expression, SolverError> {
+        let mut updated_expr = expr;
+
+        for instance in &self.instances {
+            updated_expr = instance.add_secondary_objective_terms(updated_expr, item_group)?;
+        }
+
+        Ok(updated_expr)
+    }
 }
 
 /// A promotion instance that pairs a promotion with its solver variables
@@ -123,6 +145,22 @@ impl<'a> PromotionInstance<'a> {
         match &self.vars {
             Some(vars) => vars.add_item_participation_term(expr, item_idx),
             None => expr,
+        }
+    }
+
+    /// Contribute optional lexicographic tie-break terms for this instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SolverError`] if the promotion runtime fails to build tie-break terms.
+    pub(crate) fn add_secondary_objective_terms(
+        &self,
+        expr: Expression,
+        item_group: &ItemGroup<'_>,
+    ) -> Result<Expression, SolverError> {
+        match &self.vars {
+            Some(vars) => vars.add_secondary_objective_terms(expr, item_group),
+            None => Ok(expr),
         }
     }
 
@@ -191,6 +229,24 @@ pub trait ILPPromotionVars: Debug + Send + Sync + Any {
     /// Returns true if this promotion determines the final price for `item_idx`.
     fn is_item_priced_by_promotion(&self, solution: &dyn Solution, item_idx: usize) -> bool {
         self.is_item_participating(solution, item_idx)
+    }
+
+    /// Optionally contribute terms for a secondary lexicographic objective.
+    ///
+    /// This is evaluated only in a second pass where the primary objective value
+    /// is constrained to its first-pass optimum.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SolverError`] if a term coefficient cannot be represented.
+    fn add_secondary_objective_terms(
+        &self,
+        expr: Expression,
+        _item_group: &ItemGroup<'_>,
+    ) -> Result<Expression, SolverError> {
+        // Most promotions do not need a tie-break objective. Returning `expr`
+        // unchanged keeps the primary-only behaviour and avoids extra model work.
+        Ok(expr)
     }
 
     /// Emit vars-owned constraints into the ILP state.

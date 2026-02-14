@@ -1,7 +1,7 @@
 //! ILP Solver
 
 use good_lp::{
-    Expression, ProblemVariables, Solution, SolverModel, Variable,
+    Expression, IntoAffineExpression, ProblemVariables, Solution, SolverModel, Variable,
     solvers::microlp::microlp as default_solver, variable,
 };
 use rusty_money::{Money, iso::Currency};
@@ -35,6 +35,23 @@ type ItemIndexList = SmallVec<[usize; 10]>;
 type ItemUsageFlags = SmallVec<[bool; 10]>;
 type AppliedPromotionState<'a> = (ItemIndexList, ItemUsageFlags, Money<'a, Currency>);
 type FullPriceState<'a> = (ItemIndexList, Money<'a, Currency>);
+
+struct BuiltILPFormulation<'a> {
+    /// Pool of all ILP decision variables for this formulation build.
+    pb: ProblemVariables,
+
+    /// Primary objective expression in minor currency units.
+    cost: Expression,
+
+    /// Baseline "full-price" option variable per item-group position.
+    item_presence: SmallVec<[Variable; 10]>,
+
+    /// Promotion-owned linear constraints recorded while building `ILPState`.
+    constraints: Vec<ILPConstraint>,
+
+    /// Compiled promotion runtimes bound to the variables above.
+    promotion_instances: PromotionInstances<'a>,
+}
 
 /// Solver using Integer Linear Programming (ILP)
 #[derive(Debug)]
@@ -101,28 +118,27 @@ impl ILPSolver {
             });
         }
 
-        // Build the optimization problem using ILPState to manage variables and objective.
-        // The goal is to find the best combination of promotions that minimizes
-        // total item group cost.
-        //
-        // We set up three things:
-        //
-        // 1. Presence variables: each item at full price (baseline option)
-        // 2. Promotion variables: each item with each applicable promotion (discount options)
-        // 3. Constraints: ensure each item is purchased exactly once (baseline full price OR one promotion discount applied)
+        let BuiltILPFormulation {
+            pb,
+            cost,
+            item_presence,
+            constraints,
+            promotion_instances,
+        } = build_ilp_formulation(promotions, item_group, observer)?;
 
-        // Set up all possible promotion choices for the solver to consider.
-        // For each promotion, we create decision variables that let the solver choose
-        // whether to apply that promotion to each eligible item.
-        let mut state = ILPState::with_presence_variables_and_observer(item_group, observer)?;
+        // Promotions may optionally contribute a secondary tie-break objective.
+        // We check whether any non-zero linear terms were emitted so we can skip
+        // the second pass entirely when no tie-break is configured.
+        let secondary_objective =
+            promotion_instances.add_secondary_objective_terms(Expression::default(), item_group)?;
+        let has_secondary_objective_terms =
+            IntoAffineExpression::linear_coefficients(&secondary_objective)
+                .next()
+                .is_some();
 
-        let promotion_instances =
-            PromotionInstances::from_promotions(promotions, item_group, &mut state, observer)?;
-
-        // Extract state for model creation
-        let (pb, cost, item_presence, constraints) = state.into_parts_with_constraints();
-
-        // Create the solver model
+        // Keep a clone of the exact first-pass objective so we can evaluate the
+        // solved optimum value before consuming `cost` in the model builder.
+        let primary_cost = cost.clone();
         let mut model = pb.minimise(cost).using(default_solver);
 
         ensure_presence_vars_len(item_presence.len(), item_group.len())?;
@@ -148,40 +164,73 @@ impl ILPSolver {
         // Add all recorded promotion constraints.
         model = apply_recorded_constraints(model, constraints);
 
-        let solution = model.solve()?;
+        // Pass 1: optimize the real business objective (total final basket value).
+        let primary_solution = model.solve()?;
 
-        // Translate the solver's decisions back into business terms: which items got
-        // discounted, by which promotions, and what their final prices are.
-        let mut used_items: ItemUsageFlags = smallvec![false; item_group.len()];
-        let mut total = Money::from_minor(0, item_group.currency());
-        let mut promotion_applications: SmallVec<[PromotionApplication<'b>; 10]> = SmallVec::new();
-        let mut next_bundle_id: usize = 0;
-        let mut affected_items: ItemIndexList = ItemIndexList::new();
-
-        // Extract which items each promotion selected and their discounted prices
-        for instance in promotion_instances.iter() {
-            let apps =
-                instance.calculate_item_applications(&solution, item_group, &mut next_bundle_id)?;
-
-            let (applied_items, updated_used_items, updated_total) =
-                apply_promotion_applications(item_group.len(), used_items, total, &apps)?;
-
-            affected_items.extend(applied_items);
-            used_items = updated_used_items;
-            total = updated_total;
-
-            promotion_applications.extend(apps);
+        if !has_secondary_objective_terms {
+            return build_solver_result(
+                &promotion_instances,
+                &primary_solution,
+                item_group,
+                &item_presence,
+            );
         }
 
-        let (unaffected_items, total) =
-            collect_full_price_items(item_group, &solution, &item_presence, used_items, total)?;
+        // Convert the first-pass optimum back to an integral minor-unit value.
+        // The model is built from integer coefficients/variables, so this should
+        // be integral apart from tiny floating-point noise from the LP backend.
+        let primary_optimal_value = objective_value_to_integral_minor_units(
+            primary_solution.eval(&primary_cost),
+            "primary objective value is non-integral",
+        )?;
+        let primary_optimal_f64 = i64_to_f64_exact(primary_optimal_value).ok_or(
+            SolverError::MinorUnitsNotRepresentable(primary_optimal_value),
+        )?;
 
-        Ok(SolverResult {
-            affected_items,
-            unaffected_items,
-            total,
-            promotion_applications,
-        })
+        // Pass 2 uses an identical formulation but with:
+        // 1) a fixed equality `primary_cost == optimum_from_pass_1`
+        // 2) a secondary objective that only breaks ties among pass-1 optima.
+        //
+        // We rebuild instead of mutating the solved model in-place to keep the
+        // construction path identical and avoid backend-specific model mutation
+        // assumptions.
+        let mut secondary_observer = NoopObserver;
+        let BuiltILPFormulation {
+            pb,
+            cost,
+            item_presence,
+            constraints,
+            promotion_instances,
+        } = build_ilp_formulation(promotions, item_group, &mut secondary_observer)?;
+
+        let secondary_objective =
+            promotion_instances.add_secondary_objective_terms(Expression::default(), item_group)?;
+        let mut secondary_model = pb.minimise(secondary_objective).using(default_solver);
+
+        ensure_presence_vars_len(item_presence.len(), item_group.len())?;
+
+        for (item_idx, z_i) in item_presence.iter().copied().enumerate() {
+            let constraint_expr =
+                promotion_instances.add_item_presence_term(Expression::from(z_i), item_idx);
+
+            secondary_observer.on_exclusivity_constraint(item_idx, &constraint_expr);
+            secondary_model = secondary_model.with(constraint_expr.eq(1));
+        }
+
+        secondary_model = apply_recorded_constraints(secondary_model, constraints);
+        // Lexicographic guardrail: force pass 2 to stay on the primary optimum face.
+        secondary_model = secondary_model.with(cost.eq(primary_optimal_f64));
+
+        // Pass 2: choose a deterministic/cheaper branch profile among equal-cost
+        // pass-1 solutions.
+        let secondary_solution = secondary_model.solve()?;
+
+        build_solver_result(
+            &promotion_instances,
+            &secondary_solution,
+            item_group,
+            &item_presence,
+        )
     }
 }
 
@@ -209,6 +258,118 @@ fn apply_recorded_constraints<S: SolverModel>(mut model: S, constraints: Vec<ILP
     }
 
     model
+}
+
+fn build_ilp_formulation<'a>(
+    promotions: &[&'a dyn ILPPromotion],
+    item_group: &ItemGroup<'_>,
+    observer: &mut dyn ILPObserver,
+) -> Result<BuiltILPFormulation<'a>, SolverError> {
+    // Build the optimization problem using ILPState to manage variables and objective.
+    // The goal is to find the best combination of promotions that minimizes
+    // total item group cost.
+    //
+    // We set up three things:
+    //
+    // 1. Presence variables: each item at full price (baseline option)
+    // 2. Promotion variables: each item with each applicable promotion (discount options)
+    // 3. Constraints: ensure each item is purchased exactly once (baseline full price OR one promotion discount applied)
+    let mut state = ILPState::with_presence_variables_and_observer(item_group, observer)?;
+
+    // Set up all possible promotion choices for the solver to consider.
+    // For each promotion, we create decision variables that let the solver choose
+    // whether to apply that promotion to each eligible item.
+    let promotion_instances =
+        PromotionInstances::from_promotions(promotions, item_group, &mut state, observer)?;
+
+    let (pb, cost, item_presence, constraints) = state.into_parts_with_constraints();
+
+    Ok(BuiltILPFormulation {
+        pb,
+        cost,
+        item_presence,
+        constraints,
+        promotion_instances,
+    })
+}
+
+fn objective_value_to_integral_minor_units(
+    value: f64,
+    non_integral_message: &'static str,
+) -> Result<i64, SolverError> {
+    const I64_MIN_F64: f64 = -9_223_372_036_854_775_808.0;
+    const I64_MAX_F64: f64 = 9_223_372_036_854_775_807.0;
+
+    // Solver APIs return objective values as `f64`, but our monetary objective is
+    // modelled in integral minor units. This helper validates and converts safely.
+    if !value.is_finite() {
+        return Err(SolverError::InvariantViolation {
+            message: "objective value is not finite",
+        });
+    }
+
+    // Accept tiny floating-point error around integers (for example 1234.0000001).
+    let rounded = value.round();
+
+    if (value - rounded).abs() > 1e-6 {
+        return Err(SolverError::InvariantViolation {
+            message: non_integral_message,
+        });
+    }
+
+    if !(I64_MIN_F64..=I64_MAX_F64).contains(&rounded) {
+        return Err(SolverError::InvariantViolation {
+            message: "objective value out of i64 range",
+        });
+    }
+
+    format!("{rounded:.0}")
+        .parse()
+        .map_err(|_parse_err| SolverError::InvariantViolation {
+            message: "objective value out of i64 range",
+        })
+}
+
+fn build_solver_result<'a, 'b, S: Solution>(
+    promotion_instances: &PromotionInstances<'a>,
+    solution: &S,
+    item_group: &ItemGroup<'b>,
+    item_presence: &[Variable],
+) -> Result<SolverResult<'b>, SolverError> {
+    // Translate the solver's decisions back into business terms: which items got
+    // discounted, by which promotions, and what their final prices are.
+    let mut used_items: ItemUsageFlags = smallvec![false; item_group.len()];
+    let mut total = Money::from_minor(0, item_group.currency());
+    let mut promotion_applications: SmallVec<[PromotionApplication<'b>; 10]> = SmallVec::new();
+    let mut next_bundle_id: usize = 0;
+    let mut affected_items: ItemIndexList = ItemIndexList::new();
+
+    // Extract which items each promotion selected and their discounted prices
+    for instance in promotion_instances.iter() {
+        let apps =
+            instance.calculate_item_applications(solution, item_group, &mut next_bundle_id)?;
+
+        let (applied_items, updated_used_items, updated_total) =
+            apply_promotion_applications(item_group.len(), used_items, total, &apps)?;
+
+        affected_items.extend(applied_items);
+        used_items = updated_used_items;
+        total = updated_total;
+
+        promotion_applications.extend(apps);
+    }
+
+    let (unaffected_items, total) =
+        collect_full_price_items(item_group, solution, item_presence, used_items, total)?;
+
+    // At this point every item-group position is accounted for exactly once:
+    // either via a promotion application or via its baseline full-price variable.
+    Ok(SolverResult {
+        affected_items,
+        unaffected_items,
+        total,
+        promotion_applications,
+    })
 }
 
 /// Ensure that the number of presence variables matches the number of selected items.
