@@ -742,7 +742,7 @@ pub fn BasketPanel(
     install_mobile_dock_observer(cart_items, dock_hidden);
 
     view! {
-        <aside class="basket-panel">
+        <aside id="basket-panel" class="basket-panel">
             <div class="basket-panel-content">
                 {move || {
                     render_basket_panel_content(

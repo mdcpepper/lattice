@@ -37,6 +37,10 @@
     min-width: 0;
 }
 
+.basket-panel {
+    scroll-margin-top: var(--step-3);
+}
+
 .basket-panel-content {
     position: relative;
 }
@@ -188,7 +192,7 @@
     background: #000;
     color: #fff;
     clip-path: polygon(100% 0, 0 0, 100% 100%);
-    z-index: 30;
+    z-index: 100;
 }
 
 .repo-corner-link:hover {
