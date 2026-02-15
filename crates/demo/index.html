@@ -1,10 +1,69 @@
 <!doctype html>
-<html>
+<html lang="en">
     <head>
         <title>Lattice Demo</title>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <style>
+            .noscript-shell {
+                min-height: 100dvh;
+                margin: 0;
+                padding: 1.5rem;
+                display: grid;
+                place-items: center;
+                background:
+                    radial-gradient(circle at top right, #dbeafe 0%, #eff6ff 45%, #f8fafc 100%);
+                font-family:
+                    Seravek, "Gill Sans Nova", Ubuntu, Calibri, "DejaVu Sans",
+                    source-sans-pro, sans-serif;
+                color: #0f172a;
+            }
+
+            .noscript-card {
+                width: min(100%, 34rem);
+                border: 1px solid #cbd5e1;
+                border-radius: 0.875rem;
+                padding: 1.25rem;
+                background: #fff;
+                box-shadow: 0 10px 28px -20px rgb(15 23 42 / 0.45);
+            }
+
+            .noscript-eyebrow {
+                margin: 0 0 0.5rem;
+                font-size: 0.8125rem;
+                font-weight: 700;
+                color: #1d4ed8;
+            }
+
+            .noscript-card h1 {
+                margin: 0;
+                font-size: clamp(1.25rem, 3.2vw, 1.6rem);
+                line-height: 1.2;
+            }
+
+            .noscript-card p {
+                margin: 0.75rem 0 0;
+                font-size: 0.95rem;
+                line-height: 1.5;
+                color: #334155;
+            }
+        </style>
         <link data-trunk rel="css" href="app.css" />
     </head>
-    <body></body>
+    <body>
+        <noscript>
+            <main class="noscript-shell">
+                <section class="noscript-card" aria-labelledby="noscript-title">
+                    <p class="noscript-eyebrow">Lattice Demo</p>
+                    <h1 id="noscript-title">JavaScript is required for this demo.</h1>
+                    <p>
+                        This app is rendered by a WebAssembly component that also
+                        embeds the solver itself, so there is no non-JavaScript
+                        fallback UI.
+                    </p>
+                    <p>Please enable JavaScript and reload this page to continue.</p>
+                </section>
+            </main>
+        </noscript>
+    </body>
 </html>

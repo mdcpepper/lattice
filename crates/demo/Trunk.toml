@@ -13,4 +13,4 @@ command_arguments = [
 ]
 
 [watch]
-watch = ["app.src.css", "css", "src"]
+watch = ["app.src.css", "css", "src", "index.html"]

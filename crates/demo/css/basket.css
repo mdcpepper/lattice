@@ -197,20 +197,17 @@
 @media (max-width: 48rem) {
     .basket-mobile-dock {
         position: fixed;
-        left: 50%;
-        bottom: calc(var(--space-2xs) + env(safe-area-inset-bottom));
-        transform: translateX(-50%);
-        width: min(
-            calc(100% - (2 * var(--space-layout-page-inline))),
-            var(--app-max-width)
-        );
+        left: 0;
+        right: 0;
+        bottom: 0;
         display: grid;
         grid-template-columns: 1fr auto;
         align-items: center;
         gap: var(--space-layout-subtle-gap) var(--space-layout-row-gap);
-        border: 1px solid var(--color-slate-200);
+        border-top: 1px solid var(--color-slate-200);
         background: rgb(255 255 255 / 0.96);
-        padding: var(--space-layout-row-pad-y) var(--space-layout-row-pad-x);
+        padding: var(--space-layout-row-pad-y) var(--space-layout-page-inline)
+            calc(var(--space-layout-row-pad-y) + env(safe-area-inset-bottom));
         box-shadow: 0 -8px 24px -16px rgb(15 23 42 / 0.4);
         backdrop-filter: blur(8px);
         z-index: 3;
@@ -269,6 +266,6 @@
     .basket-mobile-dock-hidden {
         opacity: 0;
         pointer-events: none;
-        transform: translate(-50%, 0.2rem);
+        transform: translateY(0.2rem);
     }
 }
