@@ -37,6 +37,14 @@
     min-width: 0;
 }
 
+.basket-panel-content {
+    position: relative;
+}
+
+.basket-panel-main {
+    position: relative;
+}
+
 .panel-header {
     display: flex;
     align-items: center;
@@ -199,4 +207,26 @@
     width: 1.1rem;
     height: 1.1rem;
     transform: rotate(45deg);
+}
+
+@media (max-width: 48rem) {
+    .app-shell {
+        padding-bottom: calc(
+            var(--space-layout-page-block) + 4.5rem +
+                env(safe-area-inset-bottom)
+        );
+    }
+
+    .basket-panel {
+        position: relative;
+        z-index: 30;
+    }
+
+    .basket-panel-content {
+        z-index: 1;
+    }
+
+    .basket-panel-main {
+        z-index: 2;
+    }
 }

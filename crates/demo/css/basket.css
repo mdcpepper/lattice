@@ -176,3 +176,83 @@
     margin-top: var(--space-layout-subtle-top);
     font-weight: 600;
 }
+
+.basket-mobile-dock {
+    display: none;
+}
+
+@media (max-width: 48rem) {
+    .basket-mobile-dock {
+        position: fixed;
+        left: 50%;
+        bottom: calc(var(--space-2xs) + env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        width: min(
+            calc(100% - (2 * var(--space-layout-page-inline))),
+            var(--app-max-width)
+        );
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: var(--space-layout-subtle-gap) var(--space-layout-row-gap);
+        border: 1px solid var(--color-slate-200);
+        background: rgb(255 255 255 / 0.96);
+        padding: var(--space-layout-row-pad-y) var(--space-layout-row-pad-x);
+        box-shadow: 0 -8px 24px -16px rgb(15 23 42 / 0.4);
+        backdrop-filter: blur(8px);
+        z-index: 3;
+        font-weight: bold;
+        opacity: 1;
+        transition:
+            opacity 140ms ease,
+            transform 140ms ease;
+    }
+
+    .basket-mobile-dock-label,
+    .basket-mobile-dock-total,
+    .basket-mobile-dock-meta {
+        margin: 0;
+    }
+
+    .basket-mobile-dock-label {
+        font-size: var(--step--2);
+        line-height: 1rem;
+        /*color: var(--color-slate-600);*/
+    }
+
+    .basket-mobile-dock-total {
+        font-size: var(--step--1);
+        line-height: 1.25rem;
+        color: var(--color-slate-900);
+        font-weight: 600;
+        text-align: right;
+    }
+
+    .basket-mobile-dock-meta {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: var(--space-layout-row-gap);
+        font-size: var(--step--2);
+        font-weight: normal;
+        line-height: 1rem;
+        color: var(--color-slate-500);
+    }
+
+    .basket-mobile-dock-meta-label {
+        justify-self: start;
+        text-align: left;
+    }
+
+    .basket-mobile-dock-meta-value {
+        justify-self: end;
+        text-align: right;
+    }
+
+    .basket-mobile-dock-hidden {
+        opacity: 0;
+        pointer-events: none;
+        transform: translate(-50%, 0.2rem);
+    }
+}

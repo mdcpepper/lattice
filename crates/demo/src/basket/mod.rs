@@ -1,22 +1,24 @@
 use std::{
     collections::{BTreeSet, HashMap},
     sync::Arc,
+    time::Duration,
 };
 
 #[cfg(target_arch = "wasm32")]
 use std::path::PathBuf;
-#[cfg(target_arch = "wasm32")]
-use std::time::Duration;
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
 use humanize_duration::{Truncate, prelude::DurationExt};
 use leptos::prelude::*;
+use rustc_hash::{FxHashMap, FxHashSet};
 use rusty_money::{Money, iso::Currency};
 use slotmap::{SecondaryMap, SlotMap};
 
 #[cfg(target_arch = "wasm32")]
 use lattice::solvers::ilp::renderers::typst::MultiLayerRenderer;
+
 use lattice::{
     basket::Basket,
     graph::PromotionGraph,
@@ -31,35 +33,13 @@ use crate::{
     promotions::{PromotionPill, bundle_pill_style},
 };
 
-fn start_icon_confirmation(confirmed_icons: RwSignal<BTreeSet<String>>, icon_key: &str) {
-    confirmed_icons.update(|states| {
-        states.insert(icon_key.to_string());
-    });
-}
+pub(super) mod dock;
+pub(super) mod line_item;
+pub(super) mod summary;
 
-fn clear_icon_confirmation(confirmed_icons: RwSignal<BTreeSet<String>>, icon_key: &str) {
-    confirmed_icons.update(|states| {
-        states.remove(icon_key);
-    });
-}
-
-fn is_icon_confirmed(confirmed_icons: RwSignal<BTreeSet<String>>, icon_key: &str) -> bool {
-    confirmed_icons.with(|states| states.contains(icon_key))
-}
-
-fn remove_line_item(items: &mut Vec<String>, basket_index: usize, fixture_key: &str) {
-    if items
-        .get(basket_index)
-        .is_some_and(|item_key| item_key == fixture_key)
-    {
-        items.remove(basket_index);
-        return;
-    }
-
-    if let Some(position) = items.iter().position(|item_key| item_key == fixture_key) {
-        items.remove(position);
-    }
-}
+use dock::{BasketMobileDock, install_mobile_dock_observer};
+use line_item::BasketLine;
+use summary::BasketSummary;
 
 /// Solver inputs required to build basket/receipt view state.
 #[derive(Debug)]
@@ -85,7 +65,7 @@ pub struct BasketSolverData {
 
 /// Render model for an item line in the basket.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct BasketLineItem {
+pub(crate) struct BasketLineItem {
     /// Item index in the basket/cart.
     basket_index: usize,
 
@@ -129,12 +109,18 @@ struct BasketViewModel {
 
 /// Render model for savings contribution by promotion.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PromotionSavings {
+pub(crate) struct PromotionSavings {
     /// Promotion display name.
     name: String,
 
     /// Savings amount for this promotion.
     savings: String,
+
+    /// Number of discounted item applications for this promotion.
+    item_applications: usize,
+
+    /// Number of distinct bundles for this promotion.
+    bundle_applications: usize,
 }
 
 fn build_basket(
@@ -271,15 +257,23 @@ fn solve_basket(
         total: format_money(&receipt.total()),
         savings: format!("-{}", format_money(&savings)),
         savings_breakdown,
-        solve_duration: format!("{}", solve_elapsed.human(Truncate::Nano)),
+        solve_duration: format_solve_duration(solve_elapsed),
     })
+}
+
+#[derive(Debug)]
+struct PromotionAggregate {
+    name: String,
+    savings_minor: i64,
+    item_applications: usize,
+    bundle_ids: FxHashSet<usize>,
 }
 
 fn collect_promotion_savings(
     receipt: &Receipt<'_>,
     solver_data: &BasketSolverData,
 ) -> Result<Vec<PromotionSavings>, String> {
-    let mut savings_by_promotion: HashMap<String, i64> = HashMap::new();
+    let mut by_promotion: FxHashMap<PromotionKey, PromotionAggregate> = FxHashMap::default();
 
     for applications in receipt.promotion_applications().values() {
         for app in applications {
@@ -298,30 +292,58 @@ fn collect_promotion_savings(
                 .cloned()
                 .unwrap_or_else(|| "Unknown promotion".to_string());
 
-            savings_by_promotion
-                .entry(promotion_name)
-                .and_modify(|total| *total += app_savings_minor)
-                .or_insert(app_savings_minor);
+            let aggregate =
+                by_promotion
+                    .entry(app.promotion_key)
+                    .or_insert_with(|| PromotionAggregate {
+                        name: promotion_name,
+                        savings_minor: 0,
+                        item_applications: 0,
+                        bundle_ids: FxHashSet::default(),
+                    });
+
+            aggregate.savings_minor += app_savings_minor;
+            aggregate.item_applications += 1;
+            aggregate.bundle_ids.insert(app.bundle_id);
         }
     }
 
-    let mut grouped: Vec<(String, i64)> = savings_by_promotion.into_iter().collect();
-    grouped.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+    let mut grouped: Vec<PromotionAggregate> = by_promotion.into_values().collect();
+
+    grouped.sort_by(|left, right| {
+        right
+            .savings_minor
+            .cmp(&left.savings_minor)
+            .then_with(|| left.name.cmp(&right.name))
+    });
 
     Ok(grouped
         .into_iter()
-        .map(|(name, savings_minor)| PromotionSavings {
-            name,
+        .map(|aggregate| PromotionSavings {
+            item_applications: aggregate.item_applications,
+            bundle_applications: aggregate.bundle_ids.len(),
             savings: format!(
                 "-{}",
-                format_money(&Money::from_minor(savings_minor, solver_data.currency))
+                format_money(&Money::from_minor(
+                    aggregate.savings_minor,
+                    solver_data.currency
+                ))
             ),
+            name: aggregate.name,
         })
         .collect())
 }
 
 fn format_money(money: &Money<'_, Currency>) -> String {
     format!("{money}")
+}
+
+fn format_solve_duration(duration: Duration) -> String {
+    if duration < Duration::from_millis(1) {
+        return "< 1ms".to_string();
+    }
+
+    format!("{}", duration.human(Truncate::Nano))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -422,253 +444,6 @@ fn download_text_file(filename: &str, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Basket panel component.
-#[component]
-fn BasketSummary(
-    subtotal: String,
-    savings: String,
-    savings_breakdown: Vec<PromotionSavings>,
-    total: String,
-) -> impl IntoView {
-    view! {
-        <div class="basket-summary">
-            <p class="basket-summary-row">
-                <span>"Subtotal"</span>
-                <span>{subtotal}</span>
-            </p>
-            <details class="basket-savings">
-                <summary class="basket-savings-summary">
-                    <span>
-                        <span>"Savings"</span>
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="24"
-                            height="24"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            aria-hidden="true"
-                        >
-                            <path d="m9 18 6-6-6-6"></path>
-                        </svg>
-                    </span>
-                    <span>{savings}</span>
-                </summary>
-
-                <div class="basket-savings-body">
-                    {if savings_breakdown.is_empty() {
-                        view! { <p>"No promotion savings applied."</p> }.into_any()
-                    } else {
-                        view! {
-                            <ul>
-                                {savings_breakdown
-                                    .into_iter()
-                                    .map(|entry| {
-                                        view! {
-                                            <li>
-                                                <span>{entry.name}</span>
-                                                <span>{entry.savings}</span>
-                                            </li>
-                                        }
-                                    })
-                                    .collect_view()}
-                            </ul>
-                        }
-                            .into_any()
-                    }}
-                </div>
-            </details>
-
-            <p class="basket-total-row">
-                <span>"Total"</span>
-                <span>{total}</span>
-            </p>
-        </div>
-    }
-}
-
-#[component]
-fn BasketLine(
-    line: BasketLineItem,
-    cart_items: RwSignal<Vec<String>>,
-    action_message: RwSignal<Option<String>>,
-    add_icon_confirmations: RwSignal<BTreeSet<String>>,
-) -> impl IntoView {
-    let basket_index = line.basket_index;
-
-    let fixture_key = line.fixture_key.clone();
-    let remove_fixture_key = line.fixture_key.clone();
-    let line_key = format!("{basket_index}:{}", line.fixture_key);
-
-    let item_name_for_add = line.name.clone();
-    let item_name_for_remove = line.name.clone();
-
-    let add_icon_key = format!("add:{line_key}");
-    let add_icon_key_for_class = add_icon_key.clone();
-    let add_icon_key_for_click = add_icon_key.clone();
-    let add_icon_key_for_animation_end = add_icon_key.clone();
-
-    let add_button_label = format!(
-        "Add another {} ({}) to basket",
-        item_name_for_add.clone(),
-        line.final_price
-    );
-
-    let remove_button_label = format!(
-        "Remove {} ({}) from basket",
-        item_name_for_remove.clone(),
-        line.final_price
-    );
-
-    let has_discount = line.base_price != line.final_price;
-    let promotion_pills = line.promotions;
-
-    view! {
-        <li>
-            <div class="basket-line-content">
-                <div>
-                    <div class="basket-line-header">
-                        <p class="basket-line-name">{line.name}</p>
-                        <div class="basket-line-price">
-                            {if has_discount {
-                                view! {
-                                    <span class="basket-line-base-price">{line.base_price}</span>
-                                }
-                                    .into_any()
-                            } else {
-                                ().into_any()
-                            }}
-                            <span class="basket-line-final-price">{line.final_price}</span>
-                        </div>
-                    </div>
-                    {if promotion_pills.is_empty() {
-                        ().into_any()
-                    } else {
-                        view! {
-                            <div class="basket-line-pills">
-                                {promotion_pills
-                                    .into_iter()
-                                    .map(|pill| {
-                                        let pill_text = format!("{} (#{})", pill.label.clone(), pill.bundle_id.clone());
-
-                                        view! {
-                                            <span
-                                                class="basket-line-pill"
-                                                style=pill.style
-                                            >
-                                                {pill_text}
-                                            </span>
-                                        }
-                                    })
-                                    .collect_view()}
-                            </div>
-                        }
-                            .into_any()
-                    }}
-                </div>
-
-                <div>
-                    <button
-                        type="button"
-                        aria-label=remove_button_label
-                        class="icon-button icon-button-secondary icon-button-compact"
-                        on:click=move |_| {
-                            cart_items.update(|items| {
-                                remove_line_item(items, basket_index, &remove_fixture_key);
-                            });
-
-                            action_message.set(Some(format!(
-                                "Removed {item_name_for_remove} from basket."
-                            )));
-                        }
-                    >
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="24"
-                            height="24"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            class="lucide lucide-minus-icon lucide-minus"
-                        >
-                            <path d="M5 12h14"></path>
-                        </svg>
-                    </button>
-                    <button
-                        type="button"
-                        aria-label=add_button_label
-                        class=move || {
-                            if is_icon_confirmed(
-                                add_icon_confirmations,
-                                &add_icon_key_for_class,
-                            ) {
-                                "icon-button icon-button-primary icon-button-compact icon-button-confirmed"
-                            } else {
-                                "icon-button icon-button-primary icon-button-compact"
-                            }
-                        }
-                        on:click=move |_| {
-                            start_icon_confirmation(
-                                add_icon_confirmations,
-                                &add_icon_key_for_click,
-                            );
-
-                            cart_items.update(|items| items.push(fixture_key.clone()));
-
-                            action_message
-                                .set(Some(format!("Added {item_name_for_add} to basket.")));
-                        }
-                    >
-                        <span class="icon-button-icon-stack" aria-hidden="true">
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="24"
-                                height="24"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                class="icon-button-icon icon-button-icon-original lucide lucide-plus-icon lucide-plus"
-                            >
-                                <path d="M5 12h14"></path>
-                                <path d="M12 5v14"></path>
-                            </svg>
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="24"
-                                height="24"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                class="icon-button-icon icon-button-icon-check lucide lucide-check-icon lucide-check"
-                                on:animationend=move |_| {
-                                    clear_icon_confirmation(
-                                        add_icon_confirmations,
-                                        &add_icon_key_for_animation_end,
-                                    );
-                                }
-                            >
-                                <path d="M20 6 9 17l-5-5"></path>
-                            </svg>
-                        </span>
-                    </button>
-                </div>
-            </div>
-        </li>
-    }
-}
-
 #[component]
 fn BasketBody(
     basket: BasketViewModel,
@@ -722,7 +497,10 @@ fn BasketBody(
 #[component]
 fn BasketHeading(item_count: usize, basket_total: Option<String>) -> impl IntoView {
     view! {
-        <h2 class="panel-title panel-title-spaced">
+        <h2
+            class="panel-title panel-title-spaced basket-mobile-dock-hide-target"
+            data-dock-hide-key="heading"
+        >
             <div class="panel-title-row">
                 <span class="panel-title-leading basket-title-label">
                     <svg
@@ -843,8 +621,8 @@ fn BasketPanelMeta(
             <div class="panel-meta-block">
                 {solve_meta}
                 <dl class="panel-meta-notes">
-                    <dt>"Supplier: 10% Off Coke"</dt>
-                    <dd>"Applies first and can stack with later basket promotions."</dd>
+                    <dt>"10% Off Coca Cola"</dt>
+                    <dd>"A supplier-funded discount that applies first and can stack with other retailer promotions."</dd>
 
                     <dt>"£3.80 Meal Deal"</dt>
                     <dd>"Applies to 1 "<kbd>"main"</kbd>" + 1 "<kbd>"drink"</kbd>" + 1 "<kbd>"snack"</kbd>" as a fixed bundle price."</dd>
@@ -879,13 +657,18 @@ fn render_basket_panel_content(
     live_message: RwSignal<(u64, String)>,
     action_message: RwSignal<Option<String>>,
     add_icon_confirmations: RwSignal<BTreeSet<String>>,
+    dock_hidden: RwSignal<bool>,
 ) -> AnyView {
     let cart_snapshot = cart_items.get();
     let item_count = cart_snapshot.len();
 
     match solve_basket(solver_data, &cart_snapshot) {
         Ok(basket) => {
-            solve_time_text.set(basket.solve_duration.clone());
+            if item_count == 0 {
+                solve_time_text.set(String::new());
+            } else {
+                solve_time_text.set(basket.solve_duration.clone());
+            }
 
             if let Some(action) = action_message.get_untracked() {
                 announce(live_message, format!("{action}, total {}.", basket.total));
@@ -893,16 +676,25 @@ fn render_basket_panel_content(
             }
 
             let basket_total = basket.total.clone();
+            let basket_savings = basket.savings.clone();
 
             view! {
-                <BasketHeading item_count=item_count basket_total=Some(basket_total) />
-                <div class="panel-card">
-                    <BasketBody
-                        basket=basket
-                        cart_items=cart_items
-                        action_message=action_message
-                        add_icon_confirmations=add_icon_confirmations
-                    />
+                <BasketMobileDock
+                    item_count=item_count
+                    basket_total=Some(basket_total.clone())
+                    savings=Some(basket_savings)
+                    hidden=dock_hidden
+                />
+                <div class="basket-panel-main">
+                    <BasketHeading item_count=item_count basket_total=Some(basket_total) />
+                    <div class="panel-card">
+                        <BasketBody
+                            basket=basket
+                            cart_items=cart_items
+                            action_message=action_message
+                            add_icon_confirmations=add_icon_confirmations
+                        />
+                    </div>
                 </div>
             }
             .into_any()
@@ -910,9 +702,17 @@ fn render_basket_panel_content(
         Err(error_message) => {
             solve_time_text.set(String::new());
             view! {
-                <BasketHeading item_count=item_count basket_total=None />
-                <div class="panel-card">
-                    <p class="error-text">{error_message}</p>
+                <BasketMobileDock
+                    item_count=item_count
+                    basket_total=None
+                    savings=None
+                    hidden=dock_hidden
+                />
+                <div class="basket-panel-main">
+                    <BasketHeading item_count=item_count basket_total=None />
+                    <div class="panel-card">
+                        <p class="error-text">{error_message}</p>
+                    </div>
                 </div>
             }
             .into_any()
@@ -935,34 +735,40 @@ pub fn BasketPanel(
     action_message: RwSignal<Option<String>>,
 ) -> impl IntoView {
     let add_icon_confirmations = RwSignal::new(BTreeSet::<String>::new());
+    let dock_hidden = RwSignal::new(false);
     let panel_solver_data = solver_data;
     let meta_solver_data = Arc::clone(&panel_solver_data);
 
+    install_mobile_dock_observer(cart_items, dock_hidden);
+
     view! {
         <aside class="basket-panel">
-            {move || {
-                render_basket_panel_content(
-                    &panel_solver_data,
-                    cart_items,
-                    solve_time_text,
-                    live_message,
-                    action_message,
-                    add_icon_confirmations,
-                )
-            }}
-            <BasketPanelMeta
-                solve_time_text=solve_time_text
-                solver_data=meta_solver_data
-                cart_items=cart_items
-                live_message=live_message
-            />
+            <div class="basket-panel-content">
+                {move || {
+                    render_basket_panel_content(
+                        &panel_solver_data,
+                        cart_items,
+                        solve_time_text,
+                        live_message,
+                        action_message,
+                        add_icon_confirmations,
+                        dock_hidden,
+                    )
+                }}
+                <BasketPanelMeta
+                    solve_time_text=solve_time_text
+                    solver_data=meta_solver_data
+                    cart_items=cart_items
+                    live_message=live_message
+                />
+            </div>
         </aside>
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, time::Duration};
 
     use leptos::prelude::*;
     use rusty_money::{Money, iso};
@@ -973,6 +779,13 @@ mod tests {
         receipt::Receipt, tags::string::StringTagCollection,
     };
     use testresult::TestResult;
+
+    use crate::basket::{
+        line_item::{
+            clear_icon_confirmation, is_icon_confirmed, remove_line_item, start_icon_confirmation,
+        },
+        summary::format_application_summary,
+    };
 
     use super::*;
 
@@ -1134,7 +947,34 @@ mod tests {
         assert_eq!(result, "€1.234,56");
     }
 
-    // Test build_basket function
+    #[test]
+    fn test_format_solve_duration_sub_millisecond() {
+        let result = format_solve_duration(Duration::from_nanos(999_999));
+
+        assert_eq!(result, "< 1ms");
+    }
+
+    #[test]
+    fn test_format_solve_duration_one_millisecond() {
+        let result = format_solve_duration(Duration::from_millis(1));
+
+        assert_eq!(result, "1ms");
+    }
+
+    #[test]
+    fn test_format_application_summary_mixed_counts() {
+        let result = format_application_summary(3, 1);
+
+        assert_eq!(result, "× 1 (3 items)");
+    }
+
+    #[test]
+    fn test_format_application_summary_singular_counts() {
+        let result = format_application_summary(1, 1);
+
+        assert_eq!(result, "× 1 (1 item)");
+    }
+
     #[test]
     fn test_build_basket_empty_cart() -> TestResult {
         let solver_data = create_minimal_solver_data()?;
@@ -1200,7 +1040,6 @@ mod tests {
         Ok(())
     }
 
-    // Test solve_basket function
     #[test]
     fn test_solve_basket_empty() -> TestResult {
         let solver_data = create_test_solver_data()?;
@@ -1246,7 +1085,6 @@ mod tests {
         Ok(())
     }
 
-    // Test collect_promotion_savings
     #[test]
     fn test_collect_promotion_savings_empty_receipt() -> TestResult {
         let solver_data = create_test_solver_data()?;
@@ -1267,7 +1105,35 @@ mod tests {
         Ok(())
     }
 
-    // Helper functions for creating test data
+    #[test]
+    fn test_collect_promotion_savings_meal_deal_counts_items_and_bundles() -> TestResult {
+        let solver_data = create_demo_solver_data()?;
+
+        let cart_fixture_keys = vec![
+            "sandwich".to_string(),
+            "water".to_string(),
+            "crisps".to_string(),
+        ];
+
+        let basket = build_basket(&solver_data, &cart_fixture_keys)?;
+        let item_group = ItemGroup::from(&basket);
+
+        let solved = solver_data.graph.evaluate(&item_group)?;
+        let receipt = Receipt::from_layered_result(&basket, solved)?;
+
+        let savings = collect_promotion_savings(&receipt, &solver_data)?;
+
+        let meal_deal = savings
+            .iter()
+            .find(|entry| entry.name == "£3.80 Meal Deal")
+            .ok_or_else(|| "Expected meal deal entry in savings breakdown".to_string())?;
+
+        assert_eq!(meal_deal.item_applications, 3);
+        assert_eq!(meal_deal.bundle_applications, 1);
+
+        Ok(())
+    }
+
     fn create_minimal_solver_data() -> TestResult<BasketSolverData> {
         let product_meta_map = SlotMap::with_key();
         let product_key_by_fixture_key = HashMap::new();
@@ -1321,6 +1187,25 @@ mod tests {
             promotion_names,
             promotion_meta_map,
             currency: iso::GBP,
+        })
+    }
+
+    fn create_demo_solver_data() -> TestResult<BasketSolverData> {
+        let products_yaml = include_str!("../../../../fixtures/products/demo.yml");
+        let promotions_yaml = include_str!("../../../../fixtures/promotions/demo.yml");
+
+        let loaded_products =
+            crate::products::load_products(products_yaml).map_err(testresult::TestError::from)?;
+        let loaded_promotions = crate::promotions::load_promotions(promotions_yaml)
+            .map_err(testresult::TestError::from)?;
+
+        Ok(BasketSolverData {
+            product_meta_map: loaded_products.product_meta_map,
+            product_key_by_fixture_key: loaded_products.product_key_by_fixture_key,
+            graph: loaded_promotions.graph,
+            promotion_names: loaded_promotions.promotion_names,
+            promotion_meta_map: loaded_promotions.promotion_meta_map,
+            currency: loaded_products.currency,
         })
     }
 }
