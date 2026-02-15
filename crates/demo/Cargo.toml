@@ -8,10 +8,11 @@ testresult.workspace = true
 
 [dependencies]
 console_error_panic_hook = "0.1.7"
-humanize-duration = "0.0.7"
+humanize-duration.workspace = true
 leptos = { version = "0.8.15", features = ["csr"] }
 lattice = { path = "../core" }
 petgraph.workspace = true
+rustc-hash.workspace = true
 rusty-money.workspace = true
 serde_norway.workspace = true
 slotmap.workspace = true
@@ -21,7 +22,11 @@ web-sys = { version = "0.3.85", features = [
     "Document",
     "Element",
     "HtmlElement",
+    "IntersectionObserver",
+    "IntersectionObserverEntry",
+    "IntersectionObserverInit",
     "Node",
+    "NodeList",
     "Performance",
     "Url",
     "Window",

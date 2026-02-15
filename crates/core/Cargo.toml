@@ -19,11 +19,11 @@ testresult.workspace = true
 clap = { version = "4.5.57", features = ["derive"] }
 decimal-percentage.workspace = true
 good_lp = { version = "1.14.2", default-features = false }
-humanize-duration = "0.0.7"
+humanize-duration.workspace = true
 num-traits = "0.2.19"
 petgraph = "0.8.3"
 rust_decimal = "1.40.0"
-rustc-hash = "2.1.1"
+rustc-hash.workspace = true
 rusty-money.workspace = true
 serde = { version = "1.0.228", features = ["derive"] }
 serde_norway.workspace = true

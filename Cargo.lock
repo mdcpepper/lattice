@@ -2502,6 +2502,7 @@ dependencies = [
  "leptos",
  "leptos_workers",
  "petgraph",
+ "rustc-hash",
  "rusty-money",
  "serde_norway",
  "slotmap",
