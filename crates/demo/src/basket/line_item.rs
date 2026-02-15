@@ -41,7 +41,10 @@ pub(super) fn remove_line_item(items: &mut Vec<String>, basket_index: usize, fix
 
 fn render_promotion_pills(promotion_pills: Vec<PromotionPill>) -> AnyView {
     if promotion_pills.is_empty() {
-        return ().into_any();
+        return view! {
+            <div class="basket-line-pills basket-line-pills-empty" aria-hidden="true"></div>
+        }
+        .into_any();
     }
 
     view! {
