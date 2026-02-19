@@ -2,11 +2,11 @@
 
 declare(strict_types=1);
 
-use Lattice\Discount\DiscountKind;
+use Lattice\Discount\Kind;
 use Lattice\Discount\InvalidPercentageException;
 use Lattice\Discount\Percentage;
 use Lattice\Discount\PercentageOutOfRangeException;
-use Lattice\Discount\SimpleDiscount;
+use Lattice\Discount\Simple;
 use Lattice\Money;
 
 it("can create percentage from decimal value", function (): void {
@@ -111,48 +111,48 @@ it("accepts 100% discount", function (): void {
 
 it("can create percentage off discount", function (): void {
     $percentage = new Percentage("0.25");
-    $discount = SimpleDiscount::percentageOff($percentage);
+    $discount = Simple::percentageOff($percentage);
 
-    expect($discount->kind)->toBe(DiscountKind::PercentageOff);
+    expect($discount->kind)->toBe(Kind::PercentageOff);
     expect($discount->percentage)->not->toBeNull();
     expect($discount->amount)->toBeNull();
 });
 
 it("can create amount override discount", function (): void {
     $amount = new Money(500, "GBP");
-    $discount = SimpleDiscount::amountOverride($amount);
+    $discount = Simple::amountOverride($amount);
 
-    expect($discount->kind)->toBe(DiscountKind::AmountOverride);
+    expect($discount->kind)->toBe(Kind::AmountOverride);
     expect($discount->percentage)->toBeNull();
     expect($discount->amount)->not->toBeNull();
 });
 
 it("can create amount off discount", function (): void {
     $amount = new Money(200, "GBP");
-    $discount = SimpleDiscount::amountOff($amount);
+    $discount = Simple::amountOff($amount);
 
-    expect($discount->kind)->toBe(DiscountKind::AmountOff);
+    expect($discount->kind)->toBe(Kind::AmountOff);
     expect($discount->percentage)->toBeNull();
     expect($discount->amount)->not->toBeNull();
 });
 
 it("percentage off discount uses correct discount kind", function (): void {
     $percentage = Percentage::fromDecimal(0.5);
-    $discount = SimpleDiscount::percentageOff($percentage);
+    $discount = Simple::percentageOff($percentage);
 
-    expect($discount->kind)->toBe(DiscountKind::PercentageOff);
+    expect($discount->kind)->toBe(Kind::PercentageOff);
 });
 
 it("amount override discount uses correct discount kind", function (): void {
     $amount = new Money(1000, "USD");
-    $discount = SimpleDiscount::amountOverride($amount);
+    $discount = Simple::amountOverride($amount);
 
-    expect($discount->kind)->toBe(DiscountKind::AmountOverride);
+    expect($discount->kind)->toBe(Kind::AmountOverride);
 });
 
 it("amount off discount uses correct discount kind", function (): void {
     $amount = new Money(300, "EUR");
-    $discount = SimpleDiscount::amountOff($amount);
+    $discount = Simple::amountOff($amount);
 
-    expect($discount->kind)->toBe(DiscountKind::AmountOff);
+    expect($discount->kind)->toBe(Kind::AmountOff);
 });

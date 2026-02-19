@@ -2,27 +2,27 @@
 
 declare(strict_types=1);
 
-use Lattice\Discount\SimpleDiscount;
+use Lattice\Discount\Simple;
 use Lattice\Discount\Percentage;
 use Lattice\Item;
-use Lattice\Layer;
-use Lattice\LayerOutput;
 use Lattice\Money;
 use Lattice\Product;
 use Lattice\PromotionRedemption;
-use Lattice\Promotions\Budget;
-use Lattice\Promotions\DirectDiscountPromotion;
+use Lattice\Promotion\Budget;
+use Lattice\Promotion\Direct;
 use Lattice\Qualification;
 use Lattice\Receipt;
-use Lattice\Stack;
-use Lattice\StackBuilder;
 use Lattice\Stack\InvalidStackException;
+use Lattice\Stack\Layer;
+use Lattice\Stack\LayerOutput;
+use Lattice\Stack\Stack;
+use Lattice\Stack\StackBuilder;
 
 it("validates a linear stack as a promotion graph", function (): void {
-    $promotion = new DirectDiscountPromotion(
+    $promotion = new Direct(
         reference: "promo-1",
         qualification: Qualification::matchAny(["food"]),
-        discount: SimpleDiscount::amountOff(new Money(25, "GBP")),
+        discount: Simple::amountOff(new Money(25, "GBP")),
         budget: Budget::unlimited(),
     );
 
@@ -104,10 +104,10 @@ it("builds and processes a single-layer stack", function (): void {
         ),
     );
 
-    $tenPercentOff = new DirectDiscountPromotion(
+    $tenPercentOff = new Direct(
         reference: "ten-off",
         qualification: Qualification::matchAny(["eligible"]),
-        discount: SimpleDiscount::percentageOff(Percentage::fromDecimal(0.1)),
+        discount: Simple::percentageOff(Percentage::fromDecimal(0.1)),
         budget: Budget::unlimited(),
     );
 
@@ -150,28 +150,28 @@ it(
         $sandwichItem = Item::fromProduct("i-main", $sandwich);
         $snackItem = Item::fromProduct("i-side", $snack);
 
-        $elevenOff = new DirectDiscountPromotion(
+        $elevenOff = new Direct(
             reference: "eleven-off",
             qualification: Qualification::matchAny(["eligible"]),
-            discount: SimpleDiscount::percentageOff(
+            discount: Simple::percentageOff(
                 Percentage::fromDecimal(0.11),
             ),
             budget: Budget::unlimited(),
         );
 
-        $thirteenOff = new DirectDiscountPromotion(
+        $thirteenOff = new Direct(
             reference: "thirteen-off",
             qualification: Qualification::matchAny(["eligible"]),
-            discount: SimpleDiscount::percentageOff(
+            discount: Simple::percentageOff(
                 Percentage::fromDecimal(0.13),
             ),
             budget: Budget::unlimited(),
         );
 
-        $seventeenOff = new DirectDiscountPromotion(
+        $seventeenOff = new Direct(
             reference: "seventeen-off",
             qualification: Qualification::matchAny(["eligible"]),
-            discount: SimpleDiscount::percentageOff(
+            discount: Simple::percentageOff(
                 Percentage::fromDecimal(0.17),
             ),
             budget: Budget::unlimited(),
@@ -256,19 +256,19 @@ it(
             ),
         );
 
-        $tenOffEligible = new DirectDiscountPromotion(
+        $tenOffEligible = new Direct(
             reference: "ten-off-eligible",
             qualification: Qualification::matchAny(["eligible"]),
-            discount: SimpleDiscount::percentageOff(
+            discount: Simple::percentageOff(
                 Percentage::fromDecimal(0.1),
             ),
             budget: Budget::unlimited(),
         );
 
-        $staffDiscount = new DirectDiscountPromotion(
+        $staffDiscount = new Direct(
             reference: "five-off-staff",
             qualification: Qualification::matchAll(),
-            discount: SimpleDiscount::percentageOff(
+            discount: Simple::percentageOff(
                 Percentage::fromDecimal(0.05),
             ),
             budget: Budget::unlimited(),

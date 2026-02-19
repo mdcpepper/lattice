@@ -4,18 +4,18 @@ declare(strict_types=1);
 
 use Lattice\Discount\Percentage;
 use Lattice\Item;
-use Lattice\Layer;
-use Lattice\LayerOutput;
 use Lattice\Money;
 use Lattice\Product;
-use Lattice\Promotions\Budget;
-use Lattice\Promotions\Promotion;
-use Lattice\Promotions\TieredThreshold;
-use Lattice\Promotions\TieredThreshold\Discount;
-use Lattice\Promotions\TieredThreshold\Threshold;
-use Lattice\Promotions\TieredThreshold\Tier;
+use Lattice\Promotion\Budget;
+use Lattice\Promotion\PromotionInterface;
+use Lattice\Promotion\TieredThreshold\Discount;
+use Lattice\Promotion\TieredThreshold\Threshold;
+use Lattice\Promotion\TieredThreshold\Tier;
+use Lattice\Promotion\TieredThreshold\TieredThreshold;
 use Lattice\Qualification;
-use Lattice\StackBuilder;
+use Lattice\Stack\Layer;
+use Lattice\Stack\LayerOutput;
+use Lattice\Stack\StackBuilder;
 
 it("implements Promotion interface", function () {
     $promotion = new TieredThreshold(
@@ -32,7 +32,7 @@ it("implements Promotion interface", function () {
         budget: Budget::unlimited(),
     );
 
-    expect($promotion)->toBeInstanceOf(Promotion::class);
+    expect($promotion)->toBeInstanceOf(PromotionInterface::class);
 });
 
 it("can be instantiated", function () {

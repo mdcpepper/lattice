@@ -913,24 +913,17 @@ just test-extension
 
 ```php
 use Lattice\Discount\Percentage;
-use Lattice\Discount\SimpleDiscount;
+use Lattice\Discount\Simple;
 use Lattice\Item;
-use Lattice\Layer;
-use Lattice\LayerOutput;
 use Lattice\Money;
 use Lattice\Product;
-use Lattice\Promotions\Budget;
-use Lattice\Promotions\DirectDiscountPromotion;
-use Lattice\Promotions\MixAndMatch\Discount as MixAndMatchDiscount;
-use Lattice\Promotions\MixAndMatch\Slot as MixAndMatchSlot;
-use Lattice\Promotions\MixAndMatchPromotion;
-use Lattice\Promotions\PositionalDiscountPromotion;
-use Lattice\Promotions\TieredThreshold;
-use Lattice\Promotions\TieredThreshold\Discount as TieredThresholdDiscount;
-use Lattice\Promotions\TieredThreshold\Threshold as TieredThresholdThreshold;
-use Lattice\Promotions\TieredThreshold\Tier as TieredThresholdTier;
+use Lattice\Promotion\Budget;
+use Lattice\Promotion\Direct;
+use Lattice\Promotion\MixAndMatch\{MixAndMatch, Slot as MixAndMatchSlot, Discount as MixAndMatchDiscount};
+use Lattice\Promotion\Positional;
+use Lattice\Promotion\TieredThreshold\{TieredThreshold, Tier, Threshold, Discount as TieredThresholdDiscount};
 use Lattice\Qualification;
-use Lattice\StackBuilder;
+use Lattice\Stack\{Layer, LayerOutput, StackBuilder};
 
 $sandwich = Item::fromProduct(
     reference: "item-1",
@@ -942,23 +935,23 @@ $crisps = Item::fromProduct(
     product: new Product("sku-2", "Crisps", new Money(1_00, "GBP"), ["meal-deal:snack"]),
 );
 
-$tenPercentOffDrinks = new DirectDiscountPromotion(
+$tenPercentOffDrinks = new Direct(
     reference: "10%-off",
     qualification: Qualification::matchAny(["drinks"]),
-    discount: SimpleDiscount::percentageOff(Percentage::fromDecimal(0.1)),
+    discount: Simple::percentageOff(Percentage::fromDecimal(0.1)),
     budget: Budget::unlimited(),
 );
 
-$threeForTwoHaircare = new PositionalDiscountPromotion(
+$threeForTwoHaircare = new Positional(
     reference: "3-for-2-haircare",
     qualification: Qualification::matchAny(["haircare"]),
     size: 3,
     positions: [2],
-    discount: SimpleDiscount::percentageOff(Percentage::fromDecimal(1.0)),
+    discount: Simple::percentageOff(Percentage::fromDecimal(1.0)),
     budget: Budget::unlimited(),
 );
 
-$mealDeal = new MixAndMatchPromotion(
+$mealDeal = new MixAndMatch(
     reference: "meal-deal",
     slots: [
         new MixAndMatchSlot(
@@ -987,16 +980,16 @@ $mealDeal = new MixAndMatchPromotion(
 $tieredSpendBonus = new TieredThreshold(
     reference: "tiered-spend-bonus",
     tiers: [
-        new TieredThresholdTier(
-            TieredThresholdThreshold::withMonetaryThreshold(new Money(50_00, "GBP")),
-            TieredThresholdThreshold::withMonetaryThreshold(new Money(100_00, "GBP")),
+        new Tier(
+            Threshold::withMonetaryThreshold(new Money(50_00, "GBP")),
+            Threshold::withMonetaryThreshold(new Money(100_00, "GBP")),
             Qualification::matchAll(),
             Qualification::matchAll(),
             TieredThresholdDiscount::percentageOffEachItem(Percentage::fromDecimal(0.05)),
         ),
-        new TieredThresholdTier(
-            TieredThresholdThreshold::withMonetaryThreshold(new Money(100_00, "GBP")),
-            TieredThresholdThreshold::withMonetaryThreshold(new Money(200_00, "GBP")),
+        new Tier(
+            Threshold::withMonetaryThreshold(new Money(100_00, "GBP")),
+            Threshold::withMonetaryThreshold(new Money(200_00, "GBP")),
             Qualification::matchAll(),
             Qualification::matchAll(),
             TieredThresholdDiscount::percentageOffEachItem(Percentage::fromDecimal(0.10)),
@@ -1009,8 +1002,8 @@ $builder = new StackBuilder();
 
 $layer = $builder->addLayer(
     new Layer(
-        "layer", 
-        LayerOutput::passThrough(), 
+        "layer",
+        LayerOutput::passThrough(),
         [$tenPercentOffDrinks, $threeForTwoHaircare, $mealDeal, $tieredSpendBonus],
     ),
 );

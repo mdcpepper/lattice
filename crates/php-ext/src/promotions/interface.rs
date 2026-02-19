@@ -10,7 +10,7 @@ use ext_php_rs::{
 
 /// Marker interface for all PHP promotion configuration objects.
 #[php_interface]
-#[php(name = "Lattice\\Promotions\\Promotion")]
+#[php(name = "Lattice\\Promotion\\PromotionInterface")]
 pub trait Promotion {}
 
 #[derive(Debug)]

@@ -27,7 +27,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 #[php_enum]
-#[php(name = "Lattice\\Promotions\\MixAndMatch\\DiscountKind")]
+#[php(name = "Lattice\\Promotion\\MixAndMatch\\DiscountKind")]
 pub enum DiscountKind {
     #[php(value = "percentage_off_all_items")]
     PercentageOffAllItems,
@@ -53,7 +53,7 @@ pub enum DiscountKind {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Promotions\\MixAndMatch\\Discount")]
+#[php(name = "Lattice\\Promotion\\MixAndMatch\\Discount")]
 pub struct MixAndMatchDiscount {
     #[php(prop)]
     kind: DiscountKind,
@@ -289,7 +289,7 @@ impl TryFrom<MixAndMatchDiscount> for CoreMixAndMatchDiscount<'static> {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Promotions\\MixAndMatch\\Slot")]
+#[php(name = "Lattice\\Promotion\\MixAndMatch\\Slot")]
 pub struct MixAndMatchSlot {
     #[php(prop)]
     reference: ReferenceValue,
@@ -431,7 +431,7 @@ impl TryFrom<MixAndMatchSlotRef> for MixAndMatchSlot {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Promotions\\MixAndMatchPromotion")]
+#[php(name = "Lattice\\Promotion\\MixAndMatch\\MixAndMatch")]
 #[php(implements(PhpInterfacePromotion))]
 pub struct MixAndMatchDiscountPromotion {
     #[php(prop)]
