@@ -4,20 +4,20 @@ declare(strict_types=1);
 
 use Lattice\Discount\Percentage;
 use Lattice\Item;
-use Lattice\Layer;
-use Lattice\LayerOutput;
 use Lattice\Money;
 use Lattice\Product;
-use Lattice\Promotions\Budget;
-use Lattice\Promotions\MixAndMatch\Discount;
-use Lattice\Promotions\MixAndMatch\Slot as MixAndMatchSlot;
-use Lattice\Promotions\MixAndMatchPromotion;
-use Lattice\Promotions\Promotion;
+use Lattice\Promotion\Budget;
+use Lattice\Promotion\PromotionInterface;
+use Lattice\Promotion\MixAndMatch\Discount;
+use Lattice\Promotion\MixAndMatch\MixAndMatch;
+use Lattice\Promotion\MixAndMatch\Slot as MixAndMatchSlot;
 use Lattice\Qualification;
-use Lattice\StackBuilder;
+use Lattice\Stack\Layer;
+use Lattice\Stack\LayerOutput;
+use Lattice\Stack\StackBuilder;
 
 it("implements Promotion interface", function () {
-    $promotion = new MixAndMatchPromotion(
+    $promotion = new MixAndMatch(
         reference: 123,
         slots: [
             new MixAndMatchSlot(
@@ -33,7 +33,7 @@ it("implements Promotion interface", function () {
         budget: Budget::unlimited(),
     );
 
-    expect($promotion)->toBeInstanceOf(Promotion::class);
+    expect($promotion)->toBeInstanceOf(PromotionInterface::class);
 });
 
 it("can be instantiated", function () {
@@ -44,7 +44,7 @@ it("can be instantiated", function () {
         max: 2,
     );
 
-    $promotion = new MixAndMatchPromotion(
+    $promotion = new MixAndMatch(
         reference: 123,
         slots: [$slot],
         discount: Discount::amountOffEachItem(new Money(1_00, "GBP")),
@@ -83,7 +83,7 @@ it("applies discount correctly", function () {
         ),
     );
 
-    $promotion = new MixAndMatchPromotion(
+    $promotion = new MixAndMatch(
         reference: "promotion",
         slots: [
             new MixAndMatchSlot(

@@ -15,7 +15,7 @@ use crate::money::{Money, MoneyRef};
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Promotions\\Budget")]
+#[php(name = "Lattice\\Promotion\\Budget")]
 pub struct Budget {
     #[php(prop)]
     pub redemption_limit: Option<i64>,

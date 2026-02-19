@@ -27,7 +27,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 #[php_enum]
-#[php(name = "Lattice\\Promotions\\TieredThreshold\\DiscountKind")]
+#[php(name = "Lattice\\Promotion\\TieredThreshold\\DiscountKind")]
 pub enum DiscountKind {
     #[php(value = "percentage_off_each_item")]
     PercentageOffEachItem,
@@ -53,7 +53,7 @@ pub enum DiscountKind {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Promotions\\TieredThreshold\\Discount")]
+#[php(name = "Lattice\\Promotion\\TieredThreshold\\Discount")]
 pub struct ThresholdDiscount {
     #[php(prop)]
     kind: DiscountKind,
@@ -285,7 +285,7 @@ impl TryFrom<ThresholdDiscount> for CoreThresholdDiscount<'static> {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Promotions\\TieredThreshold\\Threshold")]
+#[php(name = "Lattice\\Promotion\\TieredThreshold\\Threshold")]
 pub struct TierThreshold {
     #[php(prop)]
     monetary_threshold: Option<MoneyRef>,
@@ -453,7 +453,7 @@ impl TryFrom<TierThreshold> for CoreTierThreshold<'static> {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Promotions\\TieredThreshold\\Tier")]
+#[php(name = "Lattice\\Promotion\\TieredThreshold\\Tier")]
 pub struct ThresholdTier {
     #[php(prop)]
     lower_threshold: TierThresholdRef,
@@ -621,7 +621,7 @@ impl TryFrom<ThresholdTierRef> for ThresholdTier {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Promotions\\TieredThreshold")]
+#[php(name = "Lattice\\Promotion\\TieredThreshold\\TieredThreshold")]
 #[php(implements(PhpInterfacePromotion))]
 pub struct TieredThresholdPromotion {
     #[php(prop)]

@@ -31,7 +31,7 @@ impl InvalidDiscountException {}
 
 #[derive(Debug, Clone, Copy)]
 #[php_enum]
-#[php(name = "Lattice\\Discount\\DiscountKind")]
+#[php(name = "Lattice\\Discount\\Kind")]
 pub enum DiscountKind {
     #[php(value = "percentage_off")]
     PercentageOff,
@@ -45,7 +45,7 @@ pub enum DiscountKind {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Discount\\SimpleDiscount")]
+#[php(name = "Lattice\\Discount\\Simple")]
 pub struct SimpleDiscount {
     #[php(prop)]
     kind: DiscountKind,

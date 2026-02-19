@@ -60,7 +60,7 @@ impl InvalidStackException {}
 
 #[derive(Debug, Default)]
 #[php_class]
-#[php(name = "Lattice\\StackBuilder")]
+#[php(name = "Lattice\\Stack\\StackBuilder")]
 pub struct StackBuilder {
     #[php(prop)]
     layers: Vec<LayerRef>,
@@ -126,7 +126,7 @@ impl StackBuilder {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Stack")]
+#[php(name = "Lattice\\Stack\\Stack")]
 pub struct Stack {
     #[php(prop)]
     layers: Vec<LayerRef>,

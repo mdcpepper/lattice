@@ -19,7 +19,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\LayerOutput")]
+#[php(name = "Lattice\\Stack\\LayerOutput")]
 pub struct LayerOutput {
     #[php(prop, flags = PropertyFlags::Private)]
     participating: Option<LayerRef>,
@@ -150,7 +150,7 @@ impl TryFrom<LayerOutputRef> for LayerOutput {
 
 #[derive(Debug, Clone)]
 #[php_class]
-#[php(name = "Lattice\\Layer")]
+#[php(name = "Lattice\\Stack\\Layer")]
 pub struct Layer {
     #[php(prop)]
     reference: ReferenceValue,
