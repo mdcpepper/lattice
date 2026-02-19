@@ -30,20 +30,63 @@ env:
 
 jobs:
   build:
-    name: Build (linux, php-${{ matrix.php_version }})
+    name: Build (linux, php-${{ matrix.php_version }}, ${{ matrix.php_ts }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        php_version: ["8.2", "8.3", "8.4", "8.5"]
+        php_version: ["8.2", "8.4", "8.5"]
+        php_ts: ["nts", "zts"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup PHP
+      - name: Setup PHP (NTS)
+        if: matrix.php_ts == 'nts'
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php_version }}
+          coverage: none
+          extensions: none
+
+      - name: Setup PHP (ZTS)
+        if: matrix.php_ts == 'zts'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php_version }}
+          coverage: none
+          extensions: none
+        env:
+          phpts: ts
+
+      - name: Verify PHP thread safety mode
+        env:
+          PHP_TS: ${{ matrix.php_ts }}
+        run: |
+          set -euo pipefail
+
+          configure_opts="$(php-config --configure-options)"
+
+          case "$PHP_TS" in
+            zts)
+              if [[ "$configure_opts" != *"--enable-zts"* ]]; then
+                echo "Expected ZTS PHP build, but php-config does not report --enable-zts"
+                echo "$configure_opts"
+                exit 1
+              fi
+              ;;
+            nts)
+              if [[ "$configure_opts" == *"--enable-zts"* ]]; then
+                echo "Expected NTS PHP build, but php-config reports --enable-zts"
+                echo "$configure_opts"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unknown PHP_TS value: $PHP_TS"
+              exit 1
+              ;;
+          esac
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -59,6 +102,7 @@ jobs:
       - name: Prepare release assets
         env:
           PHP_VERSION: ${{ matrix.php_version }}
+          PHP_TS: ${{ matrix.php_ts }}
           RAW_TAG_NAME: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
         run: |
           set -euo pipefail
@@ -84,7 +128,12 @@ jobs:
             exit 1
           fi
 
-          asset_name="lattice-${safe_tag_name}-linux-php${PHP_VERSION}.so"
+          ts_suffix=""
+          if [[ "$PHP_TS" == "zts" ]]; then
+            ts_suffix="-zts"
+          fi
+
+          asset_name="lattice-${safe_tag_name}-linux-php${PHP_VERSION}${ts_suffix}.so"
           cp "$lib_path" "dist/$asset_name"
 
           if command -v sha256sum >/dev/null 2>&1; then
@@ -96,7 +145,7 @@ jobs:
       - name: Upload linux assets
         uses: actions/upload-artifact@v4
         with:
-          name: lattice-linux-php${{ matrix.php_version }}
+          name: lattice-linux-php${{ matrix.php_version }}${{ matrix.php_ts == 'zts' && '-zts' || '' }}
           path: dist/*
           if-no-files-found: error
 
