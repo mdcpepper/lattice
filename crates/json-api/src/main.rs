@@ -1,18 +1,17 @@
 //! Lattice JSON API Server
 
-use std::{io, process};
+use std::process;
 
 use salvo::{
+    affix_state::inject,
     oapi::{OpenApi, swagger_ui::SwaggerUi},
     prelude::*,
-    server::ServerHandle,
     trailing_slash::remove_slash,
 };
-use thiserror::Error;
-use tokio::signal;
+use tracing::error;
 use tracing_subscriber::EnvFilter;
 
-use crate::{config::ServerConfig, handlers::healthcheck};
+use crate::{config::ServerConfig, state::State};
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
@@ -22,7 +21,12 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 mod config;
-mod handlers;
+mod database;
+mod extensions;
+mod healthcheck;
+mod products;
+mod shutdown;
+mod state;
 
 /// Lattice JSON API Server entry point
 ///
@@ -57,19 +61,20 @@ pub async fn main() {
     // Bind server
     let listener = TcpListener::new(addr).bind().await;
 
-    // Create router
+    let state = State::from_pool(database::connect(&config.database_url).await);
+
     let router = Router::new()
         .hoop(CatchPanic::new())
         .hoop(remove_slash())
-        .push(Router::with_path("healthcheck").get(healthcheck::handler));
+        .hoop(inject(state))
+        .push(Router::with_path("healthcheck").get(healthcheck::handler))
+        .push(Router::with_path("products").get(products::index::handler));
 
-    // Create OpenAPI documentation
     let doc = OpenApi::new("Lattice API", "0.1.0").merge_router(&router);
 
-    // Add documentation routes
     let router = router
-        .unshift(doc.into_router("/api-doc/openapi.json"))
-        .unshift(SwaggerUi::new("/api-doc/openapi.json").into_router("docs"));
+        .push(doc.into_router("/api-doc/openapi.json"))
+        .push(SwaggerUi::new("/api-doc/openapi.json").into_router("docs"));
 
     let server = Server::new(listener);
 
@@ -77,67 +82,11 @@ pub async fn main() {
 
     // Listen for shutdown signal
     tokio::spawn(async move {
-        if let Err(error) = listen_shutdown_signal(handle).await {
-            tracing::error!("failed to listen for shutdown signal: {error}");
+        if let Err(error) = shutdown::listen(handle).await {
+            error!("failed to listen for shutdown signal: {error}");
         }
     });
 
     // Start serving requests
     server.serve(router).await;
-}
-
-#[derive(Debug, Error)]
-enum ShutdownSignalError {
-    #[error("failed to install Ctrl+C handler: {0}")]
-    CtrlC(#[source] io::Error),
-    #[cfg(unix)]
-    #[error("failed to install SIGTERM handler: {0}")]
-    SigTerm(#[source] io::Error),
-    #[cfg(windows)]
-    #[error("failed to install Windows terminate handler: {0}")]
-    Terminate(#[source] io::Error),
-}
-
-async fn listen_shutdown_signal(handle: ServerHandle) -> Result<(), ShutdownSignalError> {
-    // Wait Shutdown Signal
-    let ctrl_c = async {
-        // Handle Ctrl+C signal
-        signal::ctrl_c().await.map_err(ShutdownSignalError::CtrlC)
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        // Handle SIGTERM on Unix systems
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .map_err(ShutdownSignalError::SigTerm)?
-            .recv()
-            .await;
-        Ok::<(), ShutdownSignalError>(())
-    };
-
-    #[cfg(windows)]
-    let terminate = async {
-        // Handle Ctrl+C on Windows (alternative implementation)
-        signal::windows::ctrl_c()
-            .map_err(ShutdownSignalError::Terminate)?
-            .recv()
-            .await;
-        Ok::<(), ShutdownSignalError>(())
-    };
-
-    // Wait for either signal to be received
-    tokio::select! {
-        result = ctrl_c => {
-            result?;
-            tracing::info!("ctrl_c signal received");
-        }
-        result = terminate => {
-            result?;
-            tracing::info!("terminate signal received");
-        }
-    };
-
-    // Graceful Shutdown Server
-    handle.stop_graceful(None);
-    Ok(())
 }

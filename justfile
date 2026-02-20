@@ -17,3 +17,6 @@ test-extension: build-extension
     cd php && php -d extension=../{{ ext_so }} vendor/bin/pest --configuration=phpunit.xml
 
 test: test-rust test-extension
+
+watch:
+    docker compose --profile dev up json-api-dev

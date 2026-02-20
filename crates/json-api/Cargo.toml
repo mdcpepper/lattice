@@ -4,15 +4,21 @@ version = "0.3.0"
 edition = "2024"
 
 [dependencies]
+async-trait = "0.1.89"
 clap = { version = "4.5.57", features = ["derive", "env"] }
 dotenvy = "0.15.7"
-salvo = { version = "0.89.1", features = ["catch-panic", "trailing-slash", "oapi"] }
+salvo = { version = "0.89.1", features = ["affix-state", "catch-panic", "trailing-slash", "oapi"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.49.0", features = ["macros", "signal"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 thiserror.workspace = true
+sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "postgres", "uuid"] }
+uuid = { version = "1.21.0", features = ["serde", "v7"] }
+jiff = { version = "0.2.20", features = ["serde"] }
+jiff-sqlx = { version = "0.1.1", features = ["postgres"] }
+mockall = "0.14.0"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.5"

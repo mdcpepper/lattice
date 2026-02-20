@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Lattice Postgres",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "lattice_db",
+      "Username": "lattice_user",
+      "SSLMode": "prefer"
+    }
+  }
+}

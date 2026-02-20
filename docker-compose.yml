@@ -1,0 +1,113 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: lattice-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-lattice_db}
+      - POSTGRES_USER=${POSTGRES_USER:-lattice_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-lattice_password}
+      - POSTGRES_INITDB_ARGS=${POSTGRES_INITDB_ARGS:---encoding=UTF-8 --lc-collate=C --lc-ctype=C}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-lattice_user} -d ${POSTGRES_DB:-lattice_db}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - lattice-network
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:9.12
+    container_name: lattice-pgadmin
+    ports:
+      - "${PGADMIN_PORT:-8091}:80" # pgAdmin web interface
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD:-admin}
+      - PGADMIN_CONFIG_SERVER_MODE=${PGADMIN_CONFIG_SERVER_MODE:-False}
+      - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=${PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED:-False}
+      - PGADMIN_REPLACE_SERVERS_ON_STARTUP=${PGADMIN_REPLACE_SERVERS_ON_STARTUP:-True}
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    networks:
+      - lattice-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  json-api:
+    build:
+      context: .
+      dockerfile: docker/json-api.Dockerfile
+    container_name: lattice-json-api
+    ports:
+      - "8698:8698"
+    environment:
+      - SERVER_HOST=${SERVER_HOST:-0.0.0.0}
+      - SERVER_PORT=${SERVER_PORT:-8698}
+      - RUST_LOG=${RUST_LOG:-info}
+    networks:
+      - lattice-network
+    restart: unless-stopped
+
+  json-api-dev:
+    build:
+      context: .
+      dockerfile: docker/json-api.dev.Dockerfile
+    container_name: lattice-json-api-dev
+    ports:
+      - "8698:8698"
+    environment:
+      - SERVER_HOST=${SERVER_HOST:-0.0.0.0}
+      - SERVER_PORT=${SERVER_PORT:-8698}
+      - RUST_LOG=${RUST_LOG:-info}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-lattice_user}:${POSTGRES_PASSWORD:-lattice_password}@lattice-postgres:5432/${POSTGRES_DB:-lattice_db}}
+    volumes:
+      - .:/app
+      - cargo_registry:/usr/local/cargo/registry
+      - build_cache:/app/target
+    networks:
+      - lattice-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - dev
+
+  demo:
+    build:
+      context: .
+      dockerfile: docker/demo.Dockerfile
+    container_name: lattice-demo
+    ports:
+      - "5173:8080"
+    networks:
+      - lattice-network
+    restart: unless-stopped
+
+networks:
+  lattice-network:
+    driver: bridge
+    name: lattice-network
+
+volumes:
+  pg_data:
+    name: lattice_pg_data
+  pgadmin_data:
+    name: lattice_pgadmin_data
+  cargo_registry:
+    name: lattice_cargo_registry
+  build_cache:
+    name: lattice_build_cache

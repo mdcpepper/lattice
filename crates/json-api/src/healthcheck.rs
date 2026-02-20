@@ -33,10 +33,9 @@ mod tests {
     #[tokio::test]
     async fn test_healthcheck() -> TestResult {
         let router = Router::new().push(Router::with_path("healthcheck").get(handler));
-        let service = Service::new(router);
 
-        let response: HealthResponse = TestClient::get("http://127.0.0.1:8698/healthcheck")
-            .send(&service)
+        let response: HealthResponse = TestClient::get("http://example.com/healthcheck")
+            .send(&Service::new(router))
             .await
             .take_json()
             .await?;
