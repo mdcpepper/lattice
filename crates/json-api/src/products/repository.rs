@@ -112,7 +112,7 @@ mod tests {
     fn test_price_rejects_negative() {
         let result = u64::try_from(-1_i64);
 
-        assert!(matches!(result, Err(_)));
+        assert!(result.is_err());
     }
 }
 
