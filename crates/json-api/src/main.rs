@@ -8,7 +8,7 @@ use salvo::{
     prelude::*,
     trailing_slash::remove_slash,
 };
-use tracing::error;
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 use crate::{config::ServerConfig, state::State};
@@ -56,7 +56,8 @@ pub async fn main() {
         .init();
 
     let addr = config.socket_addr();
-    tracing::info!("Starting server on {addr}");
+
+    info!("Starting server on {addr}");
 
     // Bind server
     let listener = TcpListener::new(addr).bind().await;
@@ -65,21 +66,22 @@ pub async fn main() {
         Ok(pool) => pool,
         Err(db_error) => {
             error!("failed to connect to postgres: {db_error}");
+
             process::exit(1);
         }
     };
 
-    let state = State::from_pool(pool);
-
     let router = Router::new()
         .hoop(CatchPanic::new())
         .hoop(remove_slash())
-        .hoop(inject(state))
+        .hoop(inject(State::from_pool(pool)))
         .push(Router::with_path("healthcheck").get(healthcheck::handler))
         .push(
             Router::with_path("products")
                 .get(products::index::handler)
-                .post(products::create::handler),
+                .post(products::create::handler)
+                .path("{uuid}")
+                .put(products::update::handler),
         );
 
     let doc = OpenApi::new("Lattice API", "0.1.0").merge_router(&router);

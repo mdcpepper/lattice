@@ -30,7 +30,7 @@ impl From<JsonBody<CreateProductRequest>> for NewProduct {
     }
 }
 
-/// Create Product Response
+/// Product Created Response
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub(crate) struct ProductCreatedResponse {
     /// Created product UUID
@@ -42,10 +42,10 @@ pub(crate) struct ProductCreatedResponse {
     tags("products"),
     summary = "Create Product",
     responses(
-        (status_code = 201, description = "Product created"),
-        (status_code = 409, description = "Product already exists"),
-        (status_code = 400, description = "Bad Request"),
-        (status_code = 500, description = "Internal Server Error"),
+        (status_code = StatusCode::CREATED, description = "Product created"),
+        (status_code = StatusCode::CONFLICT, description = "Product already exists"),
+        (status_code = StatusCode::BAD_REQUEST, description = "Bad Request"),
+        (status_code = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error"),
     ),
 )]
 pub(crate) async fn handler(
@@ -70,37 +70,29 @@ pub(crate) async fn handler(
 
 #[cfg(test)]
 mod tests {
-    use jiff::Timestamp;
-    use salvo::test::{ResponseExt, TestClient};
+    use salvo::{
+        affix_state::inject,
+        test::{ResponseExt, TestClient},
+    };
     use serde_json::json;
     use testresult::TestResult;
 
-    use crate::products::{MockProductsRepository, ProductsRepositoryError, models::Product};
+    use crate::products::{MockProductsRepository, ProductsRepositoryError};
 
-    use super::*;
-
-    fn make_product(uuid: Uuid) -> Product {
-        Product {
-            uuid,
-            price: 100,
-            created_at: Timestamp::UNIX_EPOCH,
-            updated_at: Timestamp::UNIX_EPOCH,
-            deleted_at: None,
-        }
-    }
+    use super::{super::tests::*, *};
 
     fn make_service(repo: MockProductsRepository) -> Service {
         let state = Arc::new(State::new(Arc::new(repo)));
 
         let router = Router::new()
-            .hoop(affix_state::inject(state))
+            .hoop(inject(state))
             .push(Router::with_path("products").post(handler));
 
         Service::new(router)
     }
 
     #[tokio::test]
-    async fn test_create_product_returns_201() -> TestResult {
+    async fn test_create_product_success() -> TestResult {
         let uuid = Uuid::now_v7();
         let product = make_product(uuid);
 
@@ -108,60 +100,20 @@ mod tests {
 
         repo.expect_create_product()
             .once()
+            .withf(move |new| *new == NewProduct { uuid, price: 100 })
             .return_once(move |_| Ok(product));
 
-        let res = TestClient::post("http://example.com/products")
+        let mut res = TestClient::post("http://example.com/products")
             .json(&json!({ "uuid": uuid, "price": 100 }))
             .send(&make_service(repo))
             .await;
 
-        assert_eq!(res.status_code, Some(StatusCode::CREATED));
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_create_product_returns_location_header() -> TestResult {
-        let uuid = Uuid::now_v7();
-        let product = make_product(uuid);
-
-        let mut repo = MockProductsRepository::new();
-
-        repo.expect_create_product()
-            .once()
-            .return_once(move |_| Ok(product));
-
-        let res = TestClient::post("http://example.com/products")
-            .json(&json!({ "uuid": uuid, "price": 100 }))
-            .send(&make_service(repo))
-            .await;
-
+        let body: ProductCreatedResponse = res.take_json().await?;
         let location = res.headers().get("location").and_then(|v| v.to_str().ok());
 
+        assert_eq!(res.status_code, Some(StatusCode::CREATED));
         assert_eq!(location, Some(format!("/products/{uuid}").as_str()));
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_create_product_returns_uuid_in_body() -> TestResult {
-        let uuid = Uuid::now_v7();
-        let product = make_product(uuid);
-
-        let mut repo = MockProductsRepository::new();
-
-        repo.expect_create_product()
-            .once()
-            .return_once(move |_| Ok(product));
-
-        let response: ProductCreatedResponse = TestClient::post("http://example.com/products")
-            .json(&json!({ "uuid": uuid, "price": 100 }))
-            .send(&make_service(repo))
-            .await
-            .take_json()
-            .await?;
-
-        assert_eq!(response.uuid, uuid);
+        assert_eq!(body.uuid, uuid);
 
         Ok(())
     }
@@ -174,6 +126,7 @@ mod tests {
 
         repo.expect_create_product()
             .once()
+            .withf(move |new| *new == NewProduct { uuid, price: 100 })
             .return_once(|_| Err(ProductsRepositoryError::AlreadyExists));
 
         let res = TestClient::post("http://example.com/products")
@@ -194,6 +147,7 @@ mod tests {
 
         repo.expect_create_product()
             .once()
+            .withf(move |new| *new == NewProduct { uuid, price: 100 })
             .return_once(|_| Err(ProductsRepositoryError::InvalidData));
 
         let res = TestClient::post("http://example.com/products")
