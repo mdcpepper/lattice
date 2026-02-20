@@ -12,11 +12,13 @@ use sqlx::{
     query_as,
 };
 use thiserror::Error;
+use uuid::Uuid;
 
-use crate::products::models::{NewProduct, Product};
+use crate::products::models::{NewProduct, Product, ProductUpdate};
 
-const CREATE_PRODUCT_SQL: &str = include_str!("sql/create_product.sql");
 const GET_PRODUCTS_SQL: &str = include_str!("sql/get_products.sql");
+const CREATE_PRODUCT_SQL: &str = include_str!("sql/create_product.sql");
+const UPDATE_PRODUCT_SQL: &str = include_str!("sql/update_product.sql");
 
 #[derive(Debug, Error)]
 pub enum ProductsRepositoryError {
@@ -67,14 +69,12 @@ impl<'r> FromRow<'r, PgRow> for Product {
     fn from_row(row: &'r PgRow) -> sqlx::Result<Self> {
         let price_i64: i64 = row.try_get("price")?;
 
-        let price = u64::try_from(price_i64).map_err(|e| Error::ColumnDecode {
-            index: "price".to_string(),
-            source: Box::new(e),
-        })?;
-
         Ok(Self {
             uuid: row.try_get("uuid")?,
-            price,
+            price: u64::try_from(price_i64).map_err(|e| Error::ColumnDecode {
+                index: "price".to_string(),
+                source: Box::new(e),
+            })?,
             created_at: row.try_get::<SqlxTimestamp, _>("created_at")?.to_jiff(),
             updated_at: row.try_get::<SqlxTimestamp, _>("updated_at")?.to_jiff(),
             deleted_at: row
@@ -86,6 +86,13 @@ impl<'r> FromRow<'r, PgRow> for Product {
 
 #[async_trait]
 impl ProductsRepository for PgProductsRepository {
+    async fn get_products(&self) -> Result<Vec<Product>, ProductsRepositoryError> {
+        query_as::<Postgres, Product>(GET_PRODUCTS_SQL)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(Into::into)
+    }
+
     async fn create_product(
         &self,
         product: NewProduct,
@@ -98,9 +105,15 @@ impl ProductsRepository for PgProductsRepository {
             .map_err(Into::into)
     }
 
-    async fn get_products(&self) -> Result<Vec<Product>, ProductsRepositoryError> {
-        query_as::<Postgres, Product>(GET_PRODUCTS_SQL)
-            .fetch_all(&self.pool)
+    async fn update_product(
+        &self,
+        uuid: Uuid,
+        update: ProductUpdate,
+    ) -> Result<Product, ProductsRepositoryError> {
+        query_as::<Postgres, Product>(UPDATE_PRODUCT_SQL)
+            .bind(uuid)
+            .bind(i64::try_from(update.price)?)
+            .fetch_one(&self.pool)
             .await
             .map_err(Into::into)
     }
@@ -119,7 +132,17 @@ mod tests {
 #[automock]
 #[async_trait]
 pub(crate) trait ProductsRepository: Send + Sync {
+    /// Retrieves all products.
+    async fn get_products(&self) -> Result<Vec<Product>, ProductsRepositoryError>;
+
+    /// Creates a new product with the given UUID and price.
     async fn create_product(&self, product: NewProduct)
     -> Result<Product, ProductsRepositoryError>;
-    async fn get_products(&self) -> Result<Vec<Product>, ProductsRepositoryError>;
+
+    /// Updates a product with the given UUID and update.
+    async fn update_product(
+        &self,
+        uuid: Uuid,
+        update: ProductUpdate,
+    ) -> Result<Product, ProductsRepositoryError>;
 }
