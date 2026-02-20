@@ -5,9 +5,13 @@ use std::num::TryFromIntError;
 use async_trait::async_trait;
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use mockall::automock;
-use sqlx::{FromRow, PgPool, error::ErrorKind, query_as};
+use sqlx::{
+    Error, FromRow, PgPool, Postgres, Row,
+    error::{DatabaseError, ErrorKind},
+    postgres::PgRow,
+    query_as,
+};
 use thiserror::Error;
-use uuid::Uuid;
 
 use crate::products::models::{NewProduct, Product};
 
@@ -29,23 +33,20 @@ pub enum ProductsRepositoryError {
     InvalidData,
 
     #[error("storage error")]
-    Sql(#[source] sqlx::Error),
+    Sql(#[source] Error),
 
     #[error("invalid price value")]
     InvalidPrice(#[from] TryFromIntError),
 }
 
-impl From<sqlx::Error> for ProductsRepositoryError {
-    fn from(error: sqlx::Error) -> Self {
-        match error
-            .as_database_error()
-            .map(|database_error| database_error.kind())
-        {
+impl From<Error> for ProductsRepositoryError {
+    fn from(error: Error) -> Self {
+        match error.as_database_error().map(DatabaseError::kind) {
             Some(ErrorKind::UniqueViolation) => Self::AlreadyExists,
             Some(ErrorKind::ForeignKeyViolation) => Self::InvalidReference,
             Some(ErrorKind::NotNullViolation) => Self::MissingRequiredData,
             Some(ErrorKind::CheckViolation) => Self::InvalidData,
-            Some(ErrorKind::Other) | Some(_) | None => Self::Sql(error),
+            Some(ErrorKind::Other | _) | None => Self::Sql(error),
         }
     }
 }
@@ -62,25 +63,23 @@ impl PgProductsRepository {
     }
 }
 
-#[derive(Debug, FromRow)]
-struct ProductRow {
-    uuid: Uuid,
-    price: i64,
-    created_at: SqlxTimestamp,
-    updated_at: SqlxTimestamp,
-    deleted_at: Option<SqlxTimestamp>,
-}
+impl<'r> FromRow<'r, PgRow> for Product {
+    fn from_row(row: &'r PgRow) -> sqlx::Result<Self> {
+        let price_i64: i64 = row.try_get("price")?;
 
-impl TryFrom<ProductRow> for Product {
-    type Error = ProductsRepositoryError;
+        let price = u64::try_from(price_i64).map_err(|e| Error::ColumnDecode {
+            index: "price".to_string(),
+            source: Box::new(e),
+        })?;
 
-    fn try_from(row: ProductRow) -> Result<Self, Self::Error> {
         Ok(Self {
-            uuid: row.uuid,
-            price: u64::try_from(row.price)?,
-            created_at: row.created_at.to_jiff(),
-            updated_at: row.updated_at.to_jiff(),
-            deleted_at: row.deleted_at.map(SqlxTimestamp::to_jiff),
+            uuid: row.try_get("uuid")?,
+            price,
+            created_at: row.try_get::<SqlxTimestamp, _>("created_at")?.to_jiff(),
+            updated_at: row.try_get::<SqlxTimestamp, _>("updated_at")?.to_jiff(),
+            deleted_at: row
+                .try_get::<Option<SqlxTimestamp>, _>("deleted_at")?
+                .map(SqlxTimestamp::to_jiff),
         })
     }
 }
@@ -91,21 +90,29 @@ impl ProductsRepository for PgProductsRepository {
         &self,
         product: NewProduct,
     ) -> Result<Product, ProductsRepositoryError> {
-        query_as::<_, ProductRow>(CREATE_PRODUCT_SQL)
+        query_as::<Postgres, Product>(CREATE_PRODUCT_SQL)
             .bind(product.uuid)
             .bind(i64::try_from(product.price)?)
             .fetch_one(&self.pool)
-            .await?
-            .try_into()
+            .await
+            .map_err(Into::into)
     }
 
     async fn get_products(&self) -> Result<Vec<Product>, ProductsRepositoryError> {
-        query_as::<_, ProductRow>(GET_PRODUCTS_SQL)
+        query_as::<Postgres, Product>(GET_PRODUCTS_SQL)
             .fetch_all(&self.pool)
-            .await?
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect()
+            .await
+            .map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_price_rejects_negative() {
+        let result = u64::try_from(-1_i64);
+
+        assert!(matches!(result, Err(_)));
     }
 }
 

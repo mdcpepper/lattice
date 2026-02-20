@@ -61,7 +61,15 @@ pub async fn main() {
     // Bind server
     let listener = TcpListener::new(addr).bind().await;
 
-    let state = State::from_pool(database::connect(&config.database_url).await);
+    let pool = match database::connect(&config.database_url).await {
+        Ok(pool) => pool,
+        Err(db_error) => {
+            error!("failed to connect to postgres: {db_error}");
+            process::exit(1);
+        }
+    };
+
+    let state = State::from_pool(pool);
 
     let router = Router::new()
         .hoop(CatchPanic::new())

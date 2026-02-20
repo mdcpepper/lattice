@@ -61,7 +61,7 @@ pub(crate) async fn handler(
         .map_err(StatusError::from)?
         .uuid;
 
-    res.add_header(LOCATION, format!("/products/{}", uuid), true)
+    res.add_header(LOCATION, format!("/products/{uuid}"), true)
         .or_500("failed to set location header")?
         .status_code(StatusCode::CREATED);
 

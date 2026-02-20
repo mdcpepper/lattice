@@ -18,7 +18,7 @@ pub struct ServerConfig {
     #[arg(short, long, env = "RUST_LOG", default_value = "info")]
     pub log_level: String,
 
-    /// PostgreSQL connection string
+    /// `PostgreSQL` connection string
     #[arg(long, env = "DATABASE_URL")]
     pub database_url: String,
 }

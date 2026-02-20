@@ -1,6 +1,6 @@
 //! Product Index Handler
 
-use std::sync::Arc;
+use std::{string::ToString, sync::Arc};
 
 use salvo::{oapi::ToSchema, prelude::*};
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,7 @@ impl From<Product> for ProductResponse {
             price: product.price,
             created_at: product.created_at.to_string(),
             updated_at: product.updated_at.to_string(),
-            deleted_at: product.deleted_at.as_ref().map(|d| d.to_string()),
+            deleted_at: product.deleted_at.as_ref().map(ToString::to_string),
         }
     }
 }

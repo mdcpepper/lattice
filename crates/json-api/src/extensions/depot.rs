@@ -12,6 +12,6 @@ pub(crate) trait DepotExt {
 impl DepotExt for Depot {
     fn obtain_or_500<T: Any + Send + Sync>(&self) -> Result<&T, StatusError> {
         self.obtain::<T>()
-            .map_err(|_| StatusError::internal_server_error())
+            .map_err(|_ignored| StatusError::internal_server_error())
     }
 }
