@@ -6,7 +6,7 @@ use salvo::{affix_state::inject, prelude::*};
 use uuid::Uuid;
 
 use lattice_app::{
-    auth::MockAuthRepository, context::AppContext, products::MockProductsRepository,
+    auth::MockAuthService, context::AppContext, products::MockProductsService,
     tenants::models::TenantUuid,
 };
 
@@ -25,16 +25,16 @@ pub(crate) async fn inject_tenant(
     ctrl.call_next(req, depot, res).await;
 }
 
-fn strict_auth_mock() -> MockAuthRepository {
-    let mut auth = MockAuthRepository::new();
+fn strict_auth_mock() -> MockAuthService {
+    let mut auth = MockAuthService::new();
 
     auth.expect_find_tenant_by_token_hash().never();
 
     auth
 }
 
-fn strict_products_mock() -> MockProductsRepository {
-    let mut products = MockProductsRepository::new();
+fn strict_products_mock() -> MockProductsService {
+    let mut products = MockProductsService::new();
 
     products.expect_get_products().never();
     products.expect_create_product().never();
@@ -44,21 +44,21 @@ fn strict_products_mock() -> MockProductsRepository {
     products
 }
 
-pub(crate) fn state_with_products(products: MockProductsRepository) -> Arc<State> {
-    Arc::new(State::new(AppContext::new(
-        Arc::new(products),
-        Arc::new(strict_auth_mock()),
-    )))
+pub(crate) fn state_with_products(products: MockProductsService) -> Arc<State> {
+    Arc::new(State::new(AppContext {
+        products: Arc::new(products),
+        auth: Arc::new(strict_auth_mock()),
+    }))
 }
 
-pub(crate) fn state_with_auth(auth: MockAuthRepository) -> Arc<State> {
-    Arc::new(State::new(AppContext::new(
-        Arc::new(strict_products_mock()),
-        Arc::new(auth),
-    )))
+pub(crate) fn state_with_auth(auth: MockAuthService) -> Arc<State> {
+    Arc::new(State::new(AppContext {
+        products: Arc::new(strict_products_mock()),
+        auth: Arc::new(auth),
+    }))
 }
 
-pub(crate) fn products_service(products: MockProductsRepository, route: Router) -> Service {
+pub(crate) fn products_service(products: MockProductsService, route: Router) -> Service {
     Service::new(
         Router::new()
             .hoop(inject(state_with_products(products)))

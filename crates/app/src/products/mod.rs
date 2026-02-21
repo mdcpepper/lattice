@@ -1,6 +1,9 @@
 //! Products
 
+pub mod errors;
 pub mod models;
-pub mod repository;
+mod repository;
+pub mod service;
 
-pub use repository::*;
+pub use errors::ProductsServiceError;
+pub use service::*;

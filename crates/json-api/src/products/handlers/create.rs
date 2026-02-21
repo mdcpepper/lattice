@@ -78,13 +78,13 @@ mod tests {
     use serde_json::json;
     use testresult::TestResult;
 
-    use lattice_app::products::{MockProductsRepository, ProductsRepositoryError};
+    use lattice_app::products::{MockProductsService, ProductsServiceError};
 
     use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 
     use super::{super::tests::*, *};
 
-    fn make_service(repo: MockProductsRepository) -> Service {
+    fn make_service(repo: MockProductsService) -> Service {
         products_service(repo, Router::with_path("products").post(handler))
     }
 
@@ -93,7 +93,7 @@ mod tests {
         let uuid = Uuid::now_v7();
         let product = make_product(uuid);
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_create_product()
             .once()
@@ -125,14 +125,14 @@ mod tests {
     async fn test_create_product_conflict_returns_409() -> TestResult {
         let uuid = Uuid::now_v7();
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_create_product()
             .once()
             .withf(move |tenant, new| {
                 *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
             })
-            .return_once(|_, _| Err(ProductsRepositoryError::AlreadyExists));
+            .return_once(|_, _| Err(ProductsServiceError::AlreadyExists));
 
         repo.expect_get_products().never();
         repo.expect_update_product().never();
@@ -152,14 +152,14 @@ mod tests {
     async fn test_create_product_invalid_price_returns_400() -> TestResult {
         let uuid = Uuid::now_v7();
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_create_product()
             .once()
             .withf(move |tenant, new| {
                 *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
             })
-            .return_once(|_, _| Err(ProductsRepositoryError::InvalidData));
+            .return_once(|_, _| Err(ProductsServiceError::InvalidData));
 
         repo.expect_get_products().never();
         repo.expect_update_product().never();

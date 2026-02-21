@@ -1,26 +1,32 @@
 //! Auth repository.
 
-use async_trait::async_trait;
-use mockall::automock;
 use sqlx::{FromRow, PgPool, Postgres, Row, postgres::PgRow, query_as};
 use uuid::Uuid;
 
-use crate::{
-    auth::{AuthRepositoryError, models::ApiToken},
-    tenants::models::TenantUuid,
-};
+use crate::{auth::models::ApiToken, tenants::models::TenantUuid};
 
 const FIND_TENANT_BY_TOKEN_HASH_SQL: &str = include_str!("sql/find_tenant_by_token_hash.sql");
 
 #[derive(Debug, Clone)]
-pub struct PgAuthRepository {
+pub(crate) struct PgAuthRepository {
     pool: PgPool,
 }
 
 impl PgAuthRepository {
     #[must_use]
-    pub fn new(pool: PgPool) -> Self {
+    pub(crate) fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub(crate) async fn find_tenant_by_token_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<TenantUuid>, sqlx::Error> {
+        query_as::<Postgres, ApiToken>(FIND_TENANT_BY_TOKEN_HASH_SQL)
+            .bind(hash)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|record| record.map(|record| record.tenant_uuid))
     }
 }
 
@@ -32,29 +38,4 @@ impl<'r> FromRow<'r, PgRow> for ApiToken {
             token_hash: row.try_get("token_hash")?,
         })
     }
-}
-
-#[async_trait]
-impl AuthRepository for PgAuthRepository {
-    async fn find_tenant_by_token_hash(
-        &self,
-        hash: &str,
-    ) -> Result<TenantUuid, AuthRepositoryError> {
-        query_as::<Postgres, ApiToken>(FIND_TENANT_BY_TOKEN_HASH_SQL)
-            .bind(hash)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(AuthRepositoryError::from)?
-            .map(|record| record.tenant_uuid)
-            .ok_or(AuthRepositoryError::NotFound)
-    }
-}
-
-#[automock]
-#[async_trait]
-pub trait AuthRepository: Send + Sync {
-    async fn find_tenant_by_token_hash(
-        &self,
-        hash: &str,
-    ) -> Result<TenantUuid, AuthRepositoryError>;
 }

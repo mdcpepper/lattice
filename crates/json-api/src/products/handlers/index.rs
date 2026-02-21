@@ -73,7 +73,7 @@ pub(crate) async fn handler(depot: &mut Depot) -> Result<Json<ProductsResponse>,
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
-    use lattice_app::products::{MockProductsRepository, ProductsRepositoryError};
+    use lattice_app::products::{MockProductsService, ProductsServiceError};
     use salvo::test::{ResponseExt, TestClient};
     use testresult::TestResult;
 
@@ -91,13 +91,13 @@ mod tests {
         }
     }
 
-    fn make_service(repo: MockProductsRepository) -> Service {
+    fn make_service(repo: MockProductsService) -> Service {
         products_service(repo, Router::with_path("products").get(handler))
     }
 
     #[tokio::test]
     async fn test_index_returns_200() -> TestResult {
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_get_products()
             .once()
@@ -119,7 +119,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_returns_empty_list() -> TestResult {
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_get_products()
             .once()
@@ -146,7 +146,7 @@ mod tests {
         let uuid_a = Uuid::now_v7();
         let uuid_b = Uuid::now_v7();
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_get_products()
             .once()
@@ -172,12 +172,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_repository_error_returns_500() -> TestResult {
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_get_products()
             .once()
             .withf(|tenant| *tenant == TEST_TENANT_UUID)
-            .return_once(|_| Err(ProductsRepositoryError::InvalidData));
+            .return_once(|_| Err(ProductsServiceError::InvalidData));
 
         repo.expect_create_product().never();
         repo.expect_update_product().never();

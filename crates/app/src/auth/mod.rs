@@ -3,6 +3,7 @@
 mod errors;
 mod models;
 mod repository;
+mod service;
 
 pub use errors::*;
-pub use repository::*;
+pub use service::*;

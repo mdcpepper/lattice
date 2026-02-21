@@ -81,13 +81,13 @@ mod tests {
     use serde_json::json;
     use testresult::TestResult;
 
-    use lattice_app::products::{MockProductsRepository, ProductsRepositoryError};
+    use lattice_app::products::{MockProductsService, ProductsServiceError};
 
     use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 
     use super::{super::tests::*, *};
 
-    fn make_service(repo: MockProductsRepository) -> Service {
+    fn make_service(repo: MockProductsService) -> Service {
         products_service(repo, Router::with_path("products/{uuid}").put(handler))
     }
 
@@ -99,7 +99,7 @@ mod tests {
 
         product.price = 200;
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_update_product()
             .once()
@@ -129,7 +129,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_product_invalid_uuid_returns_400() -> TestResult {
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_create_product().never();
         repo.expect_get_products().never();
@@ -149,14 +149,14 @@ mod tests {
     async fn test_update_product_invalid_price_returns_400() -> TestResult {
         let uuid = Uuid::now_v7();
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_update_product()
             .once()
             .withf(move |tenant, u, update| {
                 *tenant == TEST_TENANT_UUID && *u == uuid && *update == ProductUpdate { price: 200 }
             })
-            .return_once(|_, _, _| Err(ProductsRepositoryError::InvalidData));
+            .return_once(|_, _, _| Err(ProductsServiceError::InvalidData));
 
         repo.expect_create_product().never();
         repo.expect_get_products().never();

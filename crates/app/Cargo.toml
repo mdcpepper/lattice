@@ -14,4 +14,4 @@ sha2 = "0.10"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "postgres", "uuid"] }
 thiserror.workspace = true
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
-uuid = { version = "1.21.0", features = ["v4"] }
+uuid.workspace = true

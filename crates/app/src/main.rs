@@ -5,10 +5,7 @@ use std::process;
 use clap::{Args, Parser, Subcommand};
 use lattice_app::{
     database,
-    tenants::{
-        models::NewTenant,
-        repository::{PgTenantsRepository, TenantsRepository},
-    },
+    tenants::{PgTenantsService, TenantsService, models::NewTenant},
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -80,19 +77,19 @@ async fn create_tenant(args: CreateTenantArgs) -> Result<(), String> {
         .await
         .map_err(|error| format!("failed to connect to database: {error}"))?;
 
-    let repository = PgTenantsRepository::new(pool);
-    let tenant_uuid = args.tenant_uuid.unwrap_or_else(Uuid::new_v4);
+    let service = PgTenantsService::new(pool);
+    let tenant_uuid = args.tenant_uuid.unwrap_or_else(Uuid::now_v7);
     let raw_token = args.token.unwrap_or_else(generate_token);
 
     if raw_token.trim().is_empty() {
         return Err("token cannot be empty".to_string());
     }
 
-    let tenant = repository
+    let tenant = service
         .create_tenant(NewTenant {
             uuid: tenant_uuid,
             name: args.name,
-            token_uuid: Uuid::new_v4(),
+            token_uuid: Uuid::now_v7(),
             token_hash: hash_token(&raw_token),
         })
         .await
@@ -107,7 +104,7 @@ async fn create_tenant(args: CreateTenantArgs) -> Result<(), String> {
 }
 
 fn generate_token() -> String {
-    format!("lt_{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+    format!("lt_{}{}", Uuid::now_v7().simple(), Uuid::now_v7().simple())
 }
 
 fn hash_token(token: &str) -> String {

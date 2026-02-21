@@ -41,13 +41,13 @@ mod tests {
     use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use lattice_app::products::{MockProductsRepository, ProductsRepositoryError};
+    use lattice_app::products::{MockProductsService, ProductsServiceError};
 
     use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 
     use super::{super::tests::*, *};
 
-    fn make_service(repo: MockProductsRepository) -> Service {
+    fn make_service(repo: MockProductsService) -> Service {
         products_service(repo, Router::with_path("products/{uuid}").delete(handler))
     }
 
@@ -57,7 +57,7 @@ mod tests {
 
         make_product(uuid);
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_delete_product()
             .once()
@@ -76,7 +76,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_product_invalid_uuid_returns_400() -> TestResult {
         let res = TestClient::delete("http://example.com/products/123")
-            .send(&make_service(MockProductsRepository::new()))
+            .send(&make_service(MockProductsService::new()))
             .await;
 
         assert_eq!(res.status_code, Some(StatusCode::BAD_REQUEST));
@@ -88,12 +88,12 @@ mod tests {
     async fn test_delete_product_not_found_returns_404() -> TestResult {
         let uuid = Uuid::now_v7();
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_delete_product()
             .once()
             .withf(move |tenant, u| *tenant == TEST_TENANT_UUID && *u == uuid)
-            .return_once(|_, _| Err(ProductsRepositoryError::InvalidReference));
+            .return_once(|_, _| Err(ProductsServiceError::InvalidReference));
 
         repo.expect_create_product().never();
         repo.expect_get_products().never();

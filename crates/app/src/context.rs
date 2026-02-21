@@ -5,9 +5,9 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::{
-    auth::{AuthRepository, PgAuthRepository},
-    database,
-    products::{PgProductsRepository, ProductsRepository},
+    auth::{AuthService, PgAuthService},
+    database::{self, Db},
+    products::{PgProductsService, ProductsService},
 };
 
 #[derive(Debug, Error)]
@@ -18,16 +18,11 @@ pub enum AppInitError {
 
 #[derive(Clone)]
 pub struct AppContext {
-    pub products: Arc<dyn ProductsRepository>,
-    pub auth: Arc<dyn AuthRepository>,
+    pub products: Arc<dyn ProductsService>,
+    pub auth: Arc<dyn AuthService>,
 }
 
 impl AppContext {
-    #[must_use]
-    pub fn new(products: Arc<dyn ProductsRepository>, auth: Arc<dyn AuthRepository>) -> Self {
-        Self { products, auth }
-    }
-
     /// Build application context from a database URL.
     ///
     /// # Errors
@@ -38,9 +33,11 @@ impl AppContext {
             .await
             .map_err(AppInitError::Database)?;
 
-        Ok(Self::new(
-            Arc::new(PgProductsRepository::new(pool.clone())),
-            Arc::new(PgAuthRepository::new(pool)),
-        ))
+        let db = Db::new(pool.clone());
+
+        Ok(Self {
+            products: Arc::new(PgProductsService::new(db)),
+            auth: Arc::new(PgAuthService::new(pool)),
+        })
     }
 }

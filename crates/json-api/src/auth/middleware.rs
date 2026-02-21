@@ -6,7 +6,7 @@ use salvo::{http::header::AUTHORIZATION, prelude::*};
 use sha2::{Digest, Sha256};
 use tracing::error;
 
-use lattice_app::auth::AuthRepositoryError;
+use lattice_app::auth::AuthServiceError;
 
 use crate::{extensions::*, state::State};
 
@@ -36,12 +36,12 @@ pub(crate) async fn handler(
 
     let tenant_uuid = match state.app.auth.find_tenant_by_token_hash(&token_hash).await {
         Ok(tenant_uuid) => tenant_uuid,
-        Err(AuthRepositoryError::NotFound) => {
+        Err(AuthServiceError::NotFound) => {
             res.render(StatusError::unauthorized().brief("Invalid API token"));
 
             return;
         }
-        Err(AuthRepositoryError::Sql(source)) => {
+        Err(AuthServiceError::Sql(source)) => {
             error!("failed to validate api token: {source}");
 
             res.render(StatusError::internal_server_error());
@@ -78,7 +78,7 @@ mod tests {
     use testresult::TestResult;
     use uuid::Uuid;
 
-    use lattice_app::{auth::MockAuthRepository, tenants::models::TenantUuid};
+    use lattice_app::{auth::MockAuthService, tenants::models::TenantUuid};
 
     use crate::test_helpers::state_with_auth;
 
@@ -94,7 +94,7 @@ mod tests {
         res.render(tenant);
     }
 
-    fn make_service(auth: MockAuthRepository) -> Service {
+    fn make_service(auth: MockAuthService) -> Service {
         let state = state_with_auth(auth);
 
         let router = Router::new()
@@ -107,7 +107,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_missing_authorization_header_returns_401() -> TestResult {
-        let mut auth = MockAuthRepository::new();
+        let mut auth = MockAuthService::new();
 
         auth.expect_find_tenant_by_token_hash().never();
 
@@ -122,7 +122,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_non_bearer_authorization_header_returns_401() -> TestResult {
-        let mut auth = MockAuthRepository::new();
+        let mut auth = MockAuthService::new();
 
         auth.expect_find_tenant_by_token_hash().never();
 
@@ -138,11 +138,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_token_returns_401() -> TestResult {
-        let mut auth = MockAuthRepository::new();
+        let mut auth = MockAuthService::new();
 
         auth.expect_find_tenant_by_token_hash()
             .once()
-            .return_once(|_| Err(AuthRepositoryError::NotFound));
+            .return_once(|_| Err(AuthServiceError::NotFound));
 
         let res = TestClient::get("http://example.com")
             .add_header(AUTHORIZATION, "Bearer abc123", true)
@@ -158,7 +158,7 @@ mod tests {
     async fn test_valid_token_injects_tenant_uuid() -> TestResult {
         let tenant = TenantUuid::from_uuid(Uuid::nil());
 
-        let mut auth = MockAuthRepository::new();
+        let mut auth = MockAuthService::new();
 
         let expected_hash = format!("{:x}", Sha256::digest("abc123".as_bytes()));
 

@@ -3,27 +3,27 @@
 use salvo::http::StatusError;
 use tracing::error;
 
-use lattice_app::products::ProductsRepositoryError;
+use lattice_app::products::ProductsServiceError;
 
-pub(crate) fn into_status_error(error: ProductsRepositoryError) -> StatusError {
+pub(crate) fn into_status_error(error: ProductsServiceError) -> StatusError {
     match error {
-        ProductsRepositoryError::AlreadyExists => {
+        ProductsServiceError::AlreadyExists => {
             StatusError::conflict().brief("Product already exists")
         }
-        ProductsRepositoryError::InvalidPrice(_) => {
+        ProductsServiceError::InvalidPrice(_) => {
             StatusError::bad_request().brief("Price is out of range")
         }
-        ProductsRepositoryError::InvalidReference
-        | ProductsRepositoryError::MissingRequiredData
-        | ProductsRepositoryError::InvalidData => {
+        ProductsServiceError::InvalidReference
+        | ProductsServiceError::MissingRequiredData
+        | ProductsServiceError::InvalidData => {
             StatusError::bad_request().brief("Invalid product payload")
         }
-        ProductsRepositoryError::Sql(source) => {
+        ProductsServiceError::Sql(source) => {
             error!("failed to create product: {source}");
 
             StatusError::internal_server_error()
         }
-        ProductsRepositoryError::NotFound => {
+        ProductsServiceError::NotFound => {
             error!("product not found");
 
             StatusError::not_found()
