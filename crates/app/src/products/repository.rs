@@ -1,5 +1,6 @@
 //! Products Repository
 
+use jiff::Timestamp;
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
 use uuid::Uuid;
@@ -24,8 +25,10 @@ impl PgProductsRepository {
     pub(crate) async fn list_products(
         &self,
         tx: &mut Transaction<'_, Postgres>,
+        point_in_time: Timestamp,
     ) -> Result<Vec<Product>, sqlx::Error> {
         query_as::<Postgres, Product>(LIST_PRODUCTS_SQL)
+            .bind(SqlxTimestamp::from(point_in_time))
             .fetch_all(&mut **tx)
             .await
     }
@@ -34,9 +37,11 @@ impl PgProductsRepository {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         uuid: Uuid,
+        point_in_time: Timestamp,
     ) -> Result<Product, sqlx::Error> {
         query_as::<Postgres, Product>(GET_PRODUCT_SQL)
             .bind(uuid)
+            .bind(SqlxTimestamp::from(point_in_time))
             .fetch_one(&mut **tx)
             .await
     }
@@ -58,10 +63,14 @@ impl PgProductsRepository {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         uuid: Uuid,
+        product_detail_uuid: Option<Uuid>,
         price: i64,
     ) -> Result<Product, sqlx::Error> {
+        let product_detail_uuid = product_detail_uuid.unwrap_or_else(Uuid::now_v7);
+
         query_as::<Postgres, Product>(UPDATE_PRODUCT_SQL)
             .bind(uuid)
+            .bind(product_detail_uuid)
             .bind(price)
             .fetch_one(&mut **tx)
             .await

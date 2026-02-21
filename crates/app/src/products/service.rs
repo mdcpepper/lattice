@@ -1,6 +1,7 @@
 //! Products service.
 
 use async_trait::async_trait;
+use jiff::Timestamp;
 use mockall::automock;
 use uuid::Uuid;
 
@@ -45,10 +46,14 @@ impl ProductsService for PgProductsService {
     async fn list_products(
         &self,
         tenant: TenantUuid,
+        point_in_time: Timestamp,
     ) -> Result<Vec<Product>, ProductsServiceError> {
         let mut tx = self.begin_tenant_transaction(tenant).await?;
 
-        let products = self.repository.list_products(&mut tx).await?;
+        let products = self
+            .repository
+            .list_products(&mut tx, point_in_time)
+            .await?;
 
         tx.commit().await?;
 
@@ -59,10 +64,14 @@ impl ProductsService for PgProductsService {
         &self,
         tenant: TenantUuid,
         uuid: Uuid,
+        point_in_time: Timestamp,
     ) -> Result<Product, ProductsServiceError> {
         let mut tx = self.begin_tenant_transaction(tenant).await?;
 
-        let product = self.repository.get_product(&mut tx, uuid).await?;
+        let product = self
+            .repository
+            .get_product(&mut tx, uuid, point_in_time)
+            .await?;
 
         tx.commit().await?;
 
@@ -96,7 +105,7 @@ impl ProductsService for PgProductsService {
 
         let updated = self
             .repository
-            .update_product(&mut tx, uuid, i64::try_from(update.price)?)
+            .update_product(&mut tx, uuid, update.uuid, i64::try_from(update.price)?)
             .await?;
 
         tx.commit().await?;
@@ -127,14 +136,18 @@ impl ProductsService for PgProductsService {
 #[async_trait]
 pub trait ProductsService: Send + Sync {
     /// Retrieves all products.
-    async fn list_products(&self, tenant: TenantUuid)
-    -> Result<Vec<Product>, ProductsServiceError>;
+    async fn list_products(
+        &self,
+        tenant: TenantUuid,
+        point_in_time: Timestamp,
+    ) -> Result<Vec<Product>, ProductsServiceError>;
 
     /// Retrieve a single product.
     async fn get_product(
         &self,
         tenant: TenantUuid,
         uuid: Uuid,
+        point_in_time: Timestamp,
     ) -> Result<Product, ProductsServiceError>;
 
     /// Creates a new product with the given UUID and price.
