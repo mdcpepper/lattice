@@ -102,7 +102,8 @@ mod tests {
             })
             .return_once(move |_, _| Ok(product));
 
-        repo.expect_get_products().never();
+        repo.expect_get_product().never();
+        repo.expect_list_products().never();
         repo.expect_update_product().never();
         repo.expect_delete_product().never();
 
@@ -134,7 +135,8 @@ mod tests {
             })
             .return_once(|_, _| Err(ProductsServiceError::AlreadyExists));
 
-        repo.expect_get_products().never();
+        repo.expect_get_product().never();
+        repo.expect_list_products().never();
         repo.expect_update_product().never();
         repo.expect_delete_product().never();
 
@@ -161,7 +163,8 @@ mod tests {
             })
             .return_once(|_, _| Err(ProductsServiceError::InvalidData));
 
-        repo.expect_get_products().never();
+        repo.expect_get_product().never();
+        repo.expect_list_products().never();
         repo.expect_update_product().never();
         repo.expect_delete_product().never();
 

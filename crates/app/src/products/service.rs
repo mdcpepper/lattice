@@ -42,14 +42,31 @@ impl PgProductsService {
 
 #[async_trait]
 impl ProductsService for PgProductsService {
-    async fn get_products(&self, tenant: TenantUuid) -> Result<Vec<Product>, ProductsServiceError> {
+    async fn list_products(
+        &self,
+        tenant: TenantUuid,
+    ) -> Result<Vec<Product>, ProductsServiceError> {
         let mut tx = self.begin_tenant_transaction(tenant).await?;
 
-        let products = self.repository.get_products(&mut tx).await?;
+        let products = self.repository.list_products(&mut tx).await?;
 
         tx.commit().await?;
 
         Ok(products)
+    }
+
+    async fn get_product(
+        &self,
+        tenant: TenantUuid,
+        uuid: Uuid,
+    ) -> Result<Product, ProductsServiceError> {
+        let mut tx = self.begin_tenant_transaction(tenant).await?;
+
+        let product = self.repository.get_product(&mut tx, uuid).await?;
+
+        tx.commit().await?;
+
+        Ok(product)
     }
 
     async fn create_product(
@@ -59,7 +76,10 @@ impl ProductsService for PgProductsService {
     ) -> Result<Product, ProductsServiceError> {
         let mut tx = self.begin_tenant_transaction(tenant).await?;
 
-        let created = self.repository.create_product(&mut tx, product).await?;
+        let created = self
+            .repository
+            .create_product(&mut tx, product.uuid, i64::try_from(product.price)?)
+            .await?;
 
         tx.commit().await?;
 
@@ -76,7 +96,7 @@ impl ProductsService for PgProductsService {
 
         let updated = self
             .repository
-            .update_product(&mut tx, uuid, update)
+            .update_product(&mut tx, uuid, i64::try_from(update.price)?)
             .await?;
 
         tx.commit().await?;
@@ -91,7 +111,11 @@ impl ProductsService for PgProductsService {
     ) -> Result<(), ProductsServiceError> {
         let mut tx = self.begin_tenant_transaction(tenant).await?;
 
-        self.repository.delete_product(&mut tx, uuid).await?;
+        let rows_affected = self.repository.delete_product(&mut tx, uuid).await?;
+
+        if rows_affected == 0 {
+            return Err(ProductsServiceError::NotFound);
+        }
 
         tx.commit().await?;
 
@@ -103,7 +127,15 @@ impl ProductsService for PgProductsService {
 #[async_trait]
 pub trait ProductsService: Send + Sync {
     /// Retrieves all products.
-    async fn get_products(&self, tenant: TenantUuid) -> Result<Vec<Product>, ProductsServiceError>;
+    async fn list_products(&self, tenant: TenantUuid)
+    -> Result<Vec<Product>, ProductsServiceError>;
+
+    /// Retrieve a single product.
+    async fn get_product(
+        &self,
+        tenant: TenantUuid,
+        uuid: Uuid,
+    ) -> Result<Product, ProductsServiceError>;
 
     /// Creates a new product with the given UUID and price.
     async fn create_product(

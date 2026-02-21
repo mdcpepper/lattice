@@ -5,7 +5,8 @@ SET
     updated_at = NOW()
 WHERE
     uuid = $1
-AND deleted_at IS NULL
+AND
+    deleted_at IS NULL
 RETURNING
     uuid,
     price,

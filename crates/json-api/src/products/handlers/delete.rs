@@ -64,6 +64,11 @@ mod tests {
             .withf(move |tenant, u| *tenant == TEST_TENANT_UUID && *u == uuid)
             .return_once(move |_, _| Ok(()));
 
+        repo.expect_get_product().never();
+        repo.expect_create_product().never();
+        repo.expect_list_products().never();
+        repo.expect_update_product().never();
+
         let res = TestClient::delete(format!("http://example.com/products/{uuid}"))
             .send(&make_service(repo))
             .await;
@@ -75,8 +80,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_product_invalid_uuid_returns_400() -> TestResult {
+        let mut repo = MockProductsService::new();
+
+        repo.expect_get_product().never();
+        repo.expect_create_product().never();
+        repo.expect_list_products().never();
+        repo.expect_update_product().never();
+        repo.expect_delete_product().never();
+
         let res = TestClient::delete("http://example.com/products/123")
-            .send(&make_service(MockProductsService::new()))
+            .send(&make_service(repo))
             .await;
 
         assert_eq!(res.status_code, Some(StatusCode::BAD_REQUEST));
@@ -96,7 +109,7 @@ mod tests {
             .return_once(|_, _| Err(ProductsServiceError::InvalidReference));
 
         repo.expect_create_product().never();
-        repo.expect_get_products().never();
+        repo.expect_list_products().never();
         repo.expect_update_product().never();
 
         let res = TestClient::delete(format!("http://example.com/products/{uuid}"))

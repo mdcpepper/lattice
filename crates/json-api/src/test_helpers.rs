@@ -36,7 +36,7 @@ fn strict_auth_mock() -> MockAuthService {
 fn strict_products_mock() -> MockProductsService {
     let mut products = MockProductsService::new();
 
-    products.expect_get_products().never();
+    products.expect_list_products().never();
     products.expect_create_product().never();
     products.expect_update_product().never();
     products.expect_delete_product().never();

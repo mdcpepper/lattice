@@ -91,6 +91,7 @@ pub async fn main() {
                     .post(products::create::handler)
                     .push(
                         Router::with_path("{uuid}")
+                            .get(products::get::handler)
                             .put(products::update::handler)
                             .delete(products::delete::handler),
                     ),

@@ -3,10 +3,7 @@
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, PgPool, Postgres, Row, postgres::PgRow, query_as};
 
-use crate::tenants::{
-    errors::TenantsServiceError,
-    models::{NewTenant, Tenant},
-};
+use crate::tenants::models::{NewTenant, Tenant};
 
 const CREATE_TENANT_SQL: &str = include_str!("sql/create_tenant.sql");
 
@@ -23,10 +20,7 @@ impl PgTenantsRepository {
         Self { pool }
     }
 
-    pub(crate) async fn create_tenant(
-        &self,
-        tenant: NewTenant,
-    ) -> Result<Tenant, TenantsServiceError> {
+    pub(crate) async fn create_tenant(&self, tenant: NewTenant) -> Result<Tenant, sqlx::Error> {
         query_as::<Postgres, Tenant>(CREATE_TENANT_SQL)
             .bind(tenant.uuid)
             .bind(tenant.name)
@@ -34,7 +28,6 @@ impl PgTenantsRepository {
             .bind(tenant.token_hash)
             .fetch_one(&self.pool)
             .await
-            .map_err(TenantsServiceError::from)
     }
 }
 
