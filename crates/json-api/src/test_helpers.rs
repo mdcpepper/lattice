@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::MockAuthRepository, extensions::*, products::MockProductsRepository, state::State,
-    tenants::TenantUuid,
+    tenants::models::TenantUuid,
 };
 
 pub(crate) const TEST_TENANT_UUID: TenantUuid = TenantUuid::from_uuid(Uuid::nil());

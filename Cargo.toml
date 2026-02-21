@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/app",
     "crates/core",
     "crates/css-build",
     "crates/demo",

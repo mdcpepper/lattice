@@ -76,16 +76,18 @@ mod tests {
     use testresult::TestResult;
     use uuid::Uuid;
 
-    use crate::{auth::MockAuthRepository, tenants::TenantUuid, test_helpers::state_with_auth};
+    use crate::{
+        auth::MockAuthRepository, tenants::models::TenantUuid, test_helpers::state_with_auth,
+    };
 
     use super::*;
 
     #[salvo::handler]
     async fn echo_tenant(depot: &mut Depot, res: &mut Response) {
-        let tenant = depot
-            .tenant_uuid_or_401()
-            .ok()
-            .map_or_else(|| "missing".to_string(), |uuid| uuid.to_string());
+        let tenant = depot.tenant_uuid_or_401().ok().map_or_else(
+            || "missing".to_string(),
+            |uuid: TenantUuid| uuid.to_string(),
+        );
 
         res.render(tenant);
     }

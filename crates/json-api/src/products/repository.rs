@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::{
     database::SET_TENANT_CONTEXT_SQL,
     products::models::{NewProduct, Product, ProductUpdate},
-    tenants::TenantUuid,
+    tenants::models::TenantUuid,
 };
 
 const GET_PRODUCTS_SQL: &str = include_str!("sql/get_products.sql");
@@ -87,7 +87,7 @@ impl PgProductsRepository {
             .map_err(ProductsRepositoryError::from)?;
 
         query_scalar::<Postgres, String>(SET_TENANT_CONTEXT_SQL)
-            .bind(tenant.as_uuid().to_string())
+            .bind(tenant.into_uuid().to_string())
             .fetch_one(&mut *tx)
             .await
             .map_err(ProductsRepositoryError::from)?;

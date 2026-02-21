@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{AuthRepositoryError, models::ApiToken},
-    tenants::TenantUuid,
+    tenants::models::TenantUuid,
 };
 
 const FIND_TENANT_BY_TOKEN_HASH_SQL: &str = include_str!("sql/find_tenant_by_token_hash.sql");

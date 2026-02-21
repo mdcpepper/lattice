@@ -4,7 +4,7 @@ use std::any::Any;
 
 use salvo::prelude::{Depot, StatusError};
 
-use crate::tenants::TenantUuid;
+use crate::tenants::models::TenantUuid;
 
 const TENANT_UUID_KEY: &str = "tenant_uuid";
 

@@ -20,11 +20,6 @@ impl<T> TypedUuid<T> {
     pub(crate) const fn into_uuid(self) -> Uuid {
         self.0
     }
-
-    #[must_use]
-    pub(crate) const fn as_uuid(&self) -> Uuid {
-        self.0
-    }
 }
 
 impl<T> Clone for TypedUuid<T> {

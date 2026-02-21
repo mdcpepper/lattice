@@ -2,7 +2,7 @@
 
 use uuid::Uuid;
 
-use crate::tenants::TenantUuid;
+use crate::tenants::models::TenantUuid;
 
 /// Represents an API token with associated metadata.
 #[derive(Debug, Clone)]
