@@ -14,7 +14,10 @@ use sqlx::{
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::products::models::{NewProduct, Product, ProductUpdate};
+use crate::{
+    products::models::{NewProduct, Product, ProductUpdate},
+    tenants::TenantUuid,
+};
 
 const GET_PRODUCTS_SQL: &str = include_str!("sql/get_products.sql");
 const CREATE_PRODUCT_SQL: &str = include_str!("sql/create_product.sql");
@@ -47,6 +50,10 @@ pub enum ProductsRepositoryError {
 
 impl From<Error> for ProductsRepositoryError {
     fn from(error: Error) -> Self {
+        if matches!(error, Error::RowNotFound) {
+            return Self::NotFound;
+        }
+
         match error.as_database_error().map(DatabaseError::kind) {
             Some(ErrorKind::UniqueViolation) => Self::AlreadyExists,
             Some(ErrorKind::ForeignKeyViolation) => Self::InvalidReference,
@@ -73,12 +80,14 @@ impl<'r> FromRow<'r, PgRow> for Product {
     fn from_row(row: &'r PgRow) -> sqlx::Result<Self> {
         let price_i64: i64 = row.try_get("price")?;
 
+        let price = u64::try_from(price_i64).map_err(|e| Error::ColumnDecode {
+            index: "price".to_string(),
+            source: Box::new(e),
+        })?;
+
         Ok(Self {
             uuid: row.try_get("uuid")?,
-            price: u64::try_from(price_i64).map_err(|e| Error::ColumnDecode {
-                index: "price".to_string(),
-                source: Box::new(e),
-            })?,
+            price,
             created_at: row.try_get::<SqlxTimestamp, _>("created_at")?.to_jiff(),
             updated_at: row.try_get::<SqlxTimestamp, _>("updated_at")?.to_jiff(),
             deleted_at: row
@@ -90,8 +99,12 @@ impl<'r> FromRow<'r, PgRow> for Product {
 
 #[async_trait]
 impl ProductsRepository for PgProductsRepository {
-    async fn get_products(&self) -> Result<Vec<Product>, ProductsRepositoryError> {
+    async fn get_products(
+        &self,
+        tenant: TenantUuid,
+    ) -> Result<Vec<Product>, ProductsRepositoryError> {
         query_as::<Postgres, Product>(GET_PRODUCTS_SQL)
+            .bind(tenant.as_uuid())
             .fetch_all(&self.pool)
             .await
             .map_err(Into::into)
@@ -99,11 +112,13 @@ impl ProductsRepository for PgProductsRepository {
 
     async fn create_product(
         &self,
+        tenant: TenantUuid,
         product: NewProduct,
     ) -> Result<Product, ProductsRepositoryError> {
         query_as::<Postgres, Product>(CREATE_PRODUCT_SQL)
             .bind(product.uuid)
             .bind(i64::try_from(product.price)?)
+            .bind(tenant.as_uuid())
             .fetch_one(&self.pool)
             .await
             .map_err(Into::into)
@@ -111,20 +126,27 @@ impl ProductsRepository for PgProductsRepository {
 
     async fn update_product(
         &self,
+        tenant: TenantUuid,
         uuid: Uuid,
         update: ProductUpdate,
     ) -> Result<Product, ProductsRepositoryError> {
         query_as::<Postgres, Product>(UPDATE_PRODUCT_SQL)
             .bind(uuid)
+            .bind(tenant.as_uuid())
             .bind(i64::try_from(update.price)?)
             .fetch_one(&self.pool)
             .await
             .map_err(Into::into)
     }
 
-    async fn delete_product(&self, uuid: Uuid) -> Result<(), ProductsRepositoryError> {
+    async fn delete_product(
+        &self,
+        tenant: TenantUuid,
+        uuid: Uuid,
+    ) -> Result<(), ProductsRepositoryError> {
         let result = query(DELETE_PRODUCT_SQL)
             .bind(uuid)
+            .bind(tenant.as_uuid())
             .execute(&self.pool)
             .await
             .map_err(ProductsRepositoryError::from)?;
@@ -151,19 +173,30 @@ mod tests {
 #[async_trait]
 pub(crate) trait ProductsRepository: Send + Sync {
     /// Retrieves all products.
-    async fn get_products(&self) -> Result<Vec<Product>, ProductsRepositoryError>;
+    async fn get_products(
+        &self,
+        tenant: TenantUuid,
+    ) -> Result<Vec<Product>, ProductsRepositoryError>;
 
     /// Creates a new product with the given UUID and price.
-    async fn create_product(&self, product: NewProduct)
-    -> Result<Product, ProductsRepositoryError>;
+    async fn create_product(
+        &self,
+        tenant: TenantUuid,
+        product: NewProduct,
+    ) -> Result<Product, ProductsRepositoryError>;
 
     /// Updates a product with the given UUID and update.
     async fn update_product(
         &self,
+        tenant: TenantUuid,
         uuid: Uuid,
         update: ProductUpdate,
     ) -> Result<Product, ProductsRepositoryError>;
 
     /// Deletes a product with the given UUID.
-    async fn delete_product(&self, uuid: Uuid) -> Result<(), ProductsRepositoryError>;
+    async fn delete_product(
+        &self,
+        tenant: TenantUuid,
+        uuid: Uuid,
+    ) -> Result<(), ProductsRepositoryError>;
 }

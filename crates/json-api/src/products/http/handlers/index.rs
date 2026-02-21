@@ -50,10 +50,11 @@ pub(crate) struct ProductsResponse {
 #[endpoint(tags("products"), summary = "List Products")]
 pub(crate) async fn handler(depot: &mut Depot) -> Result<Json<ProductsResponse>, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
+    let tenant = depot.tenant_uuid_or_401()?;
 
     let products = state
         .products
-        .get_products()
+        .get_products(tenant)
         .await
         .or_500("failed to fetch products")?;
 
@@ -68,7 +69,11 @@ mod tests {
     use salvo::test::{ResponseExt, TestClient};
     use testresult::TestResult;
 
-    use crate::products::{MockProductsRepository, ProductsRepositoryError};
+    use crate::{
+        products::MockProductsRepository,
+        products::ProductsRepositoryError,
+        test_helpers::{TEST_TENANT_UUID, products_service},
+    };
 
     use super::*;
 
@@ -83,20 +88,17 @@ mod tests {
     }
 
     fn make_service(repo: MockProductsRepository) -> Service {
-        let state = Arc::new(State::new(Arc::new(repo)));
-
-        let router = Router::new()
-            .hoop(affix_state::inject(state))
-            .push(Router::with_path("products").get(handler));
-
-        Service::new(router)
+        products_service(repo, Router::with_path("products").get(handler))
     }
 
     #[tokio::test]
     async fn test_index_returns_200() -> TestResult {
         let mut repo = MockProductsRepository::new();
 
-        repo.expect_get_products().once().return_once(|| Ok(vec![]));
+        repo.expect_get_products()
+            .once()
+            .withf(|tenant| *tenant == TEST_TENANT_UUID)
+            .return_once(|_| Ok(vec![]));
 
         repo.expect_create_product().never();
         repo.expect_update_product().never();
@@ -115,7 +117,10 @@ mod tests {
     async fn test_index_returns_empty_list() -> TestResult {
         let mut repo = MockProductsRepository::new();
 
-        repo.expect_get_products().once().return_once(|| Ok(vec![]));
+        repo.expect_get_products()
+            .once()
+            .withf(|tenant| *tenant == TEST_TENANT_UUID)
+            .return_once(|_| Ok(vec![]));
 
         repo.expect_create_product().never();
         repo.expect_update_product().never();
@@ -141,7 +146,8 @@ mod tests {
 
         repo.expect_get_products()
             .once()
-            .return_once(move || Ok(vec![make_product(uuid_a, 100), make_product(uuid_b, 200)]));
+            .withf(|tenant| *tenant == TEST_TENANT_UUID)
+            .return_once(move |_| Ok(vec![make_product(uuid_a, 100), make_product(uuid_b, 200)]));
 
         repo.expect_create_product().never();
         repo.expect_update_product().never();
@@ -166,7 +172,8 @@ mod tests {
 
         repo.expect_get_products()
             .once()
-            .return_once(|| Err(ProductsRepositoryError::InvalidData));
+            .withf(|tenant| *tenant == TEST_TENANT_UUID)
+            .return_once(|_| Err(ProductsRepositoryError::InvalidData));
 
         repo.expect_create_product().never();
         repo.expect_update_product().never();

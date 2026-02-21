@@ -2,7 +2,8 @@ FROM rust:1-bookworm
 
 WORKDIR /app
 
-RUN cargo install watchexec-cli
+RUN cargo install watchexec-cli \
+    && cargo install sqlx-cli
 
 ENV SERVER_HOST=0.0.0.0
 ENV SERVER_PORT=8698

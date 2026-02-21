@@ -22,10 +22,12 @@ pub(crate) async fn handler(
     uuid: PathParam<Uuid>,
     depot: &mut Depot,
 ) -> Result<StatusCode, StatusError> {
-    depot
-        .obtain_or_500::<Arc<State>>()?
+    let state = depot.obtain_or_500::<Arc<State>>()?;
+    let tenant = depot.tenant_uuid_or_401()?;
+
+    state
         .products
-        .delete_product(uuid.into_inner())
+        .delete_product(tenant, uuid.into_inner())
         .await
         .map_err(StatusError::from)?;
 
@@ -34,21 +36,18 @@ pub(crate) async fn handler(
 
 #[cfg(test)]
 mod tests {
-    use salvo::{affix_state::inject, test::TestClient};
+    use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use crate::products::{MockProductsRepository, ProductsRepositoryError};
+    use crate::{
+        products::{MockProductsRepository, ProductsRepositoryError},
+        test_helpers::{TEST_TENANT_UUID, products_service},
+    };
 
     use super::{super::tests::*, *};
 
     fn make_service(repo: MockProductsRepository) -> Service {
-        let state = Arc::new(State::new(Arc::new(repo)));
-
-        let router = Router::new()
-            .hoop(inject(state))
-            .push(Router::with_path("products/{uuid}").delete(handler));
-
-        Service::new(router)
+        products_service(repo, Router::with_path("products/{uuid}").delete(handler))
     }
 
     #[tokio::test]
@@ -61,8 +60,8 @@ mod tests {
 
         repo.expect_delete_product()
             .once()
-            .withf(move |u| *u == uuid)
-            .return_once(move |_| Ok(()));
+            .withf(move |tenant, u| *tenant == TEST_TENANT_UUID && *u == uuid)
+            .return_once(move |_, _| Ok(()));
 
         let res = TestClient::delete(format!("http://example.com/products/{uuid}"))
             .send(&make_service(repo))
@@ -92,8 +91,8 @@ mod tests {
 
         repo.expect_delete_product()
             .once()
-            .withf(move |u| *u == uuid)
-            .return_once(|_| Err(ProductsRepositoryError::InvalidReference));
+            .withf(move |tenant, u| *tenant == TEST_TENANT_UUID && *u == uuid)
+            .return_once(|_, _| Err(ProductsRepositoryError::InvalidReference));
 
         repo.expect_create_product().never();
         repo.expect_get_products().never();

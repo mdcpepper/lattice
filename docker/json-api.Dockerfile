@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY . .
 
+RUN cargo install sqlx-cli
 RUN cargo build --release -p lattice-json
 
 ENV SERVER_HOST=0.0.0.0

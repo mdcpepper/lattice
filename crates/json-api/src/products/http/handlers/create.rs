@@ -53,10 +53,12 @@ pub(crate) async fn handler(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<Json<ProductCreatedResponse>, StatusError> {
-    let uuid = depot
-        .obtain_or_500::<Arc<State>>()?
+    let state = depot.obtain_or_500::<Arc<State>>()?;
+    let tenant = depot.tenant_uuid_or_401()?;
+
+    let uuid = state
         .products
-        .create_product(json.into())
+        .create_product(tenant, json.into())
         .await
         .map_err(StatusError::from)?
         .uuid;
@@ -70,25 +72,19 @@ pub(crate) async fn handler(
 
 #[cfg(test)]
 mod tests {
-    use salvo::{
-        affix_state::inject,
-        test::{ResponseExt, TestClient},
-    };
+    use salvo::test::{ResponseExt, TestClient};
     use serde_json::json;
     use testresult::TestResult;
 
-    use crate::products::{MockProductsRepository, ProductsRepositoryError};
+    use crate::{
+        products::{MockProductsRepository, ProductsRepositoryError},
+        test_helpers::{TEST_TENANT_UUID, products_service},
+    };
 
     use super::{super::tests::*, *};
 
     fn make_service(repo: MockProductsRepository) -> Service {
-        let state = Arc::new(State::new(Arc::new(repo)));
-
-        let router = Router::new()
-            .hoop(inject(state))
-            .push(Router::with_path("products").post(handler));
-
-        Service::new(router)
+        products_service(repo, Router::with_path("products").post(handler))
     }
 
     #[tokio::test]
@@ -100,8 +96,10 @@ mod tests {
 
         repo.expect_create_product()
             .once()
-            .withf(move |new| *new == NewProduct { uuid, price: 100 })
-            .return_once(move |_| Ok(product));
+            .withf(move |tenant, new| {
+                *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
+            })
+            .return_once(move |_, _| Ok(product));
 
         repo.expect_get_products().never();
         repo.expect_update_product().never();
@@ -130,8 +128,10 @@ mod tests {
 
         repo.expect_create_product()
             .once()
-            .withf(move |new| *new == NewProduct { uuid, price: 100 })
-            .return_once(|_| Err(ProductsRepositoryError::AlreadyExists));
+            .withf(move |tenant, new| {
+                *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
+            })
+            .return_once(|_, _| Err(ProductsRepositoryError::AlreadyExists));
 
         repo.expect_get_products().never();
         repo.expect_update_product().never();
@@ -155,8 +155,10 @@ mod tests {
 
         repo.expect_create_product()
             .once()
-            .withf(move |new| *new == NewProduct { uuid, price: 100 })
-            .return_once(|_| Err(ProductsRepositoryError::InvalidData));
+            .withf(move |tenant, new| {
+                *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
+            })
+            .return_once(|_, _| Err(ProductsRepositoryError::InvalidData));
 
         repo.expect_get_products().never();
         repo.expect_update_product().never();

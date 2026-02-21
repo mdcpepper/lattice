@@ -20,6 +20,7 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+mod auth;
 mod config;
 mod database;
 mod extensions;
@@ -27,6 +28,10 @@ mod healthcheck;
 mod products;
 mod shutdown;
 mod state;
+mod tenants;
+#[cfg(test)]
+mod test_helpers;
+mod uuids;
 
 /// Lattice JSON API Server entry point
 ///
@@ -77,11 +82,16 @@ pub async fn main() {
         .hoop(inject(State::from_pool(pool)))
         .push(Router::with_path("healthcheck").get(healthcheck::handler))
         .push(
-            Router::with_path("products")
-                .get(products::index::handler)
-                .post(products::create::handler)
-                .path("{uuid}")
-                .put(products::update::handler),
+            Router::new().hoop(auth::middleware::handler).push(
+                Router::with_path("products")
+                    .get(products::index::handler)
+                    .post(products::create::handler)
+                    .push(
+                        Router::with_path("{uuid}")
+                            .put(products::update::handler)
+                            .delete(products::delete::handler),
+                    ),
+            ),
         );
 
     let doc = OpenApi::new("Lattice API", "0.1.0").merge_router(&router);
