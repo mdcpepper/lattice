@@ -27,7 +27,10 @@ impl PgTenantsService {
 #[async_trait]
 impl TenantsService for PgTenantsService {
     async fn create_tenant(&self, tenant: NewTenant) -> Result<Tenant, TenantsServiceError> {
-        self.repository.create_tenant(tenant).await
+        self.repository
+            .create_tenant(tenant)
+            .await
+            .map_err(Into::into)
     }
 }
 

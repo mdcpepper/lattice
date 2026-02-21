@@ -108,8 +108,9 @@ mod tests {
             })
             .return_once(move |_, _, _| Ok(product));
 
+        repo.expect_get_product().never();
         repo.expect_create_product().never();
-        repo.expect_get_products().never();
+        repo.expect_list_products().never();
         repo.expect_delete_product().never();
 
         let mut res = TestClient::put(format!("http://example.com/products/{uuid}"))
@@ -131,8 +132,9 @@ mod tests {
     async fn test_update_product_invalid_uuid_returns_400() -> TestResult {
         let mut repo = MockProductsService::new();
 
+        repo.expect_get_product().never();
         repo.expect_create_product().never();
-        repo.expect_get_products().never();
+        repo.expect_list_products().never();
         repo.expect_update_product().never();
         repo.expect_delete_product().never();
 
@@ -158,8 +160,9 @@ mod tests {
             })
             .return_once(|_, _, _| Err(ProductsServiceError::InvalidData));
 
+        repo.expect_get_product().never();
         repo.expect_create_product().never();
-        repo.expect_get_products().never();
+        repo.expect_list_products().never();
         repo.expect_delete_product().never();
 
         let res = TestClient::put(format!("http://example.com/products/{uuid}"))

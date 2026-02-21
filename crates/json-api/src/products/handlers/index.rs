@@ -1,44 +1,11 @@
 //! Product Index Handler
 
-use std::{string::ToString, sync::Arc};
+use std::sync::Arc;
 
 use salvo::{oapi::ToSchema, prelude::*};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
-use lattice_app::products::models::Product;
-
-use crate::{extensions::*, state::State};
-
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub(crate) struct ProductResponse {
-    /// The unique identifier of the product
-    uuid: Uuid,
-
-    /// The price of the product in pence/cents
-    price: u64,
-
-    /// The date and time the product was created
-    created_at: String,
-
-    /// The date and time the product was last updated
-    updated_at: String,
-
-    /// The date and time the product was deleted
-    deleted_at: Option<String>,
-}
-
-impl From<Product> for ProductResponse {
-    fn from(product: Product) -> Self {
-        ProductResponse {
-            uuid: product.uuid,
-            price: product.price,
-            created_at: product.created_at.to_string(),
-            updated_at: product.updated_at.to_string(),
-            deleted_at: product.deleted_at.as_ref().map(ToString::to_string),
-        }
-    }
-}
+use crate::{extensions::*, products::get::ProductResponse, state::State};
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub(crate) struct ProductsResponse {
@@ -61,7 +28,7 @@ pub(crate) async fn handler(depot: &mut Depot) -> Result<Json<ProductsResponse>,
     let products = state
         .app
         .products
-        .get_products(tenant)
+        .list_products(tenant)
         .await
         .or_500("failed to fetch products")?;
 
@@ -73,9 +40,11 @@ pub(crate) async fn handler(depot: &mut Depot) -> Result<Json<ProductsResponse>,
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
-    use lattice_app::products::{MockProductsService, ProductsServiceError};
     use salvo::test::{ResponseExt, TestClient};
     use testresult::TestResult;
+    use uuid::Uuid;
+
+    use lattice_app::products::{MockProductsService, ProductsServiceError, models::Product};
 
     use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 
@@ -99,11 +68,12 @@ mod tests {
     async fn test_index_returns_200() -> TestResult {
         let mut repo = MockProductsService::new();
 
-        repo.expect_get_products()
+        repo.expect_list_products()
             .once()
             .withf(|tenant| *tenant == TEST_TENANT_UUID)
             .return_once(|_| Ok(vec![]));
 
+        repo.expect_get_product().never();
         repo.expect_create_product().never();
         repo.expect_update_product().never();
         repo.expect_delete_product().never();
@@ -121,11 +91,12 @@ mod tests {
     async fn test_index_returns_empty_list() -> TestResult {
         let mut repo = MockProductsService::new();
 
-        repo.expect_get_products()
+        repo.expect_list_products()
             .once()
             .withf(|tenant| *tenant == TEST_TENANT_UUID)
             .return_once(|_| Ok(vec![]));
 
+        repo.expect_get_product().never();
         repo.expect_create_product().never();
         repo.expect_update_product().never();
         repo.expect_delete_product().never();
@@ -148,11 +119,12 @@ mod tests {
 
         let mut repo = MockProductsService::new();
 
-        repo.expect_get_products()
+        repo.expect_list_products()
             .once()
             .withf(|tenant| *tenant == TEST_TENANT_UUID)
             .return_once(move |_| Ok(vec![make_product(uuid_a, 100), make_product(uuid_b, 200)]));
 
+        repo.expect_get_product().never();
         repo.expect_create_product().never();
         repo.expect_update_product().never();
         repo.expect_delete_product().never();
@@ -174,11 +146,12 @@ mod tests {
     async fn test_index_repository_error_returns_500() -> TestResult {
         let mut repo = MockProductsService::new();
 
-        repo.expect_get_products()
+        repo.expect_list_products()
             .once()
             .withf(|tenant| *tenant == TEST_TENANT_UUID)
             .return_once(|_| Err(ProductsServiceError::InvalidData));
 
+        repo.expect_get_product().never();
         repo.expect_create_product().never();
         repo.expect_update_product().never();
         repo.expect_delete_product().never();

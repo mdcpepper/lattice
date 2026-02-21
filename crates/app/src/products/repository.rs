@@ -4,12 +4,10 @@ use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
 use uuid::Uuid;
 
-use crate::products::{
-    errors::ProductsServiceError,
-    models::{NewProduct, Product, ProductUpdate},
-};
+use crate::products::models::Product;
 
-const GET_PRODUCTS_SQL: &str = include_str!("sql/get_products.sql");
+const LIST_PRODUCTS_SQL: &str = include_str!("sql/list_products.sql");
+const GET_PRODUCT_SQL: &str = include_str!("sql/get_product.sql");
 const CREATE_PRODUCT_SQL: &str = include_str!("sql/create_product.sql");
 const UPDATE_PRODUCT_SQL: &str = include_str!("sql/update_product.sql");
 const DELETE_PRODUCT_SQL: &str = include_str!("sql/delete_product.sql");
@@ -23,59 +21,64 @@ impl PgProductsRepository {
         Self
     }
 
-    pub(crate) async fn get_products(
+    pub(crate) async fn list_products(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-    ) -> Result<Vec<Product>, ProductsServiceError> {
-        query_as::<Postgres, Product>(GET_PRODUCTS_SQL)
+    ) -> Result<Vec<Product>, sqlx::Error> {
+        query_as::<Postgres, Product>(LIST_PRODUCTS_SQL)
             .fetch_all(&mut **tx)
             .await
-            .map_err(ProductsServiceError::from)
+    }
+
+    pub(crate) async fn get_product(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        uuid: Uuid,
+    ) -> Result<Product, sqlx::Error> {
+        query_as::<Postgres, Product>(GET_PRODUCT_SQL)
+            .bind(uuid)
+            .fetch_one(&mut **tx)
+            .await
     }
 
     pub(crate) async fn create_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        product: NewProduct,
-    ) -> Result<Product, ProductsServiceError> {
+        uuid: Uuid,
+        price: i64,
+    ) -> Result<Product, sqlx::Error> {
         query_as::<Postgres, Product>(CREATE_PRODUCT_SQL)
-            .bind(product.uuid)
-            .bind(i64::try_from(product.price)?)
+            .bind(uuid)
+            .bind(price)
             .fetch_one(&mut **tx)
             .await
-            .map_err(ProductsServiceError::from)
     }
 
     pub(crate) async fn update_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         uuid: Uuid,
-        update: ProductUpdate,
-    ) -> Result<Product, ProductsServiceError> {
+        price: i64,
+    ) -> Result<Product, sqlx::Error> {
         query_as::<Postgres, Product>(UPDATE_PRODUCT_SQL)
             .bind(uuid)
-            .bind(i64::try_from(update.price)?)
+            .bind(price)
             .fetch_one(&mut **tx)
             .await
-            .map_err(ProductsServiceError::from)
     }
 
     pub(crate) async fn delete_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         uuid: Uuid,
-    ) -> Result<(), ProductsServiceError> {
-        let result = query(DELETE_PRODUCT_SQL)
+    ) -> Result<u64, sqlx::Error> {
+        let rows_affected = query(DELETE_PRODUCT_SQL)
             .bind(uuid)
             .execute(&mut **tx)
-            .await
-            .map_err(ProductsServiceError::from)?;
+            .await?
+            .rows_affected();
 
-        if result.rows_affected() == 0 {
-            return Err(ProductsServiceError::NotFound);
-        }
-
-        Ok(())
+        Ok(rows_affected)
     }
 }
 
