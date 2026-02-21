@@ -26,6 +26,7 @@ pub(crate) struct UpdateProductRequest {
 impl From<UpdateProductRequest> for ProductUpdate {
     fn from(request: UpdateProductRequest) -> Self {
         ProductUpdate {
+            uuid: None,
             price: request.price,
         }
     }
@@ -104,7 +105,13 @@ mod tests {
         repo.expect_update_product()
             .once()
             .withf(move |tenant, u, update| {
-                *tenant == TEST_TENANT_UUID && *u == uuid && *update == ProductUpdate { price: 200 }
+                *tenant == TEST_TENANT_UUID
+                    && *u == uuid
+                    && *update
+                        == ProductUpdate {
+                            uuid: None,
+                            price: 200,
+                        }
             })
             .return_once(move |_, _, _| Ok(product));
 
@@ -156,7 +163,13 @@ mod tests {
         repo.expect_update_product()
             .once()
             .withf(move |tenant, u, update| {
-                *tenant == TEST_TENANT_UUID && *u == uuid && *update == ProductUpdate { price: 200 }
+                *tenant == TEST_TENANT_UUID
+                    && *u == uuid
+                    && *update
+                        == ProductUpdate {
+                            uuid: None,
+                            price: 200,
+                        }
             })
             .return_once(|_, _, _| Err(ProductsServiceError::InvalidData));
 

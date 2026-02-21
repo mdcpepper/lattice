@@ -23,5 +23,6 @@ pub struct NewProduct {
 /// Product Update Model
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProductUpdate {
+    pub uuid: Option<Uuid>,
     pub price: u64,
 }
