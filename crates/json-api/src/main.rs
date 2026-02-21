@@ -4,12 +4,18 @@ use std::process;
 
 use salvo::{
     affix_state::inject,
-    oapi::{OpenApi, swagger_ui::SwaggerUi},
+    oapi::{
+        OpenApi,
+        security::{Http, HttpAuthScheme, SecurityScheme},
+        swagger_ui::SwaggerUi,
+    },
     prelude::*,
     trailing_slash::remove_slash,
 };
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
+
+use lattice_app::context::AppContext;
 
 use crate::{config::ServerConfig, state::State};
 
@@ -20,13 +26,15 @@ use tikv_jemallocator::Jemalloc;
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
+mod auth;
 mod config;
-mod database;
 mod extensions;
 mod healthcheck;
 mod products;
 mod shutdown;
 mod state;
+#[cfg(test)]
+mod test_helpers;
 
 /// Lattice JSON API Server entry point
 ///
@@ -62,10 +70,10 @@ pub async fn main() {
     // Bind server
     let listener = TcpListener::new(addr).bind().await;
 
-    let pool = match database::connect(&config.database_url).await {
-        Ok(pool) => pool,
-        Err(db_error) => {
-            error!("failed to connect to postgres: {db_error}");
+    let app = match AppContext::from_database_url(&config.database_url).await {
+        Ok(app) => app,
+        Err(init_error) => {
+            error!("failed to initialize app context: {init_error}");
 
             process::exit(1);
         }
@@ -74,17 +82,27 @@ pub async fn main() {
     let router = Router::new()
         .hoop(CatchPanic::new())
         .hoop(remove_slash())
-        .hoop(inject(State::from_pool(pool)))
+        .hoop(inject(State::from_app_context(app)))
         .push(Router::with_path("healthcheck").get(healthcheck::handler))
         .push(
-            Router::with_path("products")
-                .get(products::index::handler)
-                .post(products::create::handler)
-                .path("{uuid}")
-                .put(products::update::handler),
+            Router::new().hoop(auth::middleware::handler).push(
+                Router::with_path("products")
+                    .get(products::index::handler)
+                    .post(products::create::handler)
+                    .push(
+                        Router::with_path("{uuid}")
+                            .put(products::update::handler)
+                            .delete(products::delete::handler),
+                    ),
+            ),
         );
 
-    let doc = OpenApi::new("Lattice API", "0.1.0").merge_router(&router);
+    let doc = OpenApi::new("Lattice API", "0.3.0")
+        .add_security_scheme(
+            "bearer_auth",
+            SecurityScheme::Http(Http::new(HttpAuthScheme::Bearer)),
+        )
+        .merge_router(&router);
 
     let router = router
         .push(doc.into_router("/api-doc/openapi.json"))

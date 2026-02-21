@@ -8,9 +8,8 @@ pub(crate) mod update;
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
+    use lattice_app::products::models::Product;
     use uuid::Uuid;
-
-    use crate::products::models::Product;
 
     pub(super) fn make_product(uuid: Uuid) -> Product {
         Product {

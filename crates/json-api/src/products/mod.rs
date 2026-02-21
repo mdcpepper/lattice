@@ -1,8 +1,6 @@
 //! Products
 
-mod http;
-mod models;
-mod repository;
+pub(crate) mod errors;
+pub(crate) mod handlers;
 
-pub(crate) use http::handlers::*;
-pub(crate) use repository::*;
+pub(crate) use handlers::*;

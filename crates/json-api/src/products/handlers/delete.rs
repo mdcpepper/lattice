@@ -5,12 +5,13 @@ use std::sync::Arc;
 use salvo::{oapi::extract::PathParam, prelude::*};
 use uuid::Uuid;
 
-use crate::{extensions::*, state::State};
+use crate::{extensions::*, products::errors::into_status_error, state::State};
 
 /// Delete Product Handler
 #[endpoint(
     tags("products"),
     summary = "Delete Product",
+    security(("bearer_auth" = [])),
     responses(
         (status_code = StatusCode::OK, description = "Product deleted"),
         (status_code = StatusCode::NOT_FOUND, description = "Product not found"),
@@ -22,33 +23,32 @@ pub(crate) async fn handler(
     uuid: PathParam<Uuid>,
     depot: &mut Depot,
 ) -> Result<StatusCode, StatusError> {
-    depot
-        .obtain_or_500::<Arc<State>>()?
+    let state = depot.obtain_or_500::<Arc<State>>()?;
+    let tenant = depot.tenant_uuid_or_401()?;
+
+    state
+        .app
         .products
-        .delete_product(uuid.into_inner())
+        .delete_product(tenant, uuid.into_inner())
         .await
-        .map_err(StatusError::from)?;
+        .map_err(into_status_error)?;
 
     Ok(StatusCode::OK)
 }
 
 #[cfg(test)]
 mod tests {
-    use salvo::{affix_state::inject, test::TestClient};
+    use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use crate::products::{MockProductsRepository, ProductsRepositoryError};
+    use lattice_app::products::{MockProductsService, ProductsServiceError};
+
+    use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 
     use super::{super::tests::*, *};
 
-    fn make_service(repo: MockProductsRepository) -> Service {
-        let state = Arc::new(State::new(Arc::new(repo)));
-
-        let router = Router::new()
-            .hoop(inject(state))
-            .push(Router::with_path("products/{uuid}").delete(handler));
-
-        Service::new(router)
+    fn make_service(repo: MockProductsService) -> Service {
+        products_service(repo, Router::with_path("products/{uuid}").delete(handler))
     }
 
     #[tokio::test]
@@ -57,12 +57,12 @@ mod tests {
 
         make_product(uuid);
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_delete_product()
             .once()
-            .withf(move |u| *u == uuid)
-            .return_once(move |_| Ok(()));
+            .withf(move |tenant, u| *tenant == TEST_TENANT_UUID && *u == uuid)
+            .return_once(move |_, _| Ok(()));
 
         let res = TestClient::delete(format!("http://example.com/products/{uuid}"))
             .send(&make_service(repo))
@@ -76,7 +76,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_product_invalid_uuid_returns_400() -> TestResult {
         let res = TestClient::delete("http://example.com/products/123")
-            .send(&make_service(MockProductsRepository::new()))
+            .send(&make_service(MockProductsService::new()))
             .await;
 
         assert_eq!(res.status_code, Some(StatusCode::BAD_REQUEST));
@@ -88,12 +88,12 @@ mod tests {
     async fn test_delete_product_not_found_returns_404() -> TestResult {
         let uuid = Uuid::now_v7();
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_delete_product()
             .once()
-            .withf(move |u| *u == uuid)
-            .return_once(|_| Err(ProductsRepositoryError::InvalidReference));
+            .withf(move |tenant, u| *tenant == TEST_TENANT_UUID && *u == uuid)
+            .return_once(|_, _| Err(ProductsServiceError::InvalidReference));
 
         repo.expect_create_product().never();
         repo.expect_get_products().never();

@@ -606,9 +606,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.58"
+version = "4.5.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63be97961acde393029492ce0be7a1af7e323e6bae9511ebfac33751be5e6806"
+checksum = "2797f34da339ce31042b27d23607e051786132987f595b02ba4f6a6dffb7030a"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -616,9 +616,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.58"
+version = "4.5.60"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f13174bda5dfd69d7e947827e5af4b0f2f94a4a3ee92912fba07a66150f21e2"
+checksum = "24a241312cea5059b13574bb9b3861cabf758b879c15190b37b6d6fd63ab6876"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2642,6 +2642,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lattice-app"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "clap",
+ "dotenvy",
+ "jiff",
+ "jiff-sqlx",
+ "mockall",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "lattice-css-build"
 version = "0.3.0"
 dependencies = [
@@ -2675,16 +2692,14 @@ dependencies = [
 name = "lattice-json"
 version = "0.3.0"
 dependencies = [
- "async-trait",
  "clap",
  "dotenvy",
  "jiff",
- "jiff-sqlx",
- "mockall",
+ "lattice-app",
  "salvo",
  "serde",
  "serde_json",
- "sqlx",
+ "sha2",
  "testresult",
  "thiserror 2.0.18",
  "tikv-jemallocator",

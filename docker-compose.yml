@@ -58,8 +58,12 @@ services:
       - SERVER_HOST=${SERVER_HOST:-0.0.0.0}
       - SERVER_PORT=${SERVER_PORT:-8698}
       - RUST_LOG=${RUST_LOG:-info}
+      - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${POSTGRES_USER:-lattice_user}:${POSTGRES_PASSWORD:-lattice_password}@postgres:5432/${POSTGRES_DB:-lattice_db}}
     networks:
       - lattice-network
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   json-api-dev:
@@ -73,7 +77,7 @@ services:
       - SERVER_HOST=${SERVER_HOST:-0.0.0.0}
       - SERVER_PORT=${SERVER_PORT:-8698}
       - RUST_LOG=${RUST_LOG:-info}
-      - DATABASE_URL=${DATABASE_URL:-postgresql://${POSTGRES_USER:-lattice_user}:${POSTGRES_PASSWORD:-lattice_password}@lattice-postgres:5432/${POSTGRES_DB:-lattice_db}}
+      - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${POSTGRES_USER:-lattice_user}:${POSTGRES_PASSWORD:-lattice_password}@postgres:5432/${POSTGRES_DB:-lattice_db}}
     volumes:
       - .:/app
       - cargo_registry:/usr/local/cargo/registry

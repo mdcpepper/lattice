@@ -13,7 +13,9 @@ use salvo::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{extensions::*, products::models::ProductUpdate, state::State};
+use lattice_app::products::models::ProductUpdate;
+
+use crate::{extensions::*, products::errors::into_status_error, state::State};
 
 /// Update Product Request
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -21,10 +23,8 @@ pub(crate) struct UpdateProductRequest {
     pub price: u64,
 }
 
-impl From<JsonBody<UpdateProductRequest>> for ProductUpdate {
-    fn from(json: JsonBody<UpdateProductRequest>) -> Self {
-        let request = json.into_inner();
-
+impl From<UpdateProductRequest> for ProductUpdate {
+    fn from(request: UpdateProductRequest) -> Self {
         ProductUpdate {
             price: request.price,
         }
@@ -42,6 +42,7 @@ pub(crate) struct ProductUpdatedResponse {
 #[endpoint(
     tags("products"),
     summary = "Update Product",
+    security(("bearer_auth" = [])),
     responses(
         (status_code = StatusCode::OK, description = "Product updated"),
         (status_code = StatusCode::NOT_FOUND, description = "Product not found"),
@@ -55,14 +56,16 @@ pub(crate) async fn handler(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<Json<ProductUpdatedResponse>, StatusError> {
+    let state = depot.obtain_or_500::<Arc<State>>()?;
+    let tenant = depot.tenant_uuid_or_401()?;
     let uuid = uuid.into_inner();
 
-    let price = depot
-        .obtain_or_500::<Arc<State>>()?
+    let price = state
+        .app
         .products
-        .update_product(uuid, json.into())
+        .update_product(tenant, uuid, json.into_inner().into())
         .await
-        .map_err(StatusError::from)?
+        .map_err(into_status_error)?
         .price;
 
     res.add_header(LOCATION, format!("/products/{uuid}"), true)
@@ -74,39 +77,36 @@ pub(crate) async fn handler(
 
 #[cfg(test)]
 mod tests {
-    use salvo::{
-        affix_state::inject,
-        test::{ResponseExt, TestClient},
-    };
+    use salvo::test::{ResponseExt, TestClient};
     use serde_json::json;
     use testresult::TestResult;
 
-    use crate::products::{MockProductsRepository, ProductsRepositoryError};
+    use lattice_app::products::{MockProductsService, ProductsServiceError};
+
+    use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 
     use super::{super::tests::*, *};
 
-    fn make_service(repo: MockProductsRepository) -> Service {
-        let state = Arc::new(State::new(Arc::new(repo)));
-
-        let router = Router::new()
-            .hoop(inject(state))
-            .push(Router::with_path("products/{uuid}").put(handler));
-
-        Service::new(router)
+    fn make_service(repo: MockProductsService) -> Service {
+        products_service(repo, Router::with_path("products/{uuid}").put(handler))
     }
 
     #[tokio::test]
     async fn test_update_product_success() -> TestResult {
         let uuid = Uuid::now_v7();
+
         let mut product = make_product(uuid);
+
         product.price = 200;
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_update_product()
             .once()
-            .withf(move |u, update| *u == uuid && *update == ProductUpdate { price: 200 })
-            .return_once(move |_, _| Ok(product));
+            .withf(move |tenant, u, update| {
+                *tenant == TEST_TENANT_UUID && *u == uuid && *update == ProductUpdate { price: 200 }
+            })
+            .return_once(move |_, _, _| Ok(product));
 
         repo.expect_create_product().never();
         repo.expect_get_products().never();
@@ -129,7 +129,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_product_invalid_uuid_returns_400() -> TestResult {
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_create_product().never();
         repo.expect_get_products().never();
@@ -149,12 +149,14 @@ mod tests {
     async fn test_update_product_invalid_price_returns_400() -> TestResult {
         let uuid = Uuid::now_v7();
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_update_product()
             .once()
-            .withf(move |u, update| *u == uuid && *update == ProductUpdate { price: 200 })
-            .return_once(|_, _| Err(ProductsRepositoryError::InvalidData));
+            .withf(move |tenant, u, update| {
+                *tenant == TEST_TENANT_UUID && *u == uuid && *update == ProductUpdate { price: 200 }
+            })
+            .return_once(|_, _, _| Err(ProductsServiceError::InvalidData));
 
         repo.expect_create_product().never();
         repo.expect_get_products().never();

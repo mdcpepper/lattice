@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 /// Product Model
 #[derive(Debug, Clone)]
-pub(crate) struct Product {
+pub struct Product {
     pub uuid: Uuid,
     pub price: u64,
     pub created_at: Timestamp,
@@ -15,13 +15,13 @@ pub(crate) struct Product {
 
 /// New Product Model
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NewProduct {
+pub struct NewProduct {
     pub uuid: Uuid,
     pub price: u64,
 }
 
 /// Product Update Model
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ProductUpdate {
+pub struct ProductUpdate {
     pub price: u64,
 }

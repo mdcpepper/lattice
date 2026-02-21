@@ -10,7 +10,9 @@ use salvo::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{extensions::*, products::models::NewProduct, state::State};
+use lattice_app::products::models::NewProduct;
+
+use crate::{extensions::*, products::errors::into_status_error, state::State};
 
 /// Create Product Request
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -19,10 +21,8 @@ pub(crate) struct CreateProductRequest {
     pub price: u64,
 }
 
-impl From<JsonBody<CreateProductRequest>> for NewProduct {
-    fn from(json: JsonBody<CreateProductRequest>) -> Self {
-        let request = json.into_inner();
-
+impl From<CreateProductRequest> for NewProduct {
+    fn from(request: CreateProductRequest) -> Self {
         NewProduct {
             uuid: request.uuid,
             price: request.price,
@@ -41,6 +41,7 @@ pub(crate) struct ProductCreatedResponse {
 #[endpoint(
     tags("products"),
     summary = "Create Product",
+    security(("bearer_auth" = [])),
     responses(
         (status_code = StatusCode::CREATED, description = "Product created"),
         (status_code = StatusCode::CONFLICT, description = "Product already exists"),
@@ -53,12 +54,15 @@ pub(crate) async fn handler(
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<Json<ProductCreatedResponse>, StatusError> {
-    let uuid = depot
-        .obtain_or_500::<Arc<State>>()?
+    let state = depot.obtain_or_500::<Arc<State>>()?;
+    let tenant = depot.tenant_uuid_or_401()?;
+
+    let uuid = state
+        .app
         .products
-        .create_product(json.into())
+        .create_product(tenant, json.into_inner().into())
         .await
-        .map_err(StatusError::from)?
+        .map_err(into_status_error)?
         .uuid;
 
     res.add_header(LOCATION, format!("/products/{uuid}"), true)
@@ -70,25 +74,18 @@ pub(crate) async fn handler(
 
 #[cfg(test)]
 mod tests {
-    use salvo::{
-        affix_state::inject,
-        test::{ResponseExt, TestClient},
-    };
+    use salvo::test::{ResponseExt, TestClient};
     use serde_json::json;
     use testresult::TestResult;
 
-    use crate::products::{MockProductsRepository, ProductsRepositoryError};
+    use lattice_app::products::{MockProductsService, ProductsServiceError};
+
+    use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 
     use super::{super::tests::*, *};
 
-    fn make_service(repo: MockProductsRepository) -> Service {
-        let state = Arc::new(State::new(Arc::new(repo)));
-
-        let router = Router::new()
-            .hoop(inject(state))
-            .push(Router::with_path("products").post(handler));
-
-        Service::new(router)
+    fn make_service(repo: MockProductsService) -> Service {
+        products_service(repo, Router::with_path("products").post(handler))
     }
 
     #[tokio::test]
@@ -96,12 +93,14 @@ mod tests {
         let uuid = Uuid::now_v7();
         let product = make_product(uuid);
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_create_product()
             .once()
-            .withf(move |new| *new == NewProduct { uuid, price: 100 })
-            .return_once(move |_| Ok(product));
+            .withf(move |tenant, new| {
+                *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
+            })
+            .return_once(move |_, _| Ok(product));
 
         repo.expect_get_products().never();
         repo.expect_update_product().never();
@@ -126,12 +125,14 @@ mod tests {
     async fn test_create_product_conflict_returns_409() -> TestResult {
         let uuid = Uuid::now_v7();
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_create_product()
             .once()
-            .withf(move |new| *new == NewProduct { uuid, price: 100 })
-            .return_once(|_| Err(ProductsRepositoryError::AlreadyExists));
+            .withf(move |tenant, new| {
+                *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
+            })
+            .return_once(|_, _| Err(ProductsServiceError::AlreadyExists));
 
         repo.expect_get_products().never();
         repo.expect_update_product().never();
@@ -151,12 +152,14 @@ mod tests {
     async fn test_create_product_invalid_price_returns_400() -> TestResult {
         let uuid = Uuid::now_v7();
 
-        let mut repo = MockProductsRepository::new();
+        let mut repo = MockProductsService::new();
 
         repo.expect_create_product()
             .once()
-            .withf(move |new| *new == NewProduct { uuid, price: 100 })
-            .return_once(|_| Err(ProductsRepositoryError::InvalidData));
+            .withf(move |tenant, new| {
+                *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
+            })
+            .return_once(|_, _| Err(ProductsServiceError::InvalidData));
 
         repo.expect_get_products().never();
         repo.expect_update_product().never();
