@@ -59,7 +59,25 @@ jobs:
       - name: Run tests
         run: cargo test --all-features --workspace --exclude lattice-php-ext
 
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      php: ${{ steps.filter.outputs.php }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            php:
+              - "crates/core/**"
+              - "crates/php-ext/**"
+              - "Cargo.lock"
+              - "Cargo.toml"
+
   php_extension:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.php == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
