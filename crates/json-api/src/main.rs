@@ -30,6 +30,7 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 mod auth;
+mod carts;
 mod config;
 mod extensions;
 mod healthcheck;
@@ -98,6 +99,15 @@ pub async fn main() {
             Router::new()
                 .hoop(auth::middleware::handler)
                 .push(
+                    Router::with_path("carts")
+                        .post(carts::create::handler)
+                        .push(
+                            Router::with_path("{uuid}")
+                                .get(carts::get::handler)
+                                .delete(carts::delete::handler),
+                        ),
+                )
+                .push(
                     Router::with_path("products")
                         .get(products::index::handler)
                         .post(products::create::handler)
@@ -107,8 +117,7 @@ pub async fn main() {
                                 .put(products::update::handler)
                                 .delete(products::delete::handler),
                         ),
-                )
-                .push(Router::new()),
+                ),
         );
 
     let doc = OpenApi::new("Lattice API", "0.3.0")

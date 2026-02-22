@@ -108,6 +108,7 @@ mod tests {
             .withf(move |tenant, u| *tenant == TEST_TENANT_UUID && *u == uuid)
             .return_once(|_, _| Err(ProductsServiceError::InvalidReference));
 
+        repo.expect_get_product().never();
         repo.expect_create_product().never();
         repo.expect_list_products().never();
         repo.expect_update_product().never();

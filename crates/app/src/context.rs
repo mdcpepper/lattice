@@ -7,7 +7,10 @@ use thiserror::Error;
 use crate::{
     auth::{AuthService, OpenBaoClient, PgAuthService},
     database::{self, Db},
-    domain::products::{PgProductsService, ProductsService},
+    domain::{
+        carts::{CartsService, PgCartsService},
+        products::{PgProductsService, ProductsService},
+    },
 };
 
 #[derive(Debug, Error)]
@@ -18,6 +21,7 @@ pub enum AppInitError {
 
 #[derive(Clone)]
 pub struct AppContext {
+    pub carts: Arc<dyn CartsService>,
     pub products: Arc<dyn ProductsService>,
     pub auth: Arc<dyn AuthService>,
 }
@@ -43,6 +47,7 @@ impl AppContext {
         let db = Db::new(pool.clone());
 
         Ok(Self {
+            carts: Arc::new(PgCartsService::new(db.clone())),
             products: Arc::new(PgProductsService::new(db)),
             auth: Arc::new(PgAuthService::new(pool, openbao)),
         })
