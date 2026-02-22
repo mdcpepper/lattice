@@ -1,6 +1,9 @@
+//! Token Revocation
+
 use clap::Args;
-use lattice_app::{auth::PgAuthRepository, database};
 use uuid::Uuid;
+
+use lattice_app::{auth::PgAuthRepository, database};
 
 #[derive(Debug, Args)]
 pub(crate) struct RevokeTokenArgs {

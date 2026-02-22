@@ -3,7 +3,7 @@
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, PgPool, Postgres, Row, postgres::PgRow, query_as};
 
-use crate::tenants::models::{NewTenant, Tenant};
+use crate::domain::tenants::models::{NewTenant, Tenant};
 
 const CREATE_TENANT_SQL: &str = include_str!("sql/create_tenant.sql");
 

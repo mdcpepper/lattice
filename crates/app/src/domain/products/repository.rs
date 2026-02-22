@@ -5,7 +5,7 @@ use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
 use uuid::Uuid;
 
-use crate::products::models::Product;
+use crate::domain::products::models::Product;
 
 const LIST_PRODUCTS_SQL: &str = include_str!("sql/list_products.sql");
 const GET_PRODUCT_SQL: &str = include_str!("sql/get_product.sql");

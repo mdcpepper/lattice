@@ -3,7 +3,7 @@
 use jiff::Timestamp;
 use uuid::Uuid;
 
-use crate::{auth::ApiTokenVersion, tenants::models::TenantUuid};
+use crate::{auth::ApiTokenVersion, domain::tenants::models::TenantUuid};
 
 /// API token data used during bearer authentication.
 #[derive(Debug, Clone)]

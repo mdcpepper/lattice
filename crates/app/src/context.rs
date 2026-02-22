@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::{
     auth::{AuthService, OpenBaoClient, PgAuthService},
     database::{self, Db},
-    products::{PgProductsService, ProductsService},
+    domain::products::{PgProductsService, ProductsService},
 };
 
 #[derive(Debug, Error)]

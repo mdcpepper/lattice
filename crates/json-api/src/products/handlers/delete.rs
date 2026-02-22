@@ -41,7 +41,7 @@ mod tests {
     use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use lattice_app::products::{MockProductsService, ProductsServiceError};
+    use lattice_app::domain::products::{MockProductsService, ProductsServiceError};
 
     use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 

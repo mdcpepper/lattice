@@ -1,7 +1,7 @@
 use clap::Args;
 use lattice_app::{
     database,
-    tenants::{PgTenantsService, TenantsService, models::NewTenant},
+    domain::tenants::{PgTenantsService, TenantsService, models::NewTenant},
 };
 use uuid::Uuid;
 

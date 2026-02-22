@@ -11,7 +11,7 @@ mod tests {
     use jiff::Timestamp;
     use uuid::Uuid;
 
-    use lattice_app::products::models::Product;
+    use lattice_app::domain::products::models::Product;
 
     pub(super) fn make_product(uuid: Uuid) -> Product {
         Product {

@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::{ActiveApiToken, ApiTokenMetadata, ApiTokenVersion, NewApiToken},
-    tenants::models::TenantUuid,
+    domain::tenants::models::TenantUuid,
 };
 
 const FIND_ACTIVE_API_TOKEN_BY_UUID_SQL: &str =

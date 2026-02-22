@@ -1,10 +1,13 @@
+//! Token Creation
+
 use clap::Args;
 use jiff::Timestamp;
+use uuid::Uuid;
+
 use lattice_app::{
     auth::{OpenBaoClient, OpenBaoConfig, PgAuthService},
     database,
 };
-use uuid::Uuid;
 
 #[derive(Debug, Args)]
 pub(crate) struct CreateTokenArgs {

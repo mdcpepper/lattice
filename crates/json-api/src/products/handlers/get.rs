@@ -12,7 +12,7 @@ use salvo::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use lattice_app::products::models::Product;
+use lattice_app::domain::products::models::Product;
 
 use crate::{extensions::*, products::errors::into_status_error, state::State};
 
@@ -76,9 +76,10 @@ pub(crate) async fn handler(
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
-    use lattice_app::products::{MockProductsService, ProductsServiceError};
     use salvo::test::TestClient;
     use testresult::TestResult;
+
+    use lattice_app::domain::products::{MockProductsService, ProductsServiceError};
 
     use crate::{
         products::handlers::tests::make_product,

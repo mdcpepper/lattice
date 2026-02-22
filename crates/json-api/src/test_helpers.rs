@@ -6,8 +6,9 @@ use salvo::{affix_state::inject, prelude::*};
 use uuid::Uuid;
 
 use lattice_app::{
-    auth::MockAuthService, context::AppContext, products::MockProductsService,
-    tenants::models::TenantUuid,
+    auth::MockAuthService,
+    context::AppContext,
+    domain::{products::MockProductsService, tenants::models::TenantUuid},
 };
 
 use crate::{extensions::*, state::State};

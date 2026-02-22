@@ -70,6 +70,7 @@ services:
       context: .
       dockerfile: docker/json-api.dev.Dockerfile
     container_name: lattice-json-api-dev
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     ports:
       - "8698:8698"
     environment:

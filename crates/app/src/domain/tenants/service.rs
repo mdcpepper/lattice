@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use mockall::automock;
 use sqlx::PgPool;
 
-use crate::tenants::{
+use crate::domain::tenants::{
     errors::TenantsServiceError,
     models::{NewTenant, Tenant},
     repository::PgTenantsRepository,
