@@ -38,6 +38,6 @@ impl TenantsService for PgTenantsService {
 #[async_trait]
 /// Tenant persistence operations.
 pub trait TenantsService: Send + Sync {
-    /// Creates a new tenant with the given name and token.
+    /// Creates a new tenant.
     async fn create_tenant(&self, tenant: NewTenant) -> Result<Tenant, TenantsServiceError>;
 }

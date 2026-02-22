@@ -19,10 +19,6 @@ rusty-money.workspace = true
 smallvec.workspace = true
 slotmap.workspace = true
 testresult.workspace = true
-thiserror.workspace = true
-
-[profile.release]
-strip = "debuginfo"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(php82)"] }

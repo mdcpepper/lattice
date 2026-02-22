@@ -18,5 +18,49 @@ test-extension: build-extension
 
 test: test-rust test-extension
 
-watch:
-    docker compose --profile dev up json-api-dev
+dev:
+    docker compose up -d --wait postgres
+    docker compose --profile dev up --build --force-recreate json-api-dev demo
+
+remove:
+    docker compose --profile dev down --volumes --remove-orphans --rmi local
+
+sqlx *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export OPENBAO_ADDR="${OPENBAO_ADDR:-http://localhost:8200}"
+    export OPENBAO_TOKEN="${OPENBAO_TOKEN:-${OPENBAO_DEV_ROOT_TOKEN:-lattice-dev-root-token}}"
+    source docker/openbao-helpers.sh
+    if ! db_url="$(openbao_admin_db_url "postgres")"; then
+      db_url="postgresql://${POSTGRES_USER:-lattice_user}:${POSTGRES_PASSWORD:-lattice_password}@postgres:5432/${POSTGRES_DB:-lattice_db}"
+    fi
+    docker compose --profile dev run --rm --build --quiet-build -T -e DATABASE_URL="$db_url" json-api-dev sqlx {{ args }}
+
+migrate:
+    just sqlx migrate run
+
+cli *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export OPENBAO_ADDR="${OPENBAO_ADDR:-http://localhost:8200}"
+    export OPENBAO_TOKEN="${OPENBAO_TOKEN:-${OPENBAO_DEV_ROOT_TOKEN:-lattice-dev-root-token}}"
+    source docker/openbao-helpers.sh
+    if ! db_url="$(openbao_admin_db_url "localhost")"; then
+      db_url="${DATABASE_ADMIN_URL:-postgresql://${POSTGRES_USER:-lattice_user}:${POSTGRES_PASSWORD:-lattice_password}@localhost:5432/${POSTGRES_DB:-lattice_db}}"
+    fi
+    DATABASE_URL="$db_url" cargo run --package lattice-app -- {{ args }}
+
+db-admin-creds:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export OPENBAO_ADDR="${OPENBAO_ADDR:-http://localhost:8200}"
+    export OPENBAO_TOKEN="${OPENBAO_TOKEN:-${OPENBAO_DEV_ROOT_TOKEN:-lattice-dev-root-token}}"
+    source docker/openbao-helpers.sh
+    if ! db_url="$(openbao_admin_db_url "localhost")"; then
+      echo "error: could not fetch admin DB credentials from OpenBao at ${OPENBAO_ADDR}" >&2
+      exit 1
+    fi
+    userinfo="${db_url#postgresql://}"; userinfo="${userinfo%%@*}"
+    echo "user:     ${userinfo%%:*}"
+    echo "password: ${userinfo#*:}"
+    echo "url:      ${db_url}"

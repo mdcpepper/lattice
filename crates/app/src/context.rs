@@ -5,7 +5,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::{
-    auth::{AuthService, PgAuthService},
+    auth::{AuthService, OpenBaoClient, PgAuthService},
     database::{self, Db},
     products::{PgProductsService, ProductsService},
 };
@@ -28,8 +28,15 @@ impl AppContext {
     /// # Errors
     ///
     /// Returns an error when establishing a database connection fails.
-    pub async fn from_database_url(url: &str) -> Result<Self, AppInitError> {
+    pub async fn from_database_url(
+        url: &str,
+        openbao: OpenBaoClient,
+    ) -> Result<Self, AppInitError> {
         let pool = database::connect(url)
+            .await
+            .map_err(AppInitError::Database)?;
+
+        database::ensure_rls_enforced_role(&pool)
             .await
             .map_err(AppInitError::Database)?;
 
@@ -37,7 +44,7 @@ impl AppContext {
 
         Ok(Self {
             products: Arc::new(PgProductsService::new(db)),
-            auth: Arc::new(PgAuthService::new(pool)),
+            auth: Arc::new(PgAuthService::new(pool, openbao)),
         })
     }
 }

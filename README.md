@@ -22,6 +22,8 @@ optimisation engine written in Rust.
 * [Export ILP Formulation](#export-ilp-formulation)
 * [PHP Extension](#php-extension)
 * [WASM Demo](#wasm-demo)
+* [JSON API (WIP)](#json-api-wip)
+  * [CLI Commands](#cli-commands)
 
 ## Promotion Types
 
@@ -1026,4 +1028,78 @@ rustup target add wasm32-unknown-unknown
 cargo install trunk --locked
 cd crates/demo
 trunk serve --open
+```
+
+The demo app should then be available at: `http://localhost:5173`
+
+## JSON API (WIP)
+
+The `crates/json-api` service is a multi-tenant HTTP API, with tenant
+isolation enforced by PostgreSQL row-level security.
+
+This part of the project is still in active development and APIs may evolve.
+
+For local development, you can bootstrap everything with Docker:
+
+```bash
+cp .env.example .env
+just dev
+```
+or
+```bash
+docker compose --profile dev up --build --force-recreate json-api-dev demo
+```
+
+This starts PostgreSQL, a dev OpenBao instance, the JSON API, and the browser demo, then auto-runs:
+
+- database migrations
+- app role provisioning for RLS
+- loading/provisioning API token pepper from OpenBao
+- creation of a default local dev tenant/token
+
+Local URLs:
+
+- Swagger UI: `http://localhost:8698/docs`
+- OpenAPI JSON: `http://localhost:8698/api-doc/openapi.json`
+- OpenBao UI (dev): `http://localhost:8200/ui`
+
+The dev bootstrap prints the generated API token once, and caches it at
+`.dev-api-token` for reuse in later runs.
+
+Dev OpenBao defaults:
+
+- token: `OPENBAO_DEV_ROOT_TOKEN` (default: `lattice-dev-root-token`)
+- secret path: `OPENBAO_SECRET_PATH` (default: `secret/data/lattice/json-api`)
+
+The `json-api-dev` bootstrap reads `api_token_pepper` and
+`api_token_previous_peppers` from that OpenBao path. If missing, and
+`OPENBAO_DEV_AUTO_PROVISION=true`, it creates a random pepper automatically.
+
+### CLI Commands
+
+The `lattice-app` CLI currently includes commands for tenant bootstrap, token
+lifecycle management, and app role provisioning.
+
+Using `just cli`:
+
+```bash
+just cli db ensure-app-role --password "$APP_DB_PASSWORD"
+just cli tenant create --name "Dev Tenant"
+just cli token create --tenant-uuid "$DEV_TENANT_UUID"
+just cli token list --tenant-uuid "$DEV_TENANT_UUID"
+```
+
+Directly with `cargo run`:
+
+```bash
+DATABASE_URL="$DATABASE_ADMIN_URL" cargo run --package lattice-app -- db ensure-app-role --password "$APP_DB_PASSWORD"
+DATABASE_URL="$DATABASE_ADMIN_URL" cargo run --package lattice-app -- tenant create --name "Dev Tenant"
+DATABASE_URL="$DATABASE_ADMIN_URL" cargo run --package lattice-app -- token create --tenant-uuid "$DEV_TENANT_UUID"
+DATABASE_URL="$DATABASE_ADMIN_URL" cargo run --package lattice-app -- token list --tenant-uuid "$DEV_TENANT_UUID"
+```
+
+To fully reset the local Docker setup (containers, volumes, and local images):
+
+```bash
+just remove
 ```

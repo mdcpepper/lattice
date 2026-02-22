@@ -21,6 +21,18 @@ pub struct ServerConfig {
     /// `PostgreSQL` connection string
     #[arg(long, env = "DATABASE_URL")]
     pub database_url: String,
+
+    /// `OpenBao` server address
+    #[arg(long, env = "OPENBAO_ADDR")]
+    pub openbao_addr: String,
+
+    /// `OpenBao` authentication token
+    #[arg(long, env = "OPENBAO_TOKEN", hide_env_values = true)]
+    pub openbao_token: String,
+
+    /// `OpenBao` Transit key name
+    #[arg(long, env = "OPENBAO_TRANSIT_KEY")]
+    pub openbao_transit_key: String,
 }
 
 impl ServerConfig {

@@ -15,7 +15,10 @@ use salvo::{
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-use lattice_app::context::AppContext;
+use lattice_app::{
+    auth::{OpenBaoClient, OpenBaoConfig},
+    context::AppContext,
+};
 
 use crate::{config::ServerConfig, state::State};
 
@@ -70,7 +73,13 @@ pub async fn main() {
     // Bind server
     let listener = TcpListener::new(addr).bind().await;
 
-    let app = match AppContext::from_database_url(&config.database_url).await {
+    let openbao = OpenBaoClient::new(OpenBaoConfig {
+        addr: config.openbao_addr,
+        token: config.openbao_token,
+        transit_key: config.openbao_transit_key,
+    });
+
+    let app = match AppContext::from_database_url(&config.database_url, openbao).await {
         Ok(app) => app,
         Err(init_error) => {
             error!("failed to initialize app context: {init_error}");

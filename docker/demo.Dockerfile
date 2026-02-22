@@ -2,8 +2,12 @@ FROM rust:1-bookworm
 
 WORKDIR /app
 
-RUN rustup target add wasm32-unknown-unknown \
-    && cargo install trunk --locked
+ARG RUST_TOOLCHAIN=1.93.0
+
+RUN rustup toolchain install ${RUST_TOOLCHAIN} \
+    && rustup default ${RUST_TOOLCHAIN} \
+    && rustup target add wasm32-unknown-unknown --toolchain ${RUST_TOOLCHAIN} \
+    && cargo +${RUST_TOOLCHAIN} install trunk --locked
 
 COPY . .
 

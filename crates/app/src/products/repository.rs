@@ -9,7 +9,8 @@ use crate::products::models::Product;
 
 const LIST_PRODUCTS_SQL: &str = include_str!("sql/list_products.sql");
 const GET_PRODUCT_SQL: &str = include_str!("sql/get_product.sql");
-const CREATE_PRODUCT_SQL: &str = include_str!("sql/create_product.sql");
+const CREATE_PRODUCT_INSERT_SQL: &str = include_str!("sql/create_product_insert.sql");
+const CREATE_PRODUCT_DETAIL_INSERT_SQL: &str = include_str!("sql/create_product_detail_insert.sql");
 const UPDATE_PRODUCT_SQL: &str = include_str!("sql/update_product.sql");
 const DELETE_PRODUCT_SQL: &str = include_str!("sql/delete_product.sql");
 
@@ -52,11 +53,35 @@ impl PgProductsRepository {
         uuid: Uuid,
         price: i64,
     ) -> Result<Product, sqlx::Error> {
-        query_as::<Postgres, Product>(CREATE_PRODUCT_SQL)
+        let (created_uuid, created_at, updated_at, deleted_at): (
+            Uuid,
+            SqlxTimestamp,
+            SqlxTimestamp,
+            Option<SqlxTimestamp>,
+        ) = query_as(CREATE_PRODUCT_INSERT_SQL)
             .bind(uuid)
-            .bind(price)
             .fetch_one(&mut **tx)
-            .await
+            .await?;
+
+        query(CREATE_PRODUCT_DETAIL_INSERT_SQL)
+            .bind(created_uuid)
+            .bind(price)
+            .bind(created_at)
+            .execute(&mut **tx)
+            .await?;
+
+        let price = u64::try_from(price).map_err(|e| sqlx::Error::ColumnDecode {
+            index: "price".to_string(),
+            source: Box::new(e),
+        })?;
+
+        Ok(Product {
+            uuid: created_uuid,
+            price,
+            created_at: created_at.to_jiff(),
+            updated_at: updated_at.to_jiff(),
+            deleted_at: deleted_at.map(SqlxTimestamp::to_jiff),
+        })
     }
 
     pub(crate) async fn update_product(

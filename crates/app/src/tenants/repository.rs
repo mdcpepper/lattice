@@ -24,8 +24,6 @@ impl PgTenantsRepository {
         query_as::<Postgres, Tenant>(CREATE_TENANT_SQL)
             .bind(tenant.uuid)
             .bind(tenant.name)
-            .bind(tenant.token_uuid)
-            .bind(tenant.token_hash)
             .fetch_one(&self.pool)
             .await
     }

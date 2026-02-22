@@ -36,10 +36,4 @@ pub struct NewTenant {
 
     /// Tenant name to persist.
     pub name: String,
-
-    /// UUID to assign to the API token row.
-    pub token_uuid: Uuid,
-
-    /// SHA-256 hash of the raw API token.
-    pub token_hash: String,
 }

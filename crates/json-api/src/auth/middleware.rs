@@ -2,11 +2,9 @@
 
 use std::sync::Arc;
 
-use salvo::{http::header::AUTHORIZATION, prelude::*};
-use sha2::{Digest, Sha256};
-use tracing::error;
-
 use lattice_app::auth::AuthServiceError;
+use salvo::{http::header::AUTHORIZATION, prelude::*};
+use tracing::error;
 
 use crate::{extensions::*, state::State};
 
@@ -23,8 +21,6 @@ pub(crate) async fn handler(
         return;
     };
 
-    let token_hash = format!("{:x}", Sha256::digest(token.as_bytes()));
-
     let state = match depot.obtain::<Arc<State>>() {
         Ok(state) => state,
         Err(_error) => {
@@ -34,7 +30,7 @@ pub(crate) async fn handler(
         }
     };
 
-    let tenant_uuid = match state.app.auth.find_tenant_by_token_hash(&token_hash).await {
+    let tenant_uuid = match state.app.auth.authenticate_bearer(token).await {
         Ok(tenant_uuid) => tenant_uuid,
         Err(AuthServiceError::NotFound) => {
             res.render(StatusError::unauthorized().brief("Invalid API token"));
@@ -43,6 +39,20 @@ pub(crate) async fn handler(
         }
         Err(AuthServiceError::Sql(source)) => {
             error!("failed to validate api token: {source}");
+
+            res.render(StatusError::internal_server_error());
+
+            return;
+        }
+        Err(AuthServiceError::Token(source)) => {
+            error!("failed to process api token: {source}");
+
+            res.render(StatusError::internal_server_error());
+
+            return;
+        }
+        Err(AuthServiceError::OpenBao(source)) => {
+            error!("OpenBao error during token authentication: {source}");
 
             res.render(StatusError::internal_server_error());
 
@@ -71,14 +81,13 @@ fn extract_bearer_token(req: &Request) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    use lattice_app::{auth::MockAuthService, tenants::models::TenantUuid};
     use salvo::{
         affix_state::inject,
         test::{ResponseExt, TestClient},
     };
     use testresult::TestResult;
     use uuid::Uuid;
-
-    use lattice_app::{auth::MockAuthService, tenants::models::TenantUuid};
 
     use crate::test_helpers::state_with_auth;
 
@@ -109,7 +118,7 @@ mod tests {
     async fn test_missing_authorization_header_returns_401() -> TestResult {
         let mut auth = MockAuthService::new();
 
-        auth.expect_find_tenant_by_token_hash().never();
+        auth.expect_authenticate_bearer().never();
 
         let res = TestClient::get("http://example.com")
             .send(&make_service(auth))
@@ -124,7 +133,7 @@ mod tests {
     async fn test_non_bearer_authorization_header_returns_401() -> TestResult {
         let mut auth = MockAuthService::new();
 
-        auth.expect_find_tenant_by_token_hash().never();
+        auth.expect_authenticate_bearer().never();
 
         let res = TestClient::get("http://example.com")
             .add_header(AUTHORIZATION, "Basic abc123", true)
@@ -140,8 +149,9 @@ mod tests {
     async fn test_invalid_token_returns_401() -> TestResult {
         let mut auth = MockAuthService::new();
 
-        auth.expect_find_tenant_by_token_hash()
+        auth.expect_authenticate_bearer()
             .once()
+            .withf(|token| token == "abc123")
             .return_once(|_| Err(AuthServiceError::NotFound));
 
         let res = TestClient::get("http://example.com")
@@ -160,11 +170,9 @@ mod tests {
 
         let mut auth = MockAuthService::new();
 
-        let expected_hash = format!("{:x}", Sha256::digest("abc123".as_bytes()));
-
-        auth.expect_find_tenant_by_token_hash()
+        auth.expect_authenticate_bearer()
             .once()
-            .withf(move |hash| hash == expected_hash)
+            .withf(|token| token == "abc123")
             .return_once(move |_| Ok(tenant));
 
         let mut res = TestClient::get("http://example.com")

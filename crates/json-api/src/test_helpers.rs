@@ -28,7 +28,7 @@ pub(crate) async fn inject_tenant(
 fn strict_auth_mock() -> MockAuthService {
     let mut auth = MockAuthService::new();
 
-    auth.expect_find_tenant_by_token_hash().never();
+    auth.expect_authenticate_bearer().never();
 
     auth
 }

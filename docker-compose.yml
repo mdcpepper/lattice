@@ -11,7 +11,6 @@ services:
       - POSTGRES_INITDB_ARGS=${POSTGRES_INITDB_ARGS:---encoding=UTF-8 --lc-collate=C --lc-ctype=C}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test:
         [
@@ -58,7 +57,7 @@ services:
       - SERVER_HOST=${SERVER_HOST:-0.0.0.0}
       - SERVER_PORT=${SERVER_PORT:-8698}
       - RUST_LOG=${RUST_LOG:-info}
-      - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${POSTGRES_USER:-lattice_user}:${POSTGRES_PASSWORD:-lattice_password}@postgres:5432/${POSTGRES_DB:-lattice_db}}
+      - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${APP_DB_USER:-lattice_app}:${APP_DB_PASSWORD:-lattice_app_password}@postgres:5432/${POSTGRES_DB:-lattice_db}}
     networks:
       - lattice-network
     depends_on:
@@ -77,7 +76,18 @@ services:
       - SERVER_HOST=${SERVER_HOST:-0.0.0.0}
       - SERVER_PORT=${SERVER_PORT:-8698}
       - RUST_LOG=${RUST_LOG:-info}
-      - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${POSTGRES_USER:-lattice_user}:${POSTGRES_PASSWORD:-lattice_password}@postgres:5432/${POSTGRES_DB:-lattice_db}}
+      - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${APP_DB_USER:-lattice_app}:${APP_DB_PASSWORD:-lattice_app_password}@postgres:5432/${POSTGRES_DB:-lattice_db}}
+      - OPENBAO_POSTGRES_SECRET_PATH=${OPENBAO_POSTGRES_SECRET_PATH:-secret/data/lattice/postgres}
+      - OPENBAO_ADDR=${OPENBAO_ADDR_DOCKER:-http://openbao-dev:8200}
+      - OPENBAO_TOKEN=${OPENBAO_DEV_ROOT_TOKEN:-lattice-dev-root-token}
+      - OPENBAO_TRANSIT_KEY=${OPENBAO_TRANSIT_KEY:-lattice-api-tokens}
+      - OPENBAO_SECRET_PATH=${OPENBAO_SECRET_PATH:-secret/data/lattice/json-api}
+      - POSTGRES_USER=${POSTGRES_USER:-lattice_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-lattice_password}
+      - POSTGRES_DB=${POSTGRES_DB:-lattice_db}
+      - OPENBAO_DEV_AUTO_PROVISION=${OPENBAO_DEV_AUTO_PROVISION:-true}
+      - DEV_TENANT_NAME=${DEV_TENANT_NAME:-Dev Tenant}
+      - DEV_TENANT_UUID=${DEV_TENANT_UUID:-00000000-0000-0000-0000-000000000001}
     volumes:
       - .:/app
       - cargo_registry:/usr/local/cargo/registry
@@ -87,6 +97,30 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      openbao-dev:
+        condition: service_healthy
+    profiles:
+      - dev
+
+  openbao-dev:
+    image: openbao/openbao:latest
+    container_name: lattice-openbao-dev
+    ports:
+      - "8200:8200"
+    environment:
+      - BAO_DEV_ROOT_TOKEN_ID=${OPENBAO_DEV_ROOT_TOKEN:-lattice-dev-root-token}
+      - BAO_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+    command: server -dev -dev-no-store-token
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+    networks:
+      - lattice-network
     profiles:
       - dev
 
