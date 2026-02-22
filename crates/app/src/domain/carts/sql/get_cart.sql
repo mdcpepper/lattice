@@ -1,5 +1,7 @@
 SELECT
     carts.uuid,
+    carts.subtotal,
+    carts.total,
     carts.created_at,
     carts.updated_at,
     carts.deleted_at

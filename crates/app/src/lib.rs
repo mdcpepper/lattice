@@ -5,4 +5,7 @@ pub mod context;
 pub mod database;
 pub mod domain;
 
+#[cfg(test)]
+mod test;
+
 mod uuids;

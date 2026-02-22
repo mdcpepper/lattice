@@ -78,7 +78,7 @@ impl<'r> FromRow<'r, PgRow> for Cart {
 }
 
 fn try_get_amount(row: &PgRow, col: &str) -> Result<u64, sqlx::Error> {
-    let amount_i64: i64 = row.try_get("subtotal")?;
+    let amount_i64: i64 = row.try_get(col)?;
 
     u64::try_from(amount_i64).map_err(|e| sqlx::Error::ColumnDecode {
         index: col.to_string(),
