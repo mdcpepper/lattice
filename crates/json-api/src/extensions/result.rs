@@ -8,6 +8,7 @@ use tracing::error;
 /// Map any error to a logged internal server error.
 pub(crate) trait ResultExt<T> {
     fn or_500(self, context: &str) -> Result<T, StatusError>;
+    fn or_400(self, context: &str) -> Result<T, StatusError>;
 }
 
 impl<T, E> ResultExt<T> for Result<T, E>
@@ -19,6 +20,14 @@ where
             error!("{context}: {error}");
 
             StatusError::internal_server_error()
+        })
+    }
+
+    fn or_400(self, context: &str) -> Result<T, StatusError> {
+        self.map_err(|error| {
+            error!("{context}: {error}");
+
+            StatusError::bad_request()
         })
     }
 }
