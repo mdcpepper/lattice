@@ -1,22 +1,21 @@
-//! Product Handlers
+//! Cart Handlers
 
 pub(crate) mod create;
 pub(crate) mod delete;
 pub(crate) mod get;
-pub(crate) mod index;
-pub(crate) mod update;
 
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
     use uuid::Uuid;
 
-    use lattice_app::domain::products::models::Product;
+    use lattice_app::domain::carts::models::Cart;
 
-    pub(super) fn make_product(uuid: Uuid) -> Product {
-        Product {
+    pub(super) fn make_cart(uuid: Uuid) -> Cart {
+        Cart {
             uuid,
-            price: 100,
+            subtotal: 0,
+            total: 0,
             created_at: Timestamp::UNIX_EPOCH,
             updated_at: Timestamp::UNIX_EPOCH,
             deleted_at: None,

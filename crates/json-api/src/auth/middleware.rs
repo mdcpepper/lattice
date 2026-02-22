@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
-use lattice_app::auth::AuthServiceError;
 use salvo::{http::header::AUTHORIZATION, prelude::*};
 use tracing::error;
+
+use lattice_app::auth::AuthServiceError;
 
 use crate::{extensions::*, state::State};
 
@@ -81,13 +82,14 @@ fn extract_bearer_token(req: &Request) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use lattice_app::{auth::MockAuthService, tenants::models::TenantUuid};
     use salvo::{
         affix_state::inject,
         test::{ResponseExt, TestClient},
     };
     use testresult::TestResult;
     use uuid::Uuid;
+
+    use lattice_app::{auth::MockAuthService, domain::tenants::models::TenantUuid};
 
     use crate::test_helpers::state_with_auth;
 

@@ -7,12 +7,14 @@ use uuid::Uuid;
 
 use crate::{
     database::Db,
-    products::{
-        errors::ProductsServiceError,
-        models::{NewProduct, Product, ProductUpdate},
-        repository::PgProductsRepository,
+    domain::{
+        products::{
+            errors::ProductsServiceError,
+            models::{NewProduct, Product, ProductUpdate},
+            repository::PgProductsRepository,
+        },
+        tenants::models::TenantUuid,
     },
-    tenants::models::TenantUuid,
 };
 
 #[derive(Debug, Clone)]

@@ -3,7 +3,6 @@
 pub mod auth;
 pub mod context;
 pub mod database;
-pub mod products;
-pub mod tenants;
+pub mod domain;
 
 mod uuids;

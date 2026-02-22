@@ -5,12 +5,12 @@ use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
 use uuid::Uuid;
 
-use crate::products::models::Product;
+use crate::domain::products::models::Product;
 
 const LIST_PRODUCTS_SQL: &str = include_str!("sql/list_products.sql");
 const GET_PRODUCT_SQL: &str = include_str!("sql/get_product.sql");
-const CREATE_PRODUCT_INSERT_SQL: &str = include_str!("sql/create_product_insert.sql");
-const CREATE_PRODUCT_DETAIL_INSERT_SQL: &str = include_str!("sql/create_product_detail_insert.sql");
+const CREATE_PRODUCT_SQL: &str = include_str!("sql/create_product.sql");
+const CREATE_PRODUCT_DETAIL_SQL: &str = include_str!("sql/create_product_detail.sql");
 const UPDATE_PRODUCT_SQL: &str = include_str!("sql/update_product.sql");
 const DELETE_PRODUCT_SQL: &str = include_str!("sql/delete_product.sql");
 
@@ -58,12 +58,12 @@ impl PgProductsRepository {
             SqlxTimestamp,
             SqlxTimestamp,
             Option<SqlxTimestamp>,
-        ) = query_as(CREATE_PRODUCT_INSERT_SQL)
+        ) = query_as(CREATE_PRODUCT_SQL)
             .bind(uuid)
             .fetch_one(&mut **tx)
             .await?;
 
-        query(CREATE_PRODUCT_DETAIL_INSERT_SQL)
+        query(CREATE_PRODUCT_DETAIL_SQL)
             .bind(created_uuid)
             .bind(price)
             .bind(created_at)

@@ -30,12 +30,14 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 mod auth;
+mod carts;
 mod config;
 mod extensions;
 mod healthcheck;
 mod products;
 mod shutdown;
 mod state;
+
 #[cfg(test)]
 mod test_helpers;
 
@@ -94,17 +96,28 @@ pub async fn main() {
         .hoop(inject(State::from_app_context(app)))
         .push(Router::with_path("healthcheck").get(healthcheck::handler))
         .push(
-            Router::new().hoop(auth::middleware::handler).push(
-                Router::with_path("products")
-                    .get(products::index::handler)
-                    .post(products::create::handler)
-                    .push(
-                        Router::with_path("{uuid}")
-                            .get(products::get::handler)
-                            .put(products::update::handler)
-                            .delete(products::delete::handler),
-                    ),
-            ),
+            Router::new()
+                .hoop(auth::middleware::handler)
+                .push(
+                    Router::with_path("carts")
+                        .post(carts::create::handler)
+                        .push(
+                            Router::with_path("{uuid}")
+                                .get(carts::get::handler)
+                                .delete(carts::delete::handler),
+                        ),
+                )
+                .push(
+                    Router::with_path("products")
+                        .get(products::index::handler)
+                        .post(products::create::handler)
+                        .push(
+                            Router::with_path("{uuid}")
+                                .get(products::get::handler)
+                                .put(products::update::handler)
+                                .delete(products::delete::handler),
+                        ),
+                ),
         );
 
     let doc = OpenApi::new("Lattice API", "0.3.0")

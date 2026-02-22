@@ -1,3 +1,5 @@
+//! Tokens
+
 use clap::{Args, Subcommand};
 
 mod create;

@@ -1,6 +1,4 @@
-//! Products service errors.
-
-use std::num::TryFromIntError;
+//! Carts service errors.
 
 use sqlx::{
     Error,
@@ -9,11 +7,11 @@ use sqlx::{
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum ProductsServiceError {
-    #[error("product already exists")]
+pub enum CartsServiceError {
+    #[error("cart already exists")]
     AlreadyExists,
 
-    #[error("product not found")]
+    #[error("cart not found")]
     NotFound,
 
     #[error("related resource not found")]
@@ -27,12 +25,9 @@ pub enum ProductsServiceError {
 
     #[error("storage error")]
     Sql(#[source] Error),
-
-    #[error("invalid price value")]
-    InvalidPrice(#[from] TryFromIntError),
 }
 
-impl From<Error> for ProductsServiceError {
+impl From<Error> for CartsServiceError {
     fn from(error: Error) -> Self {
         if matches!(error, Error::RowNotFound) {
             return Self::NotFound;
@@ -45,15 +40,5 @@ impl From<Error> for ProductsServiceError {
             Some(ErrorKind::CheckViolation) => Self::InvalidData,
             Some(ErrorKind::Other | _) | None => Self::Sql(error),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_price_rejects_negative() {
-        let result = u64::try_from(-1_i64);
-
-        assert!(result.is_err());
     }
 }

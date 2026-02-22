@@ -3,7 +3,7 @@
 use salvo::http::StatusError;
 use tracing::error;
 
-use lattice_app::products::ProductsServiceError;
+use lattice_app::domain::products::ProductsServiceError;
 
 pub(crate) fn into_status_error(error: ProductsServiceError) -> StatusError {
     match error {

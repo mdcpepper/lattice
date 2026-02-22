@@ -13,7 +13,7 @@ use crate::{
         build_verifier_input, format_api_token, generate_api_token_secret, parse_api_token,
         repository::PgAuthRepository,
     },
-    tenants::models::TenantUuid,
+    domain::tenants::models::TenantUuid,
 };
 
 #[derive(Debug, Clone)]
