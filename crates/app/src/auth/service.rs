@@ -7,12 +7,12 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
+    auth::openbao::OpenBaoClient,
     auth::{
         ApiTokenMetadata, ApiTokenVersion, AuthServiceError, IssuedApiToken, NewApiToken,
         build_verifier_input, format_api_token, generate_api_token_secret, parse_api_token,
         repository::PgAuthRepository,
     },
-    auth::openbao::OpenBaoClient,
     tenants::models::TenantUuid,
 };
 
@@ -48,6 +48,7 @@ impl PgAuthService {
 
         let verifier_input =
             build_verifier_input(&token_uuid, version, &tenant_uuid.into(), &secret);
+
         let token_hash = self.openbao.hmac(&verifier_input).await?;
 
         let metadata = self

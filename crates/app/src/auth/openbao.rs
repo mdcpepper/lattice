@@ -10,8 +10,10 @@ use thiserror::Error;
 pub struct OpenBaoConfig {
     /// OpenBao server address, e.g. `"http://localhost:8200"`.
     pub addr: String,
+
     /// Vault/OpenBao authentication token.
     pub token: String,
+
     /// Transit key name to use for HMAC operations.
     pub transit_key: String,
 }
@@ -60,6 +62,7 @@ impl OpenBaoClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
+
             return Err(OpenBaoError::UnexpectedResponse(format!(
                 "hmac request failed with status {status}: {text}"
             )));
@@ -99,6 +102,7 @@ impl OpenBaoClient {
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
+
             return Err(OpenBaoError::UnexpectedResponse(format!(
                 "verify request failed with status {status}: {text}"
             )));

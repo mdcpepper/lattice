@@ -1,6 +1,6 @@
 //! API token formatting, parsing, and HMAC input construction.
 
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use rand::{RngCore, rngs::OsRng};
 use thiserror::Error;
@@ -83,8 +83,8 @@ impl ApiTokenSecret {
     }
 }
 
-impl std::fmt::Debug for ApiTokenSecret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ApiTokenSecret {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("ApiTokenSecret(**redacted**)")?;
         Ok(())
     }
@@ -118,6 +118,7 @@ pub enum ApiTokenError {
 #[must_use]
 pub fn generate_api_token_secret() -> ApiTokenSecret {
     let mut secret = [0_u8; API_TOKEN_SECRET_BYTES];
+
     OsRng.fill_bytes(&mut secret);
 
     ApiTokenSecret::from_bytes(secret)
@@ -141,6 +142,7 @@ pub fn parse_api_token(token: &str) -> Result<ParsedApiToken, ApiTokenError> {
     let (prefix_and_id, secret_hex) = token.split_once('.').ok_or(ApiTokenError::InvalidFormat)?;
 
     let mut id_parts = prefix_and_id.splitn(3, '_');
+
     let prefix = id_parts.next().ok_or(ApiTokenError::InvalidFormat)?;
     let version_segment = id_parts.next().ok_or(ApiTokenError::InvalidFormat)?;
     let token_uuid_segment = id_parts.next().ok_or(ApiTokenError::InvalidFormat)?;
@@ -150,8 +152,10 @@ pub fn parse_api_token(token: &str) -> Result<ParsedApiToken, ApiTokenError> {
     }
 
     let version = ApiTokenVersion::from_str(version_segment)?;
+
     let token_uuid =
         Uuid::try_parse(token_uuid_segment).map_err(|_| ApiTokenError::InvalidFormat)?;
+
     let secret = decode_secret_hex(secret_hex).ok_or(ApiTokenError::InvalidSecretEncoding)?;
 
     Ok(ParsedApiToken {
@@ -178,6 +182,7 @@ pub fn build_verifier_input(
         tenant_uuid.into_uuid().simple(),
         encode_secret_hex(secret.as_bytes()),
     );
+
     input.into_bytes()
 }
 

@@ -1101,5 +1101,5 @@ DATABASE_URL="$DATABASE_ADMIN_URL" cargo run --package lattice-app -- token list
 To fully reset the local Docker setup (containers, volumes, and local images):
 
 ```bash
-just uninstall
+just remove
 ```

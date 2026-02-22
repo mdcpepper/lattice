@@ -2725,7 +2725,6 @@ dependencies = [
  "slotmap",
  "smallvec",
  "testresult",
- "thiserror 2.0.18",
 ]
 
 [[package]]

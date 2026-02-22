@@ -3,7 +3,7 @@ FROM rust:1-bookworm
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates jq \
     && rm -rf /var/lib/apt/lists/* \
     && cargo install watchexec-cli \
     && cargo install sqlx-cli
