@@ -12,14 +12,18 @@ use salvo::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use lattice_app::domain::carts::models::Cart;
+use lattice_app::domain::carts::models::{Cart, CartItem};
 
 use crate::{carts::errors::into_status_error, extensions::*, state::State};
 
+/// Cart Response
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub(crate) struct CartResponse {
     /// The unique identifier of the cart
     pub uuid: Uuid,
+
+    /// The items in the cart
+    pub items: Vec<CartItemResponse>,
 
     /// The date and time the cart was created
     pub created_at: String,
@@ -35,9 +39,45 @@ impl From<Cart> for CartResponse {
     fn from(cart: Cart) -> Self {
         CartResponse {
             uuid: cart.uuid,
+            items: cart.items.into_iter().map(CartItemResponse::from).collect(),
             created_at: cart.created_at.to_string(),
             updated_at: cart.updated_at.to_string(),
             deleted_at: cart.deleted_at.as_ref().map(ToString::to_string),
+        }
+    }
+}
+
+/// Cart Item Response
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub(crate) struct CartItemResponse {
+    /// The unique identifier of the cart item
+    pub uuid: Uuid,
+
+    /// The base price of the cart item
+    pub base_price: u64,
+
+    /// The unique identifier of the product in the cart item
+    pub product_uuid: Uuid,
+
+    /// The date and time the cart was created
+    pub created_at: String,
+
+    /// The date and time the cart was last updated
+    pub updated_at: String,
+
+    /// The date and time the cart was deleted
+    pub deleted_at: Option<String>,
+}
+
+impl From<CartItem> for CartItemResponse {
+    fn from(cart_item: CartItem) -> Self {
+        Self {
+            uuid: cart_item.uuid,
+            base_price: cart_item.base_price,
+            product_uuid: cart_item.product_uuid,
+            created_at: cart_item.created_at.to_string(),
+            updated_at: cart_item.updated_at.to_string(),
+            deleted_at: cart_item.deleted_at.as_ref().map(ToString::to_string),
         }
     }
 }
@@ -51,7 +91,7 @@ impl From<Cart> for CartResponse {
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn handler(
-    uuid: PathParam<Uuid>,
+    cart: PathParam<Uuid>,
     at: QueryParam<String, false>,
     depot: &mut Depot,
 ) -> Result<Json<CartResponse>, StatusError> {
@@ -62,7 +102,7 @@ pub(crate) async fn handler(
     let cart = state
         .app
         .carts
-        .get_cart(tenant, uuid.into_inner(), point_in_time)
+        .get_cart(tenant, cart.into_inner(), point_in_time)
         .await
         .map_err(into_status_error)?;
 
@@ -85,7 +125,7 @@ mod tests {
     use super::*;
 
     fn make_service(repo: MockCartsService) -> Service {
-        carts_service(repo, Router::with_path("carts/{uuid}").get(handler))
+        carts_service(repo, Router::with_path("carts/{cart}").get(handler))
     }
 
     #[tokio::test]

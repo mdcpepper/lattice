@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 use crate::domain::carts::models::Cart;
 
-const GET_CART_SQL: &str = include_str!("sql/get_cart.sql");
-const CREATE_CART_SQL: &str = include_str!("sql/create_cart.sql");
-const DELETE_CART_SQL: &str = include_str!("sql/delete_cart.sql");
+const GET_CART_SQL: &str = include_str!("../sql/get_cart.sql");
+const CREATE_CART_SQL: &str = include_str!("../sql/create_cart.sql");
+const DELETE_CART_SQL: &str = include_str!("../sql/delete_cart.sql");
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PgCartsRepository;
@@ -64,10 +64,13 @@ impl<'r> FromRow<'r, PgRow> for Cart {
         let subtotal = try_get_amount(row, "subtotal")?;
         let total = try_get_amount(row, "total")?;
 
+        let cart_items_count: i64 = row.try_get("cart_items_count")?;
+
         Ok(Self {
             uuid: row.try_get("uuid")?,
             subtotal,
             total,
+            items: Vec::with_capacity(cart_items_count as usize),
             created_at: row.try_get::<SqlxTimestamp, _>("created_at")?.to_jiff(),
             updated_at: row.try_get::<SqlxTimestamp, _>("updated_at")?.to_jiff(),
             deleted_at: row
@@ -77,7 +80,7 @@ impl<'r> FromRow<'r, PgRow> for Cart {
     }
 }
 
-fn try_get_amount(row: &PgRow, col: &str) -> Result<u64, sqlx::Error> {
+pub(super) fn try_get_amount(row: &PgRow, col: &str) -> Result<u64, sqlx::Error> {
     let amount_i64: i64 = row.try_get(col)?;
 
     u64::try_from(amount_i64).map_err(|e| sqlx::Error::ColumnDecode {

@@ -2829,6 +2829,7 @@ dependencies = [
  "sqlx",
  "testcontainers",
  "testcontainers-modules",
+ "testresult",
  "thiserror 2.0.18",
  "tokio",
  "uuid",

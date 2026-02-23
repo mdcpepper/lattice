@@ -1,7 +1,5 @@
 //! Products service errors.
 
-use std::num::TryFromIntError;
-
 use sqlx::{
     Error,
     error::{DatabaseError, ErrorKind},
@@ -27,9 +25,6 @@ pub enum ProductsServiceError {
 
     #[error("storage error")]
     Sql(#[source] Error),
-
-    #[error("invalid price value")]
-    InvalidPrice(#[from] TryFromIntError),
 }
 
 impl From<Error> for ProductsServiceError {

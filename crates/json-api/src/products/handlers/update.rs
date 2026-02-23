@@ -52,24 +52,24 @@ pub(crate) struct ProductUpdatedResponse {
     ),
 )]
 pub(crate) async fn handler(
-    uuid: PathParam<Uuid>,
+    product: PathParam<Uuid>,
     json: JsonBody<UpdateProductRequest>,
     depot: &mut Depot,
     res: &mut Response,
 ) -> Result<Json<ProductUpdatedResponse>, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
     let tenant = depot.tenant_uuid_or_401()?;
-    let uuid = uuid.into_inner();
+    let product = product.into_inner();
 
     let price = state
         .app
         .products
-        .update_product(tenant, uuid, json.into_inner().into())
+        .update_product(tenant, product, json.into_inner().into())
         .await
         .map_err(into_status_error)?
         .price;
 
-    res.add_header(LOCATION, format!("/products/{uuid}"), true)
+    res.add_header(LOCATION, format!("/products/{product}"), true)
         .or_500("failed to set location header")?
         .status_code(StatusCode::OK);
 
@@ -89,7 +89,7 @@ mod tests {
     use super::{super::tests::*, *};
 
     fn make_service(repo: MockProductsService) -> Service {
-        products_service(repo, Router::with_path("products/{uuid}").put(handler))
+        products_service(repo, Router::with_path("products/{product}").put(handler))
     }
 
     #[tokio::test]

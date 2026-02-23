@@ -20,7 +20,7 @@ use crate::{extensions::*, products::errors::into_status_error, state::State};
     ),
 )]
 pub(crate) async fn handler(
-    uuid: PathParam<Uuid>,
+    product: PathParam<Uuid>,
     depot: &mut Depot,
 ) -> Result<StatusCode, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
@@ -29,7 +29,7 @@ pub(crate) async fn handler(
     state
         .app
         .products
-        .delete_product(tenant, uuid.into_inner())
+        .delete_product(tenant, product.into_inner())
         .await
         .map_err(into_status_error)?;
 
@@ -48,7 +48,10 @@ mod tests {
     use super::{super::tests::*, *};
 
     fn make_service(repo: MockProductsService) -> Service {
-        products_service(repo, Router::with_path("products/{uuid}").delete(handler))
+        products_service(
+            repo,
+            Router::with_path("products/{product}").delete(handler),
+        )
     }
 
     #[tokio::test]

@@ -51,8 +51,13 @@ impl PgProductsRepository {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         uuid: Uuid,
-        price: i64,
+        price: u64,
     ) -> Result<Product, sqlx::Error> {
+        let price_i64 = i64::try_from(price).map_err(|e| sqlx::Error::ColumnDecode {
+            index: "price".to_string(),
+            source: Box::new(e),
+        })?;
+
         let (created_uuid, created_at, updated_at, deleted_at): (
             Uuid,
             SqlxTimestamp,
@@ -65,15 +70,10 @@ impl PgProductsRepository {
 
         query(CREATE_PRODUCT_DETAIL_SQL)
             .bind(created_uuid)
-            .bind(price)
+            .bind(price_i64)
             .bind(created_at)
             .execute(&mut **tx)
             .await?;
-
-        let price = u64::try_from(price).map_err(|e| sqlx::Error::ColumnDecode {
-            index: "price".to_string(),
-            source: Box::new(e),
-        })?;
 
         Ok(Product {
             uuid: created_uuid,
@@ -89,14 +89,19 @@ impl PgProductsRepository {
         tx: &mut Transaction<'_, Postgres>,
         uuid: Uuid,
         product_detail_uuid: Option<Uuid>,
-        price: i64,
+        price: u64,
     ) -> Result<Product, sqlx::Error> {
         let product_detail_uuid = product_detail_uuid.unwrap_or_else(Uuid::now_v7);
+
+        let price_i64 = i64::try_from(price).map_err(|e| sqlx::Error::ColumnDecode {
+            index: "price".to_string(),
+            source: Box::new(e),
+        })?;
 
         query_as::<Postgres, Product>(UPDATE_PRODUCT_SQL)
             .bind(uuid)
             .bind(product_detail_uuid)
-            .bind(price)
+            .bind(price_i64)
             .fetch_one(&mut **tx)
             .await
     }

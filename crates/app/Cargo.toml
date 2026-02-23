@@ -22,6 +22,7 @@ uuid.workspace = true
 zeroize = "1.8.2"
 
 [dev-dependencies]
-once_cell = { workspace = true }
-testcontainers = { workspace = true }
-testcontainers-modules = { workspace = true }
+once_cell.workspace = true
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
+testresult.workspace = true

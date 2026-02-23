@@ -35,6 +35,7 @@ mod config;
 mod extensions;
 mod healthcheck;
 mod products;
+mod router;
 mod shutdown;
 mod state;
 
@@ -95,30 +96,7 @@ pub async fn main() {
         .hoop(remove_slash())
         .hoop(inject(State::from_app_context(app)))
         .push(Router::with_path("healthcheck").get(healthcheck::handler))
-        .push(
-            Router::new()
-                .hoop(auth::middleware::handler)
-                .push(
-                    Router::with_path("carts")
-                        .post(carts::create::handler)
-                        .push(
-                            Router::with_path("{uuid}")
-                                .get(carts::get::handler)
-                                .delete(carts::delete::handler),
-                        ),
-                )
-                .push(
-                    Router::with_path("products")
-                        .get(products::index::handler)
-                        .post(products::create::handler)
-                        .push(
-                            Router::with_path("{uuid}")
-                                .get(products::get::handler)
-                                .put(products::update::handler)
-                                .delete(products::delete::handler),
-                        ),
-                ),
-        );
+        .push(router::app_router());
 
     let doc = OpenApi::new("Lattice API", "0.3.0")
         .add_security_scheme(
@@ -135,13 +113,11 @@ pub async fn main() {
 
     let handle = server.handle();
 
-    // Listen for shutdown signal
     tokio::spawn(async move {
         if let Err(error) = shutdown::listen(handle).await {
             error!("failed to listen for shutdown signal: {error}");
         }
     });
 
-    // Start serving requests
     server.serve(router).await;
 }
