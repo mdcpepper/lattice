@@ -24,7 +24,7 @@ pub(crate) struct CreateProductRequest {
 impl From<CreateProductRequest> for NewProduct {
     fn from(request: CreateProductRequest) -> Self {
         NewProduct {
-            uuid: request.uuid,
+            uuid: request.uuid.into(),
             price: request.price,
         }
     }
@@ -69,7 +69,7 @@ pub(crate) async fn handler(
         .or_500("failed to set location header")?
         .status_code(StatusCode::CREATED);
 
-    Ok(Json(ProductCreatedResponse { uuid }))
+    Ok(Json(ProductCreatedResponse { uuid: uuid.into() }))
 }
 
 #[cfg(test)]
@@ -78,11 +78,13 @@ mod tests {
     use serde_json::json;
     use testresult::TestResult;
 
-    use lattice_app::domain::products::{MockProductsService, ProductsServiceError};
+    use lattice_app::domain::products::{
+        MockProductsService, ProductsServiceError, models::ProductUuid,
+    };
 
-    use crate::test_helpers::{TEST_TENANT_UUID, products_service};
+    use crate::test_helpers::{TEST_TENANT_UUID, make_product, products_service};
 
-    use super::{super::tests::*, *};
+    use super::*;
 
     fn make_service(repo: MockProductsService) -> Service {
         products_service(repo, Router::with_path("products").post(handler))
@@ -90,7 +92,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_product_success() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
         let product = make_product(uuid);
 
         let mut repo = MockProductsService::new();
@@ -108,7 +110,7 @@ mod tests {
         repo.expect_delete_product().never();
 
         let mut res = TestClient::post("http://example.com/products")
-            .json(&json!({ "uuid": uuid, "price": 100 }))
+            .json(&json!({ "uuid": uuid.into_uuid(), "price": 100 }))
             .send(&make_service(repo))
             .await;
 
@@ -117,14 +119,14 @@ mod tests {
 
         assert_eq!(res.status_code, Some(StatusCode::CREATED));
         assert_eq!(location, Some(format!("/products/{uuid}").as_str()));
-        assert_eq!(body.uuid, uuid);
+        assert_eq!(body.uuid, uuid.into_uuid());
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_create_product_conflict_returns_409() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         let mut repo = MockProductsService::new();
 
@@ -141,7 +143,7 @@ mod tests {
         repo.expect_delete_product().never();
 
         let res = TestClient::post("http://example.com/products")
-            .json(&json!({ "uuid": uuid, "price": 100 }))
+            .json(&json!({ "uuid": uuid.into_uuid(), "price": 100 }))
             .send(&make_service(repo))
             .await;
 
@@ -152,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_product_invalid_price_returns_400() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         let mut repo = MockProductsService::new();
 
@@ -169,7 +171,7 @@ mod tests {
         repo.expect_delete_product().never();
 
         let res = TestClient::post("http://example.com/products")
-            .json(&json!({ "uuid": uuid, "price": 100 }))
+            .json(&json!({ "uuid": uuid.into_uuid(), "price": 100 }))
             .send(&make_service(repo))
             .await;
 

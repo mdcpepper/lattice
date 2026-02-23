@@ -29,7 +29,7 @@ pub(crate) async fn handler(
     state
         .app
         .carts
-        .delete_cart(tenant, cart.into_inner())
+        .delete_cart(tenant, cart.into_inner().into())
         .await
         .map_err(into_status_error)?;
 
@@ -41,7 +41,7 @@ mod tests {
     use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use lattice_app::domain::carts::{CartsServiceError, MockCartsService};
+    use lattice_app::domain::carts::{CartsServiceError, MockCartsService, models::CartUuid};
 
     use crate::test_helpers::{TEST_TENANT_UUID, carts_service, make_cart};
 
@@ -53,7 +53,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_cart_success() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = CartUuid::new();
 
         make_cart(uuid);
 
@@ -95,7 +95,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_cart_not_found_returns_404() -> TestResult {
-        let cart = Uuid::now_v7();
+        let cart = CartUuid::new();
 
         let mut repo = MockCartsService::new();
 

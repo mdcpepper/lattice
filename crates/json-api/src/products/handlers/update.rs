@@ -64,7 +64,7 @@ pub(crate) async fn handler(
     let price = state
         .app
         .products
-        .update_product(tenant, product, json.into_inner().into())
+        .update_product(tenant, product.into(), json.into_inner().into())
         .await
         .map_err(into_status_error)?
         .price;
@@ -82,11 +82,13 @@ mod tests {
     use serde_json::json;
     use testresult::TestResult;
 
-    use lattice_app::domain::products::{MockProductsService, ProductsServiceError};
+    use lattice_app::domain::products::{
+        MockProductsService, ProductsServiceError, models::ProductUuid,
+    };
 
-    use crate::test_helpers::{TEST_TENANT_UUID, products_service};
+    use crate::test_helpers::{TEST_TENANT_UUID, make_product, products_service};
 
-    use super::{super::tests::*, *};
+    use super::*;
 
     fn make_service(repo: MockProductsService) -> Service {
         products_service(repo, Router::with_path("products/{product}").put(handler))
@@ -94,7 +96,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_product_success() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         let mut product = make_product(uuid);
 
@@ -156,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_product_invalid_price_returns_400() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         let mut repo = MockProductsService::new();
 

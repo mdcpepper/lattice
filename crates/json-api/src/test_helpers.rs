@@ -10,8 +10,14 @@ use lattice_app::{
     auth::MockAuthService,
     context::AppContext,
     domain::{
-        carts::{MockCartsService, models::Cart},
-        products::MockProductsService,
+        carts::{
+            MockCartsService,
+            models::{Cart, CartUuid},
+        },
+        products::{
+            MockProductsService,
+            models::{Product, ProductUuid},
+        },
         tenants::models::TenantUuid,
     },
 };
@@ -104,12 +110,22 @@ pub(crate) fn carts_service(carts: MockCartsService, route: Router) -> Service {
     )
 }
 
-pub(crate) fn make_cart(uuid: Uuid) -> Cart {
+pub(crate) fn make_cart(uuid: CartUuid) -> Cart {
     Cart {
         uuid,
         subtotal: 0,
         total: 0,
         items: Vec::new(),
+        created_at: Timestamp::UNIX_EPOCH,
+        updated_at: Timestamp::UNIX_EPOCH,
+        deleted_at: None,
+    }
+}
+
+pub(crate) fn make_product(uuid: ProductUuid) -> Product {
+    Product {
+        uuid,
+        price: 100,
         created_at: Timestamp::UNIX_EPOCH,
         updated_at: Timestamp::UNIX_EPOCH,
         deleted_at: None,

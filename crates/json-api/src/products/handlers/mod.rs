@@ -5,21 +5,3 @@ pub(crate) mod delete;
 pub(crate) mod get;
 pub(crate) mod index;
 pub(crate) mod update;
-
-#[cfg(test)]
-mod tests {
-    use jiff::Timestamp;
-    use uuid::Uuid;
-
-    use lattice_app::domain::products::models::Product;
-
-    pub(super) fn make_product(uuid: Uuid) -> Product {
-        Product {
-            uuid,
-            price: 100,
-            created_at: Timestamp::UNIX_EPOCH,
-            updated_at: Timestamp::UNIX_EPOCH,
-            deleted_at: None,
-        }
-    }
-}

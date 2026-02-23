@@ -1,17 +1,16 @@
 //! Test Helpers
 
 use jiff::Timestamp;
-use uuid::Uuid;
 
 use crate::{
     domain::{
         carts::{
             CartsService, CartsServiceError,
-            models::{Cart, CartItem, NewCart, NewCartItem},
+            models::{Cart, CartItem, CartItemUuid, CartUuid, NewCart, NewCartItem},
         },
         products::{
             ProductsService, ProductsServiceError,
-            models::{NewProduct, Product},
+            models::{NewProduct, Product, ProductUuid},
         },
         tenants::models::TenantUuid,
     },
@@ -21,9 +20,9 @@ use crate::{
 pub(crate) async fn add_item(
     ctx: &TestContext,
     tenant: TenantUuid,
-    cart: Uuid,
-    product: Uuid,
-    item: Uuid,
+    cart: CartUuid,
+    product: ProductUuid,
+    item: CartItemUuid,
 ) -> Result<CartItem, CartsServiceError> {
     ctx.carts
         .add_item(
@@ -40,8 +39,8 @@ pub(crate) async fn add_item(
 pub(crate) async fn remove_item(
     ctx: &TestContext,
     tenant: TenantUuid,
-    cart: Uuid,
-    item: Uuid,
+    cart: CartUuid,
+    item: CartItemUuid,
 ) -> Result<(), CartsServiceError> {
     ctx.carts.remove_item(tenant, cart, item).await
 }
@@ -49,7 +48,7 @@ pub(crate) async fn remove_item(
 pub(crate) async fn get_cart(
     ctx: &TestContext,
     tenant: TenantUuid,
-    cart: Uuid,
+    cart: CartUuid,
     point_in_time: Timestamp,
 ) -> Result<Cart, CartsServiceError> {
     ctx.carts.get_cart(tenant, cart, point_in_time).await
@@ -58,7 +57,7 @@ pub(crate) async fn get_cart(
 pub(crate) async fn create_cart(
     ctx: &TestContext,
     tenant: TenantUuid,
-    cart: Uuid,
+    cart: CartUuid,
 ) -> Result<Cart, CartsServiceError> {
     ctx.carts.create_cart(tenant, NewCart { uuid: cart }).await
 }
@@ -66,7 +65,7 @@ pub(crate) async fn create_cart(
 pub(crate) async fn create_product(
     ctx: &TestContext,
     tenant: TenantUuid,
-    product: Uuid,
+    product: ProductUuid,
     price: u64,
 ) -> Result<Product, ProductsServiceError> {
     ctx.products
