@@ -2,13 +2,18 @@
 
 use std::sync::Arc;
 
+use jiff::Timestamp;
 use salvo::{affix_state::inject, prelude::*};
 use uuid::Uuid;
 
 use lattice_app::{
     auth::MockAuthService,
     context::AppContext,
-    domain::{carts::MockCartsService, products::MockProductsService, tenants::models::TenantUuid},
+    domain::{
+        carts::{MockCartsService, models::Cart},
+        products::MockProductsService,
+        tenants::models::TenantUuid,
+    },
 };
 
 use crate::{extensions::*, state::State};
@@ -40,6 +45,8 @@ fn strict_carts_mock() -> MockCartsService {
     carts.expect_create_cart().never();
     carts.expect_delete_cart().never();
     carts.expect_get_cart().never();
+    carts.expect_add_item().never();
+    carts.expect_remove_item().never();
 
     carts
 }
@@ -95,4 +102,16 @@ pub(crate) fn carts_service(carts: MockCartsService, route: Router) -> Service {
             .hoop(inject_tenant)
             .push(route),
     )
+}
+
+pub(crate) fn make_cart(uuid: Uuid) -> Cart {
+    Cart {
+        uuid,
+        subtotal: 0,
+        total: 0,
+        items: Vec::new(),
+        created_at: Timestamp::UNIX_EPOCH,
+        updated_at: Timestamp::UNIX_EPOCH,
+        deleted_at: None,
+    }
 }
