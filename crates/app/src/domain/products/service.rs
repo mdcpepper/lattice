@@ -8,11 +8,12 @@ use crate::{
     database::Db,
     domain::{
         products::{
+            data::{NewProduct, ProductUpdate},
             errors::ProductsServiceError,
-            models::{NewProduct, Product, ProductUpdate, ProductUuid},
+            records::{ProductRecord, ProductUuid},
             repository::PgProductsRepository,
         },
-        tenants::models::TenantUuid,
+        tenants::records::TenantUuid,
     },
 };
 
@@ -38,7 +39,7 @@ impl ProductsService for PgProductsService {
         &self,
         tenant: TenantUuid,
         point_in_time: Timestamp,
-    ) -> Result<Vec<Product>, ProductsServiceError> {
+    ) -> Result<Vec<ProductRecord>, ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let products = self
@@ -56,7 +57,7 @@ impl ProductsService for PgProductsService {
         tenant: TenantUuid,
         product: ProductUuid,
         point_in_time: Timestamp,
-    ) -> Result<Product, ProductsServiceError> {
+    ) -> Result<ProductRecord, ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let product = self
@@ -73,7 +74,7 @@ impl ProductsService for PgProductsService {
         &self,
         tenant: TenantUuid,
         product: NewProduct,
-    ) -> Result<Product, ProductsServiceError> {
+    ) -> Result<ProductRecord, ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let created = self
@@ -91,7 +92,7 @@ impl ProductsService for PgProductsService {
         tenant: TenantUuid,
         product: ProductUuid,
         update: ProductUpdate,
-    ) -> Result<Product, ProductsServiceError> {
+    ) -> Result<ProductRecord, ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let updated = self
@@ -131,7 +132,7 @@ pub trait ProductsService: Send + Sync {
         &self,
         tenant: TenantUuid,
         point_in_time: Timestamp,
-    ) -> Result<Vec<Product>, ProductsServiceError>;
+    ) -> Result<Vec<ProductRecord>, ProductsServiceError>;
 
     /// Retrieve a single product.
     async fn get_product(
@@ -139,14 +140,14 @@ pub trait ProductsService: Send + Sync {
         tenant: TenantUuid,
         product: ProductUuid,
         point_in_time: Timestamp,
-    ) -> Result<Product, ProductsServiceError>;
+    ) -> Result<ProductRecord, ProductsServiceError>;
 
     /// Creates a new product with the given UUID and price.
     async fn create_product(
         &self,
         tenant: TenantUuid,
         product: NewProduct,
-    ) -> Result<Product, ProductsServiceError>;
+    ) -> Result<ProductRecord, ProductsServiceError>;
 
     /// Updates a product with the given UUID and update.
     async fn update_product(
@@ -154,7 +155,7 @@ pub trait ProductsService: Send + Sync {
         tenant: TenantUuid,
         product: ProductUuid,
         update: ProductUpdate,
-    ) -> Result<Product, ProductsServiceError>;
+    ) -> Result<ProductRecord, ProductsServiceError>;
 
     /// Deletes a product with the given UUID.
     async fn delete_product(
@@ -170,7 +171,7 @@ mod tests {
     use testresult::TestResult;
 
     use crate::{
-        domain::products::models::{NewProduct, ProductUpdate},
+        domain::products::data::{NewProduct, ProductUpdate},
         test::TestContext,
     };
 

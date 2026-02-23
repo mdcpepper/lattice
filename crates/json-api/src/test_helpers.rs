@@ -12,13 +12,13 @@ use lattice_app::{
     domain::{
         carts::{
             MockCartsService,
-            models::{Cart, CartUuid},
+            records::{CartRecord, CartUuid},
         },
         products::{
             MockProductsService,
-            models::{Product, ProductUuid},
+            records::{ProductRecord, ProductUuid},
         },
-        tenants::models::TenantUuid,
+        tenants::records::TenantUuid,
     },
 };
 
@@ -110,8 +110,8 @@ pub(crate) fn carts_service(carts: MockCartsService, route: Router) -> Service {
     )
 }
 
-pub(crate) fn make_cart(uuid: CartUuid) -> Cart {
-    Cart {
+pub(crate) fn make_cart(uuid: CartUuid) -> CartRecord {
+    CartRecord {
         uuid,
         subtotal: 0,
         total: 0,
@@ -122,8 +122,8 @@ pub(crate) fn make_cart(uuid: CartUuid) -> Cart {
     }
 }
 
-pub(crate) fn make_product(uuid: ProductUuid) -> Product {
-    Product {
+pub(crate) fn make_product(uuid: ProductUuid) -> ProductRecord {
+    ProductRecord {
         uuid,
         price: 100,
         created_at: Timestamp::UNIX_EPOCH,

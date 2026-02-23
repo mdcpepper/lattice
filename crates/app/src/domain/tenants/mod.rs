@@ -1,7 +1,8 @@
 //! Tenants
 
+pub mod data;
 pub mod errors;
-pub mod models;
+pub mod records;
 mod repository;
 pub mod service;
 

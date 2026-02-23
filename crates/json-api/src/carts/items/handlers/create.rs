@@ -10,7 +10,7 @@ use salvo::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use lattice_app::domain::carts::models::NewCartItem;
+use lattice_app::domain::carts::data::NewCartItem;
 
 use crate::{carts::errors::into_status_error, extensions::*, state::State};
 

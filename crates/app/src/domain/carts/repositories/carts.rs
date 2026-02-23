@@ -4,7 +4,7 @@ use jiff::Timestamp;
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
 
-use crate::domain::carts::models::{Cart, CartUuid};
+use crate::domain::carts::records::{CartRecord, CartUuid};
 
 const GET_CART_SQL: &str = include_str!("../sql/get_cart.sql");
 const CREATE_CART_SQL: &str = include_str!("../sql/create_cart.sql");
@@ -24,8 +24,8 @@ impl PgCartsRepository {
         tx: &mut Transaction<'_, Postgres>,
         cart: CartUuid,
         point_in_time: Timestamp,
-    ) -> Result<Cart, sqlx::Error> {
-        query_as::<Postgres, Cart>(GET_CART_SQL)
+    ) -> Result<CartRecord, sqlx::Error> {
+        query_as::<Postgres, CartRecord>(GET_CART_SQL)
             .bind(cart.into_uuid())
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_one(&mut **tx)
@@ -36,8 +36,8 @@ impl PgCartsRepository {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         cart: CartUuid,
-    ) -> Result<Cart, sqlx::Error> {
-        query_as::<Postgres, Cart>(CREATE_CART_SQL)
+    ) -> Result<CartRecord, sqlx::Error> {
+        query_as::<Postgres, CartRecord>(CREATE_CART_SQL)
             .bind(cart.into_uuid())
             .fetch_one(&mut **tx)
             .await
@@ -58,7 +58,7 @@ impl PgCartsRepository {
     }
 }
 
-impl<'r> FromRow<'r, PgRow> for Cart {
+impl<'r> FromRow<'r, PgRow> for CartRecord {
     fn from_row(row: &'r PgRow) -> sqlx::Result<Self> {
         let subtotal = try_get_amount(row, "subtotal")?;
         let total = try_get_amount(row, "total")?;

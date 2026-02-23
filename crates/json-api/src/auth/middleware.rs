@@ -89,7 +89,7 @@ mod tests {
     use testresult::TestResult;
     use uuid::Uuid;
 
-    use lattice_app::{auth::MockAuthService, domain::tenants::models::TenantUuid};
+    use lattice_app::{auth::MockAuthService, domain::tenants::records::TenantUuid};
 
     use crate::test_helpers::state_with_auth;
 

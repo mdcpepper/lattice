@@ -7,7 +7,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use zeroize::Zeroize;
 
-use crate::domain::tenants::models::TenantUuid;
+use crate::domain::tenants::records::TenantUuid;
 
 /// API token identifier prefix.
 pub const API_TOKEN_PREFIX: &str = "lt";

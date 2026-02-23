@@ -41,7 +41,7 @@ mod tests {
     use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use lattice_app::domain::carts::{CartsServiceError, MockCartsService, models::CartUuid};
+    use lattice_app::domain::carts::{CartsServiceError, MockCartsService, records::CartUuid};
 
     use crate::test_helpers::{TEST_TENANT_UUID, carts_service, make_cart};
 

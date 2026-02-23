@@ -5,8 +5,7 @@ use mockall::automock;
 use sqlx::PgPool;
 
 use crate::domain::tenants::{
-    errors::TenantsServiceError,
-    models::{NewTenant, Tenant},
+    data::NewTenant, errors::TenantsServiceError, records::TenantRecord,
     repository::PgTenantsRepository,
 };
 
@@ -26,7 +25,7 @@ impl PgTenantsService {
 
 #[async_trait]
 impl TenantsService for PgTenantsService {
-    async fn create_tenant(&self, tenant: NewTenant) -> Result<Tenant, TenantsServiceError> {
+    async fn create_tenant(&self, tenant: NewTenant) -> Result<TenantRecord, TenantsServiceError> {
         self.repository
             .create_tenant(tenant)
             .await
@@ -39,24 +38,24 @@ impl TenantsService for PgTenantsService {
 /// Tenant persistence operations.
 pub trait TenantsService: Send + Sync {
     /// Creates a new tenant.
-    async fn create_tenant(&self, tenant: NewTenant) -> Result<Tenant, TenantsServiceError>;
+    async fn create_tenant(&self, tenant: NewTenant) -> Result<TenantRecord, TenantsServiceError>;
 }
 
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
     use testresult::TestResult;
-    use uuid::Uuid;
+
+    use crate::{domain::tenants::records::TenantUuid, test::TestContext};
 
     use super::*;
-    use crate::test::TestContext;
 
     #[tokio::test]
     async fn create_tenant_returns_correct_uuid_and_name() -> TestResult {
         let ctx = TestContext::new().await;
         let svc = PgTenantsService::new(ctx.db.pool().clone());
 
-        let uuid = Uuid::now_v7();
+        let uuid = TenantUuid::new();
 
         let tenant = svc
             .create_tenant(NewTenant {
@@ -81,7 +80,7 @@ mod tests {
 
         let tenant = svc
             .create_tenant(NewTenant {
-                uuid: Uuid::now_v7(),
+                uuid: TenantUuid::new(),
                 name: "Timestamp Test".to_string(),
             })
             .await?;
@@ -99,7 +98,7 @@ mod tests {
         let ctx = TestContext::new().await;
         let svc = PgTenantsService::new(ctx.db.pool().clone());
 
-        let uuid = Uuid::now_v7();
+        let uuid = TenantUuid::new();
 
         svc.create_tenant(NewTenant {
             uuid,
@@ -129,13 +128,13 @@ mod tests {
 
         // Name has no uniqueness constraint — two tenants may share a name
         svc.create_tenant(NewTenant {
-            uuid: Uuid::now_v7(),
+            uuid: TenantUuid::new(),
             name: "Shared Name".to_string(),
         })
         .await?;
 
         svc.create_tenant(NewTenant {
-            uuid: Uuid::now_v7(),
+            uuid: TenantUuid::new(),
             name: "Shared Name".to_string(),
         })
         .await?;
@@ -148,8 +147,8 @@ mod tests {
         let ctx = TestContext::new().await;
         let svc = PgTenantsService::new(ctx.db.pool().clone());
 
-        let uuid_a = Uuid::now_v7();
-        let uuid_b = Uuid::now_v7();
+        let uuid_a = TenantUuid::new();
+        let uuid_b = TenantUuid::new();
 
         let tenant_a = svc
             .create_tenant(NewTenant {

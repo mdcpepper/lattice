@@ -1,7 +1,7 @@
 use clap::Args;
 use lattice_app::{
     database,
-    domain::tenants::{PgTenantsService, TenantsService, models::NewTenant},
+    domain::tenants::{PgTenantsService, TenantsService, data::NewTenant, records::TenantUuid},
 };
 use uuid::Uuid;
 
@@ -26,7 +26,7 @@ pub(crate) async fn run(args: CreateTenantArgs) -> Result<(), String> {
         .map_err(|error| format!("failed to connect to database: {error}"))?;
 
     let service = PgTenantsService::new(pool);
-    let tenant_uuid = args.tenant_uuid.unwrap_or_else(Uuid::now_v7);
+    let tenant_uuid = TenantUuid::from_uuid(args.tenant_uuid.unwrap_or_else(Uuid::now_v7));
 
     let tenant = service
         .create_tenant(NewTenant {

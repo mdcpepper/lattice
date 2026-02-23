@@ -44,7 +44,7 @@ mod tests {
 
     use lattice_app::domain::carts::{
         CartsServiceError, MockCartsService,
-        models::{CartItemUuid, CartUuid},
+        records::{CartItemUuid, CartUuid},
     };
 
     use crate::test_helpers::{TEST_TENANT_UUID, carts_service, make_cart};

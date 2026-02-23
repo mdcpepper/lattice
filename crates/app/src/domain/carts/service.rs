@@ -8,11 +8,12 @@ use crate::{
     database::Db,
     domain::{
         carts::{
+            data::{NewCart, NewCartItem},
             errors::CartsServiceError,
-            models::{Cart, CartItem, CartItemUuid, CartUuid, NewCart, NewCartItem},
+            records::{CartItemRecord, CartItemUuid, CartRecord, CartUuid},
             repositories::{PgCartItemsRepository, PgCartsRepository},
         },
-        tenants::models::TenantUuid,
+        tenants::records::TenantUuid,
     },
 };
 
@@ -41,7 +42,7 @@ impl CartsService for PgCartsService {
         tenant: TenantUuid,
         cart: CartUuid,
         point_in_time: Timestamp,
-    ) -> Result<Cart, CartsServiceError> {
+    ) -> Result<CartRecord, CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let items = self
@@ -65,7 +66,7 @@ impl CartsService for PgCartsService {
         &self,
         tenant: TenantUuid,
         cart: NewCart,
-    ) -> Result<Cart, CartsServiceError> {
+    ) -> Result<CartRecord, CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let created = self
@@ -101,7 +102,7 @@ impl CartsService for PgCartsService {
         tenant: TenantUuid,
         cart: CartUuid,
         item: NewCartItem,
-    ) -> Result<CartItem, CartsServiceError> {
+    ) -> Result<CartItemRecord, CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let item = self
@@ -146,14 +147,14 @@ pub trait CartsService: Send + Sync {
         tenant: TenantUuid,
         cart: CartUuid,
         point_in_time: Timestamp,
-    ) -> Result<Cart, CartsServiceError>;
+    ) -> Result<CartRecord, CartsServiceError>;
 
     /// Creates a new cart with the given details.
     async fn create_cart(
         &self,
         tenant: TenantUuid,
         cart: NewCart,
-    ) -> Result<Cart, CartsServiceError>;
+    ) -> Result<CartRecord, CartsServiceError>;
 
     /// Deletes a cart with the given UUID.
     async fn delete_cart(
@@ -168,7 +169,7 @@ pub trait CartsService: Send + Sync {
         tenant: TenantUuid,
         cart: CartUuid,
         item: NewCartItem,
-    ) -> Result<CartItem, CartsServiceError>;
+    ) -> Result<CartItemRecord, CartsServiceError>;
 
     /// Remove an item from the given cart
     async fn remove_item(
@@ -185,7 +186,7 @@ mod tests {
     use testresult::TestResult;
 
     use crate::{
-        domain::carts::models::NewCart,
+        domain::carts::data::NewCart,
         test::{
             TestContext,
             helpers::{add_item, create_cart, create_product, get_cart, remove_item},
@@ -260,7 +261,7 @@ mod tests {
     }
 
     mod get {
-        use crate::domain::products::models::ProductUuid;
+        use crate::domain::products::records::ProductUuid;
 
         use super::*;
 
@@ -373,7 +374,7 @@ mod tests {
     }
 
     mod add_item {
-        use crate::domain::products::models::ProductUuid;
+        use crate::domain::products::records::ProductUuid;
 
         use super::*;
 
@@ -462,7 +463,7 @@ mod tests {
     }
 
     mod remove_item {
-        use crate::domain::products::models::ProductUuid;
+        use crate::domain::products::records::ProductUuid;
 
         use super::*;
 
