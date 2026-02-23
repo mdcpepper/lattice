@@ -76,9 +76,9 @@ mod tests {
 
     use lattice_app::domain::carts::{CartsServiceError, MockCartsService};
 
-    use crate::test_helpers::{TEST_TENANT_UUID, carts_service};
+    use crate::test_helpers::{TEST_TENANT_UUID, carts_service, make_cart};
 
-    use super::{super::tests::*, *};
+    use super::*;
 
     fn make_service(repo: MockCartsService) -> Service {
         carts_service(repo, Router::with_path("carts").post(handler))

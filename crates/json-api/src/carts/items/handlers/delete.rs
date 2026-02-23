@@ -1,4 +1,4 @@
-//! Delete Cart Handler
+//! Delete Cart Item Handler
 
 use std::sync::Arc;
 
@@ -7,20 +7,21 @@ use uuid::Uuid;
 
 use crate::{carts::errors::into_status_error, extensions::*, state::State};
 
-/// Delete Cart Handler
+/// Delete Cart Item Handler
 #[endpoint(
     tags("carts"),
-    summary = "Delete Cart",
+    summary = "Delete Cart Item",
     security(("bearer_auth" = [])),
     responses(
-        (status_code = StatusCode::OK, description = "Cart deleted"),
-        (status_code = StatusCode::NOT_FOUND, description = "Cart not found"),
+        (status_code = StatusCode::OK, description = "Cart item deleted"),
+        (status_code = StatusCode::NOT_FOUND, description = "Cart item not found"),
         (status_code = StatusCode::BAD_REQUEST, description = "Bad Request"),
         (status_code = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error"),
-    ),
+    )
 )]
 pub(crate) async fn handler(
     cart: PathParam<Uuid>,
+    item: PathParam<Uuid>,
     depot: &mut Depot,
 ) -> Result<StatusCode, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
@@ -29,7 +30,7 @@ pub(crate) async fn handler(
     state
         .app
         .carts
-        .delete_cart(tenant, cart.into_inner())
+        .remove_item(tenant, cart.into_inner(), item.into_inner())
         .await
         .map_err(into_status_error)?;
 
@@ -48,26 +49,30 @@ mod tests {
     use super::*;
 
     fn make_service(repo: MockCartsService) -> Service {
-        carts_service(repo, Router::with_path("carts/{cart}").delete(handler))
+        carts_service(
+            repo,
+            Router::with_path("carts/{cart}/items/{item}").delete(handler),
+        )
     }
 
     #[tokio::test]
     async fn test_delete_cart_success() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let cart = Uuid::now_v7();
+        let item = Uuid::now_v7();
 
-        make_cart(uuid);
+        make_cart(cart);
 
         let mut repo = MockCartsService::new();
 
-        repo.expect_delete_cart()
+        repo.expect_remove_item()
             .once()
-            .withf(move |tenant, u| *tenant == TEST_TENANT_UUID && *u == uuid)
-            .return_once(move |_, _| Ok(()));
+            .withf(move |tenant, c, i| *tenant == TEST_TENANT_UUID && *c == cart && *i == item)
+            .return_once(move |_, _, _| Ok(()));
 
         repo.expect_get_cart().never();
         repo.expect_create_cart().never();
 
-        let res = TestClient::delete(format!("http://example.com/carts/{uuid}"))
+        let res = TestClient::delete(format!("http://example.com/carts/{cart}/items/{item}"))
             .send(&make_service(repo))
             .await;
 
@@ -82,9 +87,9 @@ mod tests {
 
         repo.expect_get_cart().never();
         repo.expect_create_cart().never();
-        repo.expect_delete_cart().never();
+        repo.expect_remove_item().never();
 
-        let res = TestClient::delete("http://example.com/carts/123")
+        let res = TestClient::delete("http://example.com/carts/not-a-uuid/items/also-not-a-uuid")
             .send(&make_service(repo))
             .await;
 
@@ -96,22 +101,23 @@ mod tests {
     #[tokio::test]
     async fn test_delete_cart_not_found_returns_404() -> TestResult {
         let cart = Uuid::now_v7();
+        let item = Uuid::now_v7();
 
         let mut repo = MockCartsService::new();
 
-        repo.expect_delete_cart()
+        repo.expect_remove_item()
             .once()
-            .withf(move |tenant, u| *tenant == TEST_TENANT_UUID && *u == cart)
-            .return_once(|_, _| Err(CartsServiceError::InvalidReference));
+            .withf(move |tenant, c, i| *tenant == TEST_TENANT_UUID && *c == cart && *i == item)
+            .return_once(|_, _, _| Err(CartsServiceError::NotFound));
 
         repo.expect_create_cart().never();
         repo.expect_get_cart().never();
 
-        let res = TestClient::delete(format!("http://example.com/carts/{cart}"))
+        let res = TestClient::delete(format!("http://example.com/carts/{cart}/items/{item}"))
             .send(&make_service(repo))
             .await;
 
-        assert_eq!(res.status_code, Some(StatusCode::BAD_REQUEST));
+        assert_eq!(res.status_code, Some(StatusCode::NOT_FOUND));
 
         Ok(())
     }
