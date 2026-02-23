@@ -55,7 +55,7 @@ impl From<Product> for ProductResponse {
     security(("bearer_auth" = []))
 )]
 pub(crate) async fn handler(
-    uuid: PathParam<Uuid>,
+    product: PathParam<Uuid>,
     at: QueryParam<String, false>,
     depot: &mut Depot,
 ) -> Result<Json<ProductResponse>, StatusError> {
@@ -66,7 +66,7 @@ pub(crate) async fn handler(
     let product = state
         .app
         .products
-        .get_product(tenant, uuid.into_inner(), point_in_time)
+        .get_product(tenant, product.into_inner(), point_in_time)
         .await
         .map_err(into_status_error)?;
 
@@ -89,7 +89,7 @@ mod tests {
     use super::*;
 
     fn make_service(repo: MockProductsService) -> Service {
-        products_service(repo, Router::with_path("products/{uuid}").get(handler))
+        products_service(repo, Router::with_path("products/{product}").get(handler))
     }
 
     #[tokio::test]

@@ -10,9 +10,6 @@ pub(crate) fn into_status_error(error: ProductsServiceError) -> StatusError {
         ProductsServiceError::AlreadyExists => {
             StatusError::conflict().brief("Product already exists")
         }
-        ProductsServiceError::InvalidPrice(_) => {
-            StatusError::bad_request().brief("Price is out of range")
-        }
         ProductsServiceError::InvalidReference
         | ProductsServiceError::MissingRequiredData
         | ProductsServiceError::InvalidData => {

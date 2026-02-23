@@ -2,7 +2,7 @@
 
 pub mod errors;
 pub mod models;
-mod repository;
+mod repositories;
 pub mod service;
 
 pub use errors::CartsServiceError;

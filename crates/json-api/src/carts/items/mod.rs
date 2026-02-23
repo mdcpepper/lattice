@@ -1,7 +1,6 @@
-//! Carts
+//! Cart Items
 
 pub(crate) mod errors;
 pub(crate) mod handlers;
-pub(crate) mod items;
 
 pub(crate) use handlers::*;

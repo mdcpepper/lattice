@@ -16,6 +16,7 @@ mod tests {
             uuid,
             subtotal: 0,
             total: 0,
+            items: Vec::new(),
             created_at: Timestamp::UNIX_EPOCH,
             updated_at: Timestamp::UNIX_EPOCH,
             deleted_at: None,

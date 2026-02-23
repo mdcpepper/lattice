@@ -79,7 +79,7 @@ impl ProductsService for PgProductsService {
 
         let created = self
             .repository
-            .create_product(&mut tx, product.uuid, i64::try_from(product.price)?)
+            .create_product(&mut tx, product.uuid, product.price)
             .await?;
 
         tx.commit().await?;
@@ -97,7 +97,7 @@ impl ProductsService for PgProductsService {
 
         let updated = self
             .repository
-            .update_product(&mut tx, uuid, update.uuid, i64::try_from(update.price)?)
+            .update_product(&mut tx, uuid, update.uuid, update.price)
             .await?;
 
         tx.commit().await?;
@@ -168,6 +168,7 @@ pub trait ProductsService: Send + Sync {
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
+    use testresult::TestResult;
     use uuid::Uuid;
 
     use crate::{
@@ -178,40 +179,41 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn create_product_returns_correct_uuid_and_price() {
+    async fn create_product_returns_correct_uuid_and_price() -> TestResult {
         let ctx = TestContext::new().await;
         let uuid = Uuid::now_v7();
 
         let product = ctx
             .products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 999 })
-            .await
-            .expect("create_product should succeed");
+            .await?;
 
         assert_eq!(product.uuid, uuid);
         assert_eq!(product.price, 999);
         assert!(product.deleted_at.is_none());
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn get_product_returns_created_product() {
+    async fn get_product_returns_created_product() -> TestResult {
         let ctx = TestContext::new().await;
         let uuid = Uuid::now_v7();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 1500 })
-            .await
-            .expect("create_product should succeed");
+            .await?;
 
         let product = ctx
             .products
             .get_product(ctx.tenant_uuid, uuid, Timestamp::now())
-            .await
-            .expect("get_product should succeed");
+            .await?;
 
         assert_eq!(product.uuid, uuid);
         assert_eq!(product.price, 1500);
         assert!(product.deleted_at.is_none());
+
+        Ok(())
     }
 
     #[tokio::test]
@@ -230,7 +232,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_products_returns_created_products() {
+    async fn list_products_returns_created_products() -> TestResult {
         let ctx = TestContext::new().await;
 
         let uuid_a = Uuid::now_v7();
@@ -244,8 +246,7 @@ mod tests {
                     price: 100,
                 },
             )
-            .await
-            .expect("create product A should succeed");
+            .await?;
 
         ctx.products
             .create_product(
@@ -255,43 +256,43 @@ mod tests {
                     price: 200,
                 },
             )
-            .await
-            .expect("create product B should succeed");
+            .await?;
 
         let products = ctx
             .products
             .list_products(ctx.tenant_uuid, Timestamp::now())
-            .await
-            .expect("list_products should succeed");
+            .await?;
 
         let uuids: Vec<Uuid> = products.iter().map(|p| p.uuid).collect();
 
         assert!(uuids.contains(&uuid_a), "product A should be in the list");
         assert!(uuids.contains(&uuid_b), "product B should be in the list");
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn list_products_empty_when_none_created() {
+    async fn list_products_empty_when_none_created() -> TestResult {
         let ctx = TestContext::new().await;
 
         let products = ctx
             .products
             .list_products(ctx.tenant_uuid, Timestamp::now())
-            .await
-            .expect("list_products should succeed");
+            .await?;
 
         assert!(products.is_empty());
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn update_product_reflects_new_price() {
+    async fn update_product_reflects_new_price() -> TestResult {
         let ctx = TestContext::new().await;
         let uuid = Uuid::now_v7();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 500 })
-            .await
-            .expect("create_product should succeed");
+            .await?;
 
         let updated = ctx
             .products
@@ -303,11 +304,12 @@ mod tests {
                     price: 750,
                 },
             )
-            .await
-            .expect("update_product should succeed");
+            .await?;
 
         assert_eq!(updated.uuid, uuid);
         assert_eq!(updated.price, 750);
+
+        Ok(())
     }
 
     #[tokio::test]
@@ -333,19 +335,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_product_makes_it_not_found() {
+    async fn delete_product_makes_it_not_found() -> TestResult {
         let ctx = TestContext::new().await;
         let uuid = Uuid::now_v7();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 300 })
-            .await
-            .expect("create_product should succeed");
+            .await?;
 
-        ctx.products
-            .delete_product(ctx.tenant_uuid, uuid)
-            .await
-            .expect("delete_product should succeed");
+        ctx.products.delete_product(ctx.tenant_uuid, uuid).await?;
 
         let result = ctx
             .products
@@ -356,6 +354,8 @@ mod tests {
             matches!(result, Err(ProductsServiceError::NotFound)),
             "expected NotFound after deletion, got {result:?}"
         );
+
+        Ok(())
     }
 
     #[tokio::test]
@@ -374,14 +374,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_product_duplicate_uuid_returns_already_exists() {
+    async fn create_product_duplicate_uuid_returns_already_exists() -> TestResult {
         let ctx = TestContext::new().await;
         let uuid = Uuid::now_v7();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 100 })
-            .await
-            .expect("first create_product should succeed");
+            .await?;
 
         let result = ctx
             .products
@@ -392,12 +391,13 @@ mod tests {
             matches!(result, Err(ProductsServiceError::AlreadyExists)),
             "expected AlreadyExists, got {result:?}"
         );
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn product_not_visible_to_other_tenant() {
+    async fn product_not_visible_to_other_tenant() -> TestResult {
         let ctx = TestContext::new().await;
-        let tenant_b = ctx.create_tenant("Tenant B").await;
 
         let product = ctx
             .products
@@ -408,8 +408,9 @@ mod tests {
                     price: 100,
                 },
             )
-            .await
-            .expect("create_product should succeed");
+            .await?;
+
+        let tenant_b = ctx.create_tenant("Tenant B").await;
 
         // Tenant B cannot see Tenant A's product
         let result = ctx
@@ -421,32 +422,31 @@ mod tests {
             matches!(result, Err(ProductsServiceError::NotFound)),
             "expected NotFound for cross-tenant access, got {result:?}"
         );
+
+        Ok(())
     }
 
     #[tokio::test]
-    async fn deleted_product_not_returned_in_list() {
+    async fn deleted_product_not_returned_in_list() -> TestResult {
         let ctx = TestContext::new().await;
         let uuid = Uuid::now_v7();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 100 })
-            .await
-            .expect("create_product should succeed");
+            .await?;
 
-        ctx.products
-            .delete_product(ctx.tenant_uuid, uuid)
-            .await
-            .expect("delete_product should succeed");
+        ctx.products.delete_product(ctx.tenant_uuid, uuid).await?;
 
         let products = ctx
             .products
             .list_products(ctx.tenant_uuid, Timestamp::now())
-            .await
-            .expect("list_products should succeed");
+            .await?;
 
         assert!(
             !products.iter().any(|p| p.uuid == uuid),
             "deleted product should not appear in list"
         );
+
+        Ok(())
     }
 }
