@@ -95,6 +95,7 @@ pub async fn main() {
         .hoop(CatchPanic::new())
         .hoop(remove_slash())
         .hoop(inject(State::from_app_context(app)))
+        .hoop(auth::middleware::handler)
         .push(Router::with_path("healthcheck").get(healthcheck::handler))
         .push(router::app_router());
 
