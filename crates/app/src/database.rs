@@ -2,7 +2,7 @@
 
 use sqlx::{PgPool, Postgres, Transaction, query, query_as};
 
-use crate::domain::tenants::models::TenantUuid;
+use crate::domain::tenants::records::TenantUuid;
 
 /// SQL used to set tenant context for row-level security.
 pub const SET_TENANT_CONTEXT_SQL: &str = "SELECT set_config('app.current_tenant_uuid', $1, true)";

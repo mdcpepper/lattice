@@ -4,7 +4,7 @@ use std::any::Any;
 
 use salvo::prelude::{Depot, StatusError};
 
-use lattice_app::domain::tenants::models::TenantUuid;
+use lattice_app::domain::tenants::records::TenantUuid;
 
 const TENANT_UUID_KEY: &str = "tenant_uuid";
 

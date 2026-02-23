@@ -10,7 +10,7 @@ use salvo::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use lattice_app::domain::products::models::NewProduct;
+use lattice_app::domain::products::data::NewProduct;
 
 use crate::{extensions::*, products::errors::into_status_error, state::State};
 
@@ -79,7 +79,7 @@ mod tests {
     use testresult::TestResult;
 
     use lattice_app::domain::products::{
-        MockProductsService, ProductsServiceError, models::ProductUuid,
+        MockProductsService, ProductsServiceError, records::ProductUuid,
     };
 
     use crate::test_helpers::{TEST_TENANT_UUID, make_product, products_service};

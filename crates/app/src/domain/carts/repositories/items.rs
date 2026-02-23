@@ -5,8 +5,11 @@ use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
 
 use crate::domain::{
-    carts::models::{CartItem, CartItemUuid, CartUuid, NewCartItem},
-    products::models::ProductUuid,
+    carts::{
+        data::NewCartItem,
+        records::{CartItemRecord, CartItemUuid, CartUuid},
+    },
+    products::records::ProductUuid,
 };
 
 use super::carts::try_get_amount;
@@ -29,8 +32,8 @@ impl PgCartItemsRepository {
         tx: &mut Transaction<'_, Postgres>,
         cart: CartUuid,
         point_in_time: Timestamp,
-    ) -> Result<Vec<CartItem>, sqlx::Error> {
-        query_as::<Postgres, CartItem>(GET_CART_ITEMS_SQL)
+    ) -> Result<Vec<CartItemRecord>, sqlx::Error> {
+        query_as::<Postgres, CartItemRecord>(GET_CART_ITEMS_SQL)
             .bind(cart.into_uuid())
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_all(&mut **tx)
@@ -42,8 +45,8 @@ impl PgCartItemsRepository {
         tx: &mut Transaction<'_, Postgres>,
         cart: CartUuid,
         item: NewCartItem,
-    ) -> Result<CartItem, sqlx::Error> {
-        query_as::<Postgres, CartItem>(CREATE_CART_ITEM_SQL)
+    ) -> Result<CartItemRecord, sqlx::Error> {
+        query_as::<Postgres, CartItemRecord>(CREATE_CART_ITEM_SQL)
             .bind(item.uuid.into_uuid())
             .bind(cart.into_uuid())
             .bind(item.product_uuid.into_uuid())
@@ -68,7 +71,7 @@ impl PgCartItemsRepository {
     }
 }
 
-impl<'r> FromRow<'r, PgRow> for CartItem {
+impl<'r> FromRow<'r, PgRow> for CartItemRecord {
     fn from_row(row: &'r PgRow) -> sqlx::Result<Self> {
         let base_price = try_get_amount(row, "base_price")?;
 

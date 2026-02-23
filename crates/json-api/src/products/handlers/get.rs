@@ -12,7 +12,7 @@ use salvo::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use lattice_app::domain::products::models::Product;
+use lattice_app::domain::products::records::ProductRecord;
 
 use crate::{extensions::*, products::errors::into_status_error, state::State};
 
@@ -34,8 +34,8 @@ pub(crate) struct ProductResponse {
     pub deleted_at: Option<String>,
 }
 
-impl From<Product> for ProductResponse {
-    fn from(product: Product) -> Self {
+impl From<ProductRecord> for ProductResponse {
+    fn from(product: ProductRecord) -> Self {
         ProductResponse {
             uuid: product.uuid.into(),
             price: product.price,
@@ -80,7 +80,7 @@ mod tests {
     use testresult::TestResult;
 
     use lattice_app::domain::products::{
-        MockProductsService, ProductsServiceError, models::ProductUuid,
+        MockProductsService, ProductsServiceError, records::ProductUuid,
     };
 
     use crate::test_helpers::{TEST_TENANT_UUID, make_product, products_service};

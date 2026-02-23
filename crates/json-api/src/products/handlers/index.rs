@@ -52,15 +52,15 @@ mod tests {
 
     use lattice_app::domain::products::{
         MockProductsService, ProductsServiceError,
-        models::{Product, ProductUuid},
+        records::{ProductRecord, ProductUuid},
     };
 
     use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 
     use super::*;
 
-    fn make_product(uuid: ProductUuid, price: u64) -> Product {
-        Product {
+    fn make_product(uuid: ProductUuid, price: u64) -> ProductRecord {
+        ProductRecord {
             uuid,
             price,
             created_at: Timestamp::UNIX_EPOCH,

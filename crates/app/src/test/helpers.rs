@@ -6,13 +6,15 @@ use crate::{
     domain::{
         carts::{
             CartsService, CartsServiceError,
-            models::{Cart, CartItem, CartItemUuid, CartUuid, NewCart, NewCartItem},
+            data::{NewCart, NewCartItem},
+            records::{CartItemRecord, CartItemUuid, CartRecord, CartUuid},
         },
         products::{
             ProductsService, ProductsServiceError,
-            models::{NewProduct, Product, ProductUuid},
+            data::NewProduct,
+            records::{ProductRecord, ProductUuid},
         },
-        tenants::models::TenantUuid,
+        tenants::records::TenantUuid,
     },
     test::TestContext,
 };
@@ -23,7 +25,7 @@ pub(crate) async fn add_item(
     cart: CartUuid,
     product: ProductUuid,
     item: CartItemUuid,
-) -> Result<CartItem, CartsServiceError> {
+) -> Result<CartItemRecord, CartsServiceError> {
     ctx.carts
         .add_item(
             tenant,
@@ -50,7 +52,7 @@ pub(crate) async fn get_cart(
     tenant: TenantUuid,
     cart: CartUuid,
     point_in_time: Timestamp,
-) -> Result<Cart, CartsServiceError> {
+) -> Result<CartRecord, CartsServiceError> {
     ctx.carts.get_cart(tenant, cart, point_in_time).await
 }
 
@@ -58,7 +60,7 @@ pub(crate) async fn create_cart(
     ctx: &TestContext,
     tenant: TenantUuid,
     cart: CartUuid,
-) -> Result<Cart, CartsServiceError> {
+) -> Result<CartRecord, CartsServiceError> {
     ctx.carts.create_cart(tenant, NewCart { uuid: cart }).await
 }
 
@@ -67,7 +69,7 @@ pub(crate) async fn create_product(
     tenant: TenantUuid,
     product: ProductUuid,
     price: u64,
-) -> Result<Product, ProductsServiceError> {
+) -> Result<ProductRecord, ProductsServiceError> {
     ctx.products
         .create_product(
             tenant,

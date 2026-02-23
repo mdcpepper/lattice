@@ -10,7 +10,7 @@ use salvo::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use lattice_app::domain::carts::models::NewCart;
+use lattice_app::domain::carts::data::NewCart;
 
 use crate::{carts::errors::into_status_error, extensions::*, state::State};
 
@@ -76,7 +76,7 @@ mod tests {
     use serde_json::json;
     use testresult::TestResult;
 
-    use lattice_app::domain::carts::{CartsServiceError, MockCartsService, models::CartUuid};
+    use lattice_app::domain::carts::{CartsServiceError, MockCartsService, records::CartUuid};
 
     use crate::test_helpers::{TEST_TENANT_UUID, carts_service, make_cart};
 

@@ -42,7 +42,7 @@ mod tests {
     use testresult::TestResult;
 
     use lattice_app::domain::products::{
-        MockProductsService, ProductsServiceError, models::ProductUuid,
+        MockProductsService, ProductsServiceError, records::ProductUuid,
     };
 
     use crate::test_helpers::{TEST_TENANT_UUID, make_product, products_service};

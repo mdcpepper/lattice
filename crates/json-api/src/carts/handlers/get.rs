@@ -12,7 +12,7 @@ use salvo::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use lattice_app::domain::carts::models::{Cart, CartItem};
+use lattice_app::domain::carts::records::{CartItemRecord, CartRecord};
 
 use crate::{carts::errors::into_status_error, extensions::*, state::State};
 
@@ -35,8 +35,8 @@ pub(crate) struct CartResponse {
     pub deleted_at: Option<String>,
 }
 
-impl From<Cart> for CartResponse {
-    fn from(cart: Cart) -> Self {
+impl From<CartRecord> for CartResponse {
+    fn from(cart: CartRecord) -> Self {
         CartResponse {
             uuid: cart.uuid.into(),
             items: cart.items.into_iter().map(CartItemResponse::from).collect(),
@@ -69,8 +69,8 @@ pub(crate) struct CartItemResponse {
     pub deleted_at: Option<String>,
 }
 
-impl From<CartItem> for CartItemResponse {
-    fn from(cart_item: CartItem) -> Self {
+impl From<CartItemRecord> for CartItemResponse {
+    fn from(cart_item: CartItemRecord) -> Self {
         Self {
             uuid: cart_item.uuid.into(),
             base_price: cart_item.base_price,
@@ -115,7 +115,7 @@ mod tests {
     use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use lattice_app::domain::carts::{CartsServiceError, MockCartsService, models::CartUuid};
+    use lattice_app::domain::carts::{CartsServiceError, MockCartsService, records::CartUuid};
 
     use crate::test_helpers::{TEST_TENANT_UUID, carts_service, make_cart};
 

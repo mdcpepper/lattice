@@ -1,17 +1,13 @@
 //! Test context for service-level integration tests.
 
 use sqlx::{Connection, PgConnection, PgPool, query};
-use uuid::Uuid;
 
 use crate::{
     database::Db,
     domain::{
         carts::PgCartsService,
         products::PgProductsService,
-        tenants::{
-            PgTenantsService, TenantsService,
-            models::{NewTenant, TenantUuid},
-        },
+        tenants::{PgTenantsService, TenantsService, data::NewTenant, records::TenantUuid},
     },
 };
 
@@ -37,7 +33,7 @@ impl TestContext {
         let app_pool = Self::setup_app_pool(&test_db).await;
         let db = Db::new(app_pool);
 
-        let tenant_uuid = Uuid::now_v7();
+        let tenant_uuid = TenantUuid::new();
 
         PgTenantsService::new(test_db.pool().clone())
             .create_tenant(NewTenant {
@@ -50,14 +46,14 @@ impl TestContext {
         Self {
             products: PgProductsService::new(db.clone()),
             carts: PgCartsService::new(db),
-            tenant_uuid: TenantUuid::from_uuid(tenant_uuid),
+            tenant_uuid,
             db: test_db,
         }
     }
 
     /// Create an additional tenant — useful for RLS isolation tests.
     pub async fn create_tenant(&self, name: &str) -> TenantUuid {
-        let uuid = Uuid::now_v7();
+        let uuid = TenantUuid::new();
 
         PgTenantsService::new(self.db.pool().clone())
             .create_tenant(NewTenant {
@@ -67,7 +63,7 @@ impl TestContext {
             .await
             .expect("Failed to create test tenant");
 
-        TenantUuid::from_uuid(uuid)
+        uuid
     }
 
     /// Create a non-superuser role (once per server) and return a pool connected as it.

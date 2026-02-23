@@ -5,7 +5,7 @@ use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
 use uuid::Uuid;
 
-use crate::domain::products::models::{Product, ProductDetailsUuid, ProductUuid};
+use crate::domain::products::records::{ProductDetailsUuid, ProductRecord, ProductUuid};
 
 const LIST_PRODUCTS_SQL: &str = include_str!("sql/list_products.sql");
 const GET_PRODUCT_SQL: &str = include_str!("sql/get_product.sql");
@@ -27,8 +27,8 @@ impl PgProductsRepository {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         point_in_time: Timestamp,
-    ) -> Result<Vec<Product>, sqlx::Error> {
-        query_as::<Postgres, Product>(LIST_PRODUCTS_SQL)
+    ) -> Result<Vec<ProductRecord>, sqlx::Error> {
+        query_as::<Postgres, ProductRecord>(LIST_PRODUCTS_SQL)
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_all(&mut **tx)
             .await
@@ -39,8 +39,8 @@ impl PgProductsRepository {
         tx: &mut Transaction<'_, Postgres>,
         product: ProductUuid,
         point_in_time: Timestamp,
-    ) -> Result<Product, sqlx::Error> {
-        query_as::<Postgres, Product>(GET_PRODUCT_SQL)
+    ) -> Result<ProductRecord, sqlx::Error> {
+        query_as::<Postgres, ProductRecord>(GET_PRODUCT_SQL)
             .bind(product.into_uuid())
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_one(&mut **tx)
@@ -52,7 +52,7 @@ impl PgProductsRepository {
         tx: &mut Transaction<'_, Postgres>,
         product: ProductUuid,
         price: u64,
-    ) -> Result<Product, sqlx::Error> {
+    ) -> Result<ProductRecord, sqlx::Error> {
         let price_i64 = i64::try_from(price).map_err(|e| sqlx::Error::ColumnDecode {
             index: "price".to_string(),
             source: Box::new(e),
@@ -75,7 +75,7 @@ impl PgProductsRepository {
             .execute(&mut **tx)
             .await?;
 
-        Ok(Product {
+        Ok(ProductRecord {
             uuid: product,
             price,
             created_at: created_at.to_jiff(),
@@ -90,7 +90,7 @@ impl PgProductsRepository {
         product: ProductUuid,
         product_details: Option<ProductDetailsUuid>,
         price: u64,
-    ) -> Result<Product, sqlx::Error> {
+    ) -> Result<ProductRecord, sqlx::Error> {
         let product_details = product_details.unwrap_or_else(ProductDetailsUuid::new);
 
         let price_i64 = i64::try_from(price).map_err(|e| sqlx::Error::ColumnDecode {
@@ -98,7 +98,7 @@ impl PgProductsRepository {
             source: Box::new(e),
         })?;
 
-        query_as::<Postgres, Product>(UPDATE_PRODUCT_SQL)
+        query_as::<Postgres, ProductRecord>(UPDATE_PRODUCT_SQL)
             .bind(product.into_uuid())
             .bind(product_details.into_uuid())
             .bind(price_i64)
@@ -121,7 +121,7 @@ impl PgProductsRepository {
     }
 }
 
-impl<'r> FromRow<'r, PgRow> for Product {
+impl<'r> FromRow<'r, PgRow> for ProductRecord {
     fn from_row(row: &'r PgRow) -> sqlx::Result<Self> {
         let price_i64: i64 = row.try_get("price")?;
 
