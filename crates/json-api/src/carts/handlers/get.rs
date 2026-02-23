@@ -38,7 +38,7 @@ pub(crate) struct CartResponse {
 impl From<Cart> for CartResponse {
     fn from(cart: Cart) -> Self {
         CartResponse {
-            uuid: cart.uuid,
+            uuid: cart.uuid.into(),
             items: cart.items.into_iter().map(CartItemResponse::from).collect(),
             created_at: cart.created_at.to_string(),
             updated_at: cart.updated_at.to_string(),
@@ -72,9 +72,9 @@ pub(crate) struct CartItemResponse {
 impl From<CartItem> for CartItemResponse {
     fn from(cart_item: CartItem) -> Self {
         Self {
-            uuid: cart_item.uuid,
+            uuid: cart_item.uuid.into(),
             base_price: cart_item.base_price,
-            product_uuid: cart_item.product_uuid,
+            product_uuid: cart_item.product_uuid.into(),
             created_at: cart_item.created_at.to_string(),
             updated_at: cart_item.updated_at.to_string(),
             deleted_at: cart_item.deleted_at.as_ref().map(ToString::to_string),
@@ -102,7 +102,7 @@ pub(crate) async fn handler(
     let cart = state
         .app
         .carts
-        .get_cart(tenant, cart.into_inner(), point_in_time)
+        .get_cart(tenant, cart.into_inner().into(), point_in_time)
         .await
         .map_err(into_status_error)?;
 
@@ -115,7 +115,7 @@ mod tests {
     use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use lattice_app::domain::carts::{CartsServiceError, MockCartsService};
+    use lattice_app::domain::carts::{CartsServiceError, MockCartsService, models::CartUuid};
 
     use crate::test_helpers::{TEST_TENANT_UUID, carts_service, make_cart};
 
@@ -128,7 +128,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_returns_200() -> TestResult {
         let mut repo = MockCartsService::new();
-        let uuid = Uuid::now_v7();
+        let uuid = CartUuid::new();
 
         let cart = make_cart(uuid);
 
@@ -152,7 +152,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_missing_cart_returns_404() -> TestResult {
         let mut repo = MockCartsService::new();
-        let uuid = Uuid::now_v7();
+        let uuid = CartUuid::new();
 
         repo.expect_get_cart()
             .once()
@@ -174,7 +174,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_invalid_data_returns_400() -> TestResult {
         let mut repo = MockCartsService::new();
-        let uuid = Uuid::now_v7();
+        let uuid = CartUuid::new();
 
         repo.expect_get_cart()
             .once()
@@ -196,7 +196,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_forwards_point_in_time_query_param() -> TestResult {
         let mut repo = MockCartsService::new();
-        let uuid = Uuid::now_v7();
+        let uuid = CartUuid::new();
         let at: Timestamp = "2026-02-21T12:00:00Z".parse()?;
         let cart = make_cart(uuid);
 

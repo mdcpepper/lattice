@@ -3,14 +3,13 @@
 use async_trait::async_trait;
 use jiff::Timestamp;
 use mockall::automock;
-use uuid::Uuid;
 
 use crate::{
     database::Db,
     domain::{
         carts::{
             errors::CartsServiceError,
-            models::{Cart, CartItem, NewCart, NewCartItem},
+            models::{Cart, CartItem, CartItemUuid, CartUuid, NewCart, NewCartItem},
             repositories::{PgCartItemsRepository, PgCartsRepository},
         },
         tenants::models::TenantUuid,
@@ -40,19 +39,19 @@ impl CartsService for PgCartsService {
     async fn get_cart(
         &self,
         tenant: TenantUuid,
-        uuid: Uuid,
+        cart: CartUuid,
         point_in_time: Timestamp,
     ) -> Result<Cart, CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let mut cart = self
-            .carts_repository
-            .get_cart(&mut tx, uuid, point_in_time)
-            .await?;
-
         let items = self
             .items_repository
-            .get_cart_items(&mut tx, uuid, point_in_time)
+            .get_cart_items(&mut tx, cart, point_in_time)
+            .await?;
+
+        let mut cart = self
+            .carts_repository
+            .get_cart(&mut tx, cart, point_in_time)
             .await?;
 
         tx.commit().await?;
@@ -79,10 +78,14 @@ impl CartsService for PgCartsService {
         Ok(created)
     }
 
-    async fn delete_cart(&self, tenant: TenantUuid, uuid: Uuid) -> Result<(), CartsServiceError> {
+    async fn delete_cart(
+        &self,
+        tenant: TenantUuid,
+        cart: CartUuid,
+    ) -> Result<(), CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let rows_affected = self.carts_repository.delete_cart(&mut tx, uuid).await?;
+        let rows_affected = self.carts_repository.delete_cart(&mut tx, cart).await?;
 
         if rows_affected == 0 {
             return Err(CartsServiceError::NotFound);
@@ -96,7 +99,7 @@ impl CartsService for PgCartsService {
     async fn add_item(
         &self,
         tenant: TenantUuid,
-        cart: Uuid,
+        cart: CartUuid,
         item: NewCartItem,
     ) -> Result<CartItem, CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
@@ -114,8 +117,8 @@ impl CartsService for PgCartsService {
     async fn remove_item(
         &self,
         tenant: TenantUuid,
-        cart: Uuid,
-        item: Uuid,
+        cart: CartUuid,
+        item: CartItemUuid,
     ) -> Result<(), CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
@@ -141,7 +144,7 @@ pub trait CartsService: Send + Sync {
     async fn get_cart(
         &self,
         tenant: TenantUuid,
-        uuid: Uuid,
+        cart: CartUuid,
         point_in_time: Timestamp,
     ) -> Result<Cart, CartsServiceError>;
 
@@ -153,13 +156,17 @@ pub trait CartsService: Send + Sync {
     ) -> Result<Cart, CartsServiceError>;
 
     /// Deletes a cart with the given UUID.
-    async fn delete_cart(&self, tenant: TenantUuid, uuid: Uuid) -> Result<(), CartsServiceError>;
+    async fn delete_cart(
+        &self,
+        tenant: TenantUuid,
+        cart: CartUuid,
+    ) -> Result<(), CartsServiceError>;
 
     /// Add an item to the given cart
     async fn add_item(
         &self,
         tenant: TenantUuid,
-        cart: Uuid,
+        cart: CartUuid,
         item: NewCartItem,
     ) -> Result<CartItem, CartsServiceError>;
 
@@ -167,8 +174,8 @@ pub trait CartsService: Send + Sync {
     async fn remove_item(
         &self,
         tenant: TenantUuid,
-        cart: Uuid,
-        item: Uuid,
+        cart: CartUuid,
+        item: CartItemUuid,
     ) -> Result<(), CartsServiceError>;
 }
 
@@ -176,7 +183,6 @@ pub trait CartsService: Send + Sync {
 mod tests {
     use jiff::Timestamp;
     use testresult::TestResult;
-    use uuid::Uuid;
 
     use crate::{
         domain::carts::models::NewCart,
@@ -194,7 +200,7 @@ mod tests {
         #[tokio::test]
         async fn create_cart_returns_correct_uuid() -> TestResult {
             let ctx = TestContext::new().await;
-            let uuid = Uuid::now_v7();
+            let uuid = CartUuid::new();
 
             let cart = ctx
                 .carts
@@ -212,7 +218,7 @@ mod tests {
         #[tokio::test]
         async fn create_cart_duplicate_uuid_returns_already_exists() -> TestResult {
             let ctx = TestContext::new().await;
-            let uuid = Uuid::now_v7();
+            let uuid = CartUuid::new();
 
             ctx.carts
                 .create_cart(ctx.tenant_uuid, NewCart { uuid })
@@ -234,7 +240,7 @@ mod tests {
         #[tokio::test]
         async fn cart_not_visible_to_other_tenant() -> TestResult {
             let ctx = TestContext::new().await;
-            let uuid = Uuid::now_v7();
+            let uuid = CartUuid::new();
 
             let tenant_b = ctx.create_tenant("Tenant B").await;
 
@@ -254,12 +260,14 @@ mod tests {
     }
 
     mod get {
+        use crate::domain::products::models::ProductUuid;
+
         use super::*;
 
         #[tokio::test]
         async fn get_cart_returns_created_cart() -> TestResult {
             let ctx = TestContext::new().await;
-            let uuid = Uuid::now_v7();
+            let uuid = CartUuid::new();
 
             create_cart(&ctx, ctx.tenant_uuid, uuid).await?;
 
@@ -278,13 +286,13 @@ mod tests {
         #[tokio::test]
         async fn get_cart_returns_cart_with_items() -> TestResult {
             let ctx = TestContext::new().await;
-            let cart_uuid = Uuid::now_v7();
+            let cart_uuid = CartUuid::new();
 
-            let product = create_product(&ctx, ctx.tenant_uuid, Uuid::now_v7(), 10_00).await?;
+            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
 
             create_cart(&ctx, ctx.tenant_uuid, cart_uuid).await?;
 
-            let item_uuid = Uuid::now_v7();
+            let item_uuid = CartItemUuid::new();
 
             add_item(&ctx, ctx.tenant_uuid, cart_uuid, product.uuid, item_uuid).await?;
 
@@ -313,7 +321,7 @@ mod tests {
 
             let result = ctx
                 .carts
-                .get_cart(ctx.tenant_uuid, Uuid::now_v7(), Timestamp::now())
+                .get_cart(ctx.tenant_uuid, CartUuid::new(), Timestamp::now())
                 .await;
 
             assert!(
@@ -329,7 +337,7 @@ mod tests {
         #[tokio::test]
         async fn delete_cart_makes_it_not_found() -> TestResult {
             let ctx = TestContext::new().await;
-            let uuid = Uuid::now_v7();
+            let uuid = CartUuid::new();
 
             create_cart(&ctx, ctx.tenant_uuid, uuid).await?;
 
@@ -352,7 +360,10 @@ mod tests {
         async fn delete_cart_unknown_uuid_returns_not_found() {
             let ctx = TestContext::new().await;
 
-            let result = ctx.carts.delete_cart(ctx.tenant_uuid, Uuid::now_v7()).await;
+            let result = ctx
+                .carts
+                .delete_cart(ctx.tenant_uuid, CartUuid::new())
+                .await;
 
             assert!(
                 matches!(result, Err(CartsServiceError::NotFound)),
@@ -362,16 +373,18 @@ mod tests {
     }
 
     mod add_item {
+        use crate::domain::products::models::ProductUuid;
+
         use super::*;
 
         #[tokio::test]
         async fn adding_item_to_cart() -> TestResult {
             let ctx = TestContext::new().await;
 
-            let product = create_product(&ctx, ctx.tenant_uuid, Uuid::now_v7(), 10_00).await?;
-            let cart = create_cart(&ctx, ctx.tenant_uuid, Uuid::now_v7()).await?;
+            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
+            let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
 
-            let uuid = Uuid::now_v7();
+            let uuid = CartItemUuid::new();
             let item = add_item(&ctx, ctx.tenant_uuid, cart.uuid, product.uuid, uuid).await?;
 
             assert_eq!(item.uuid, uuid);
@@ -385,10 +398,10 @@ mod tests {
         #[tokio::test]
         async fn adding_same_product_twice_creates_two_distinct_items() -> TestResult {
             let ctx = TestContext::new().await;
-            let product = create_product(&ctx, ctx.tenant_uuid, Uuid::now_v7(), 10_00).await?;
-            let cart = create_cart(&ctx, ctx.tenant_uuid, Uuid::now_v7()).await?;
+            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
+            let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
 
-            let uuid = Uuid::now_v7();
+            let uuid = CartItemUuid::new();
 
             let item_1 = add_item(&ctx, ctx.tenant_uuid, cart.uuid, product.uuid, uuid).await?;
             let item_2 = add_item(
@@ -396,7 +409,7 @@ mod tests {
                 ctx.tenant_uuid,
                 cart.uuid,
                 product.uuid,
-                Uuid::now_v7(),
+                CartItemUuid::new(),
             )
             .await?;
 
@@ -409,14 +422,14 @@ mod tests {
         #[tokio::test]
         async fn adding_item_with_unknown_product_returns_not_found() -> TestResult {
             let ctx = TestContext::new().await;
-            let cart = create_cart(&ctx, ctx.tenant_uuid, Uuid::now_v7()).await?;
+            let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
 
             let result = add_item(
                 &ctx,
                 ctx.tenant_uuid,
                 cart.uuid,
-                Uuid::now_v7(),
-                Uuid::now_v7(),
+                ProductUuid::new(),
+                CartItemUuid::new(),
             )
             .await;
 
@@ -431,12 +444,13 @@ mod tests {
         #[tokio::test]
         async fn item_not_added_to_other_tenants_cart() -> TestResult {
             let ctx = TestContext::new().await;
-            let cart = create_cart(&ctx, ctx.tenant_uuid, Uuid::now_v7()).await?;
-            let product = create_product(&ctx, ctx.tenant_uuid, Uuid::now_v7(), 10_00).await?;
+            let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
+            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
 
             let tenant_b = ctx.create_tenant("Tenant B").await;
 
-            let result = add_item(&ctx, tenant_b, cart.uuid, product.uuid, Uuid::now_v7()).await;
+            let result =
+                add_item(&ctx, tenant_b, cart.uuid, product.uuid, CartItemUuid::new()).await;
 
             assert!(
                 matches!(result, Err(CartsServiceError::NotFound)),
@@ -448,20 +462,22 @@ mod tests {
     }
 
     mod remove_item {
+        use crate::domain::products::models::ProductUuid;
+
         use super::*;
 
         #[tokio::test]
         async fn remove_item_success() -> TestResult {
             let ctx = TestContext::new().await;
-            let cart = create_cart(&ctx, ctx.tenant_uuid, Uuid::now_v7()).await?;
-            let product = create_product(&ctx, ctx.tenant_uuid, Uuid::now_v7(), 10_00).await?;
+            let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
+            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
 
             let item = add_item(
                 &ctx,
                 ctx.tenant_uuid,
                 cart.uuid,
                 product.uuid,
-                Uuid::now_v7(),
+                CartItemUuid::new(),
             )
             .await?;
 
@@ -477,19 +493,19 @@ mod tests {
         #[tokio::test]
         async fn remove_item_not_exist_errors() -> TestResult {
             let ctx = TestContext::new().await;
-            let cart = create_cart(&ctx, ctx.tenant_uuid, Uuid::now_v7()).await?;
-            let product = create_product(&ctx, ctx.tenant_uuid, Uuid::now_v7(), 10_00).await?;
+            let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
+            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
 
             add_item(
                 &ctx,
                 ctx.tenant_uuid,
                 cart.uuid,
                 product.uuid,
-                Uuid::now_v7(),
+                CartItemUuid::new(),
             )
             .await?;
 
-            let result = remove_item(&ctx, ctx.tenant_uuid, cart.uuid, Uuid::now_v7()).await;
+            let result = remove_item(&ctx, ctx.tenant_uuid, cart.uuid, CartItemUuid::new()).await;
 
             assert!(
                 matches!(result, Err(CartsServiceError::NotFound)),
@@ -502,15 +518,15 @@ mod tests {
         #[tokio::test]
         async fn item_not_removed_from_other_tenants_cart() -> TestResult {
             let ctx = TestContext::new().await;
-            let cart = create_cart(&ctx, ctx.tenant_uuid, Uuid::now_v7()).await?;
-            let product = create_product(&ctx, ctx.tenant_uuid, Uuid::now_v7(), 10_00).await?;
+            let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
+            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
 
             let item = add_item(
                 &ctx,
                 ctx.tenant_uuid,
                 cart.uuid,
                 product.uuid,
-                Uuid::now_v7(),
+                CartItemUuid::new(),
             )
             .await?;
 

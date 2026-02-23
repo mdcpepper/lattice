@@ -49,17 +49,17 @@ mod tests {
     use jiff::Timestamp;
     use salvo::test::{ResponseExt, TestClient};
     use testresult::TestResult;
-    use uuid::Uuid;
 
     use lattice_app::domain::products::{
-        MockProductsService, ProductsServiceError, models::Product,
+        MockProductsService, ProductsServiceError,
+        models::{Product, ProductUuid},
     };
 
     use crate::test_helpers::{TEST_TENANT_UUID, products_service};
 
     use super::*;
 
-    fn make_product(uuid: Uuid, price: u64) -> Product {
+    fn make_product(uuid: ProductUuid, price: u64) -> Product {
         Product {
             uuid,
             price,
@@ -123,8 +123,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_returns_products() -> TestResult {
-        let uuid_a = Uuid::now_v7();
-        let uuid_b = Uuid::now_v7();
+        let uuid_b = ProductUuid::new();
+        let uuid_a = ProductUuid::new();
 
         let mut repo = MockProductsService::new();
 
@@ -147,8 +147,8 @@ mod tests {
             .await?;
 
         assert_eq!(response.products.len(), 2, "expected two products");
-        assert_eq!(response.products[0].uuid, uuid_a);
-        assert_eq!(response.products[1].uuid, uuid_b);
+        assert_eq!(response.products[0].uuid, uuid_a.into_uuid());
+        assert_eq!(response.products[1].uuid, uuid_b.into_uuid());
 
         Ok(())
     }

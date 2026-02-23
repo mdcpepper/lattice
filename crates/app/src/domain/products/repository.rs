@@ -5,7 +5,7 @@ use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
 use uuid::Uuid;
 
-use crate::domain::products::models::Product;
+use crate::domain::products::models::{Product, ProductDetailsUuid, ProductUuid};
 
 const LIST_PRODUCTS_SQL: &str = include_str!("sql/list_products.sql");
 const GET_PRODUCT_SQL: &str = include_str!("sql/get_product.sql");
@@ -37,11 +37,11 @@ impl PgProductsRepository {
     pub(crate) async fn get_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        uuid: Uuid,
+        product: ProductUuid,
         point_in_time: Timestamp,
     ) -> Result<Product, sqlx::Error> {
         query_as::<Postgres, Product>(GET_PRODUCT_SQL)
-            .bind(uuid)
+            .bind(product.into_uuid())
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_one(&mut **tx)
             .await
@@ -50,7 +50,7 @@ impl PgProductsRepository {
     pub(crate) async fn create_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        uuid: Uuid,
+        product: ProductUuid,
         price: u64,
     ) -> Result<Product, sqlx::Error> {
         let price_i64 = i64::try_from(price).map_err(|e| sqlx::Error::ColumnDecode {
@@ -64,7 +64,7 @@ impl PgProductsRepository {
             SqlxTimestamp,
             Option<SqlxTimestamp>,
         ) = query_as(CREATE_PRODUCT_SQL)
-            .bind(uuid)
+            .bind(product.into_uuid())
             .fetch_one(&mut **tx)
             .await?;
 
@@ -76,7 +76,7 @@ impl PgProductsRepository {
             .await?;
 
         Ok(Product {
-            uuid: created_uuid,
+            uuid: product,
             price,
             created_at: created_at.to_jiff(),
             updated_at: updated_at.to_jiff(),
@@ -87,11 +87,11 @@ impl PgProductsRepository {
     pub(crate) async fn update_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        uuid: Uuid,
-        product_detail_uuid: Option<Uuid>,
+        product: ProductUuid,
+        product_details: Option<ProductDetailsUuid>,
         price: u64,
     ) -> Result<Product, sqlx::Error> {
-        let product_detail_uuid = product_detail_uuid.unwrap_or_else(Uuid::now_v7);
+        let product_details = product_details.unwrap_or_else(ProductDetailsUuid::new);
 
         let price_i64 = i64::try_from(price).map_err(|e| sqlx::Error::ColumnDecode {
             index: "price".to_string(),
@@ -99,8 +99,8 @@ impl PgProductsRepository {
         })?;
 
         query_as::<Postgres, Product>(UPDATE_PRODUCT_SQL)
-            .bind(uuid)
-            .bind(product_detail_uuid)
+            .bind(product.into_uuid())
+            .bind(product_details.into_uuid())
             .bind(price_i64)
             .fetch_one(&mut **tx)
             .await
@@ -109,10 +109,10 @@ impl PgProductsRepository {
     pub(crate) async fn delete_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        uuid: Uuid,
+        product: ProductUuid,
     ) -> Result<u64, sqlx::Error> {
         let rows_affected = query(DELETE_PRODUCT_SQL)
-            .bind(uuid)
+            .bind(product.into_uuid())
             .execute(&mut **tx)
             .await?
             .rows_affected();
@@ -131,7 +131,7 @@ impl<'r> FromRow<'r, PgRow> for Product {
         })?;
 
         Ok(Self {
-            uuid: row.try_get("uuid")?,
+            uuid: ProductUuid::from_uuid(row.try_get("uuid")?),
             price,
             created_at: row.try_get::<SqlxTimestamp, _>("created_at")?.to_jiff(),
             updated_at: row.try_get::<SqlxTimestamp, _>("updated_at")?.to_jiff(),

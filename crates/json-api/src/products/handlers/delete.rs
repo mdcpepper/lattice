@@ -29,7 +29,7 @@ pub(crate) async fn handler(
     state
         .app
         .products
-        .delete_product(tenant, product.into_inner())
+        .delete_product(tenant, product.into_inner().into())
         .await
         .map_err(into_status_error)?;
 
@@ -41,11 +41,13 @@ mod tests {
     use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use lattice_app::domain::products::{MockProductsService, ProductsServiceError};
+    use lattice_app::domain::products::{
+        MockProductsService, ProductsServiceError, models::ProductUuid,
+    };
 
-    use crate::test_helpers::{TEST_TENANT_UUID, products_service};
+    use crate::test_helpers::{TEST_TENANT_UUID, make_product, products_service};
 
-    use super::{super::tests::*, *};
+    use super::*;
 
     fn make_service(repo: MockProductsService) -> Service {
         products_service(
@@ -56,7 +58,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_product_success() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         make_product(uuid);
 
@@ -102,7 +104,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_product_not_found_returns_404() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         let mut repo = MockProductsService::new();
 

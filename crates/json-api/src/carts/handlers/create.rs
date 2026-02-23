@@ -22,7 +22,9 @@ pub(crate) struct CreateCartRequest {
 
 impl From<CreateCartRequest> for NewCart {
     fn from(request: CreateCartRequest) -> Self {
-        NewCart { uuid: request.uuid }
+        NewCart {
+            uuid: request.uuid.into(),
+        }
     }
 }
 
@@ -65,7 +67,7 @@ pub(crate) async fn handler(
         .or_500("failed to set location header")?
         .status_code(StatusCode::CREATED);
 
-    Ok(Json(CartCreatedResponse { uuid }))
+    Ok(Json(CartCreatedResponse { uuid: uuid.into() }))
 }
 
 #[cfg(test)]
@@ -74,7 +76,7 @@ mod tests {
     use serde_json::json;
     use testresult::TestResult;
 
-    use lattice_app::domain::carts::{CartsServiceError, MockCartsService};
+    use lattice_app::domain::carts::{CartsServiceError, MockCartsService, models::CartUuid};
 
     use crate::test_helpers::{TEST_TENANT_UUID, carts_service, make_cart};
 
@@ -86,7 +88,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_cart_success() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = CartUuid::new();
         let cart = make_cart(uuid);
 
         let mut repo = MockCartsService::new();
@@ -100,7 +102,7 @@ mod tests {
         repo.expect_delete_cart().never();
 
         let mut res = TestClient::post("http://example.com/carts")
-            .json(&json!({ "uuid": uuid }))
+            .json(&json!({ "uuid": uuid.into_uuid() }))
             .send(&make_service(repo))
             .await;
 
@@ -109,14 +111,14 @@ mod tests {
 
         assert_eq!(res.status_code, Some(StatusCode::CREATED));
         assert_eq!(location, Some(format!("/carts/{uuid}").as_str()));
-        assert_eq!(body.uuid, uuid);
+        assert_eq!(body.uuid, uuid.into_uuid());
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_create_cart_conflict_returns_409() -> TestResult {
-        let uuid = Uuid::now_v7();
+        let uuid = CartUuid::new();
 
         let mut repo = MockCartsService::new();
 
@@ -129,7 +131,7 @@ mod tests {
         repo.expect_delete_cart().never();
 
         let res = TestClient::post("http://example.com/carts")
-            .json(&json!({ "uuid": uuid, "price": 100 }))
+            .json(&json!({ "uuid": uuid.into_uuid(), "price": 100 }))
             .send(&make_service(repo))
             .await;
 

@@ -3,9 +3,8 @@
 use jiff::Timestamp;
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
-use uuid::Uuid;
 
-use crate::domain::carts::models::Cart;
+use crate::domain::carts::models::{Cart, CartUuid};
 
 const GET_CART_SQL: &str = include_str!("../sql/get_cart.sql");
 const CREATE_CART_SQL: &str = include_str!("../sql/create_cart.sql");
@@ -23,11 +22,11 @@ impl PgCartsRepository {
     pub(crate) async fn get_cart(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        uuid: Uuid,
+        cart: CartUuid,
         point_in_time: Timestamp,
     ) -> Result<Cart, sqlx::Error> {
         query_as::<Postgres, Cart>(GET_CART_SQL)
-            .bind(uuid)
+            .bind(cart.into_uuid())
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_one(&mut **tx)
             .await
@@ -36,10 +35,10 @@ impl PgCartsRepository {
     pub(crate) async fn create_cart(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        uuid: Uuid,
+        cart: CartUuid,
     ) -> Result<Cart, sqlx::Error> {
         query_as::<Postgres, Cart>(CREATE_CART_SQL)
-            .bind(uuid)
+            .bind(cart.into_uuid())
             .fetch_one(&mut **tx)
             .await
     }
@@ -47,10 +46,10 @@ impl PgCartsRepository {
     pub(crate) async fn delete_cart(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        uuid: Uuid,
+        cart: CartUuid,
     ) -> Result<u64, sqlx::Error> {
         let rows_affected = query(DELETE_CART_SQL)
-            .bind(uuid)
+            .bind(cart.into_uuid())
             .execute(&mut **tx)
             .await?
             .rows_affected();
@@ -67,7 +66,7 @@ impl<'r> FromRow<'r, PgRow> for Cart {
         let cart_items_count: i64 = row.try_get("cart_items_count")?;
 
         Ok(Self {
-            uuid: row.try_get("uuid")?,
+            uuid: CartUuid::from_uuid(row.try_get("uuid")?),
             subtotal,
             total,
             items: Vec::with_capacity(cart_items_count as usize),

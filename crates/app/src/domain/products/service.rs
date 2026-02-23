@@ -3,14 +3,13 @@
 use async_trait::async_trait;
 use jiff::Timestamp;
 use mockall::automock;
-use uuid::Uuid;
 
 use crate::{
     database::Db,
     domain::{
         products::{
             errors::ProductsServiceError,
-            models::{NewProduct, Product, ProductUpdate},
+            models::{NewProduct, Product, ProductUpdate, ProductUuid},
             repository::PgProductsRepository,
         },
         tenants::models::TenantUuid,
@@ -55,14 +54,14 @@ impl ProductsService for PgProductsService {
     async fn get_product(
         &self,
         tenant: TenantUuid,
-        uuid: Uuid,
+        product: ProductUuid,
         point_in_time: Timestamp,
     ) -> Result<Product, ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let product = self
             .repository
-            .get_product(&mut tx, uuid, point_in_time)
+            .get_product(&mut tx, product, point_in_time)
             .await?;
 
         tx.commit().await?;
@@ -90,14 +89,14 @@ impl ProductsService for PgProductsService {
     async fn update_product(
         &self,
         tenant: TenantUuid,
-        uuid: Uuid,
+        product: ProductUuid,
         update: ProductUpdate,
     ) -> Result<Product, ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let updated = self
             .repository
-            .update_product(&mut tx, uuid, update.uuid, update.price)
+            .update_product(&mut tx, product, update.uuid, update.price)
             .await?;
 
         tx.commit().await?;
@@ -108,11 +107,11 @@ impl ProductsService for PgProductsService {
     async fn delete_product(
         &self,
         tenant: TenantUuid,
-        uuid: Uuid,
+        product: ProductUuid,
     ) -> Result<(), ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let rows_affected = self.repository.delete_product(&mut tx, uuid).await?;
+        let rows_affected = self.repository.delete_product(&mut tx, product).await?;
 
         if rows_affected == 0 {
             return Err(ProductsServiceError::NotFound);
@@ -138,7 +137,7 @@ pub trait ProductsService: Send + Sync {
     async fn get_product(
         &self,
         tenant: TenantUuid,
-        uuid: Uuid,
+        product: ProductUuid,
         point_in_time: Timestamp,
     ) -> Result<Product, ProductsServiceError>;
 
@@ -153,7 +152,7 @@ pub trait ProductsService: Send + Sync {
     async fn update_product(
         &self,
         tenant: TenantUuid,
-        uuid: Uuid,
+        product: ProductUuid,
         update: ProductUpdate,
     ) -> Result<Product, ProductsServiceError>;
 
@@ -161,7 +160,7 @@ pub trait ProductsService: Send + Sync {
     async fn delete_product(
         &self,
         tenant: TenantUuid,
-        uuid: Uuid,
+        product: ProductUuid,
     ) -> Result<(), ProductsServiceError>;
 }
 
@@ -169,7 +168,6 @@ pub trait ProductsService: Send + Sync {
 mod tests {
     use jiff::Timestamp;
     use testresult::TestResult;
-    use uuid::Uuid;
 
     use crate::{
         domain::products::models::{NewProduct, ProductUpdate},
@@ -181,7 +179,7 @@ mod tests {
     #[tokio::test]
     async fn create_product_returns_correct_uuid_and_price() -> TestResult {
         let ctx = TestContext::new().await;
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         let product = ctx
             .products
@@ -198,7 +196,7 @@ mod tests {
     #[tokio::test]
     async fn get_product_returns_created_product() -> TestResult {
         let ctx = TestContext::new().await;
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 1500 })
@@ -222,7 +220,7 @@ mod tests {
 
         let result = ctx
             .products
-            .get_product(ctx.tenant_uuid, Uuid::now_v7(), Timestamp::now())
+            .get_product(ctx.tenant_uuid, ProductUuid::new(), Timestamp::now())
             .await;
 
         assert!(
@@ -235,8 +233,8 @@ mod tests {
     async fn list_products_returns_created_products() -> TestResult {
         let ctx = TestContext::new().await;
 
-        let uuid_a = Uuid::now_v7();
-        let uuid_b = Uuid::now_v7();
+        let uuid_a = ProductUuid::new();
+        let uuid_b = ProductUuid::new();
 
         ctx.products
             .create_product(
@@ -263,7 +261,7 @@ mod tests {
             .list_products(ctx.tenant_uuid, Timestamp::now())
             .await?;
 
-        let uuids: Vec<Uuid> = products.iter().map(|p| p.uuid).collect();
+        let uuids: Vec<ProductUuid> = products.iter().map(|p| p.uuid).collect();
 
         assert!(uuids.contains(&uuid_a), "product A should be in the list");
         assert!(uuids.contains(&uuid_b), "product B should be in the list");
@@ -288,7 +286,7 @@ mod tests {
     #[tokio::test]
     async fn update_product_reflects_new_price() -> TestResult {
         let ctx = TestContext::new().await;
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 500 })
@@ -320,7 +318,7 @@ mod tests {
             .products
             .update_product(
                 ctx.tenant_uuid,
-                Uuid::now_v7(),
+                ProductUuid::new(),
                 ProductUpdate {
                     uuid: None,
                     price: 100,
@@ -337,7 +335,7 @@ mod tests {
     #[tokio::test]
     async fn delete_product_makes_it_not_found() -> TestResult {
         let ctx = TestContext::new().await;
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 300 })
@@ -364,7 +362,7 @@ mod tests {
 
         let result = ctx
             .products
-            .delete_product(ctx.tenant_uuid, Uuid::now_v7())
+            .delete_product(ctx.tenant_uuid, ProductUuid::new())
             .await;
 
         assert!(
@@ -376,7 +374,7 @@ mod tests {
     #[tokio::test]
     async fn create_product_duplicate_uuid_returns_already_exists() -> TestResult {
         let ctx = TestContext::new().await;
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 100 })
@@ -404,7 +402,7 @@ mod tests {
             .create_product(
                 ctx.tenant_uuid,
                 NewProduct {
-                    uuid: Uuid::now_v7(),
+                    uuid: ProductUuid::new(),
                     price: 100,
                 },
             )
@@ -429,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn deleted_product_not_returned_in_list() -> TestResult {
         let ctx = TestContext::new().await;
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         ctx.products
             .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 100 })

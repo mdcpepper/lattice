@@ -37,7 +37,7 @@ pub(crate) struct ProductResponse {
 impl From<Product> for ProductResponse {
     fn from(product: Product) -> Self {
         ProductResponse {
-            uuid: product.uuid,
+            uuid: product.uuid.into(),
             price: product.price,
             created_at: product.created_at.to_string(),
             updated_at: product.updated_at.to_string(),
@@ -66,7 +66,7 @@ pub(crate) async fn handler(
     let product = state
         .app
         .products
-        .get_product(tenant, product.into_inner(), point_in_time)
+        .get_product(tenant, product.into_inner().into(), point_in_time)
         .await
         .map_err(into_status_error)?;
 
@@ -79,12 +79,11 @@ mod tests {
     use salvo::test::TestClient;
     use testresult::TestResult;
 
-    use lattice_app::domain::products::{MockProductsService, ProductsServiceError};
-
-    use crate::{
-        products::handlers::tests::make_product,
-        test_helpers::{TEST_TENANT_UUID, products_service},
+    use lattice_app::domain::products::{
+        MockProductsService, ProductsServiceError, models::ProductUuid,
     };
+
+    use crate::test_helpers::{TEST_TENANT_UUID, make_product, products_service};
 
     use super::*;
 
@@ -95,7 +94,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_returns_200() -> TestResult {
         let mut repo = MockProductsService::new();
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         let product = make_product(uuid);
 
@@ -121,7 +120,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_missing_product_returns_404() -> TestResult {
         let mut repo = MockProductsService::new();
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         repo.expect_get_product()
             .once()
@@ -145,7 +144,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_invalid_data_returns_400() -> TestResult {
         let mut repo = MockProductsService::new();
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
 
         repo.expect_get_product()
             .once()
@@ -169,7 +168,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_forwards_point_in_time_query_param() -> TestResult {
         let mut repo = MockProductsService::new();
-        let uuid = Uuid::now_v7();
+        let uuid = ProductUuid::new();
         let at: Timestamp = "2026-02-21T12:00:00Z".parse()?;
         let product = make_product(uuid);
 

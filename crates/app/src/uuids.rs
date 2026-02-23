@@ -7,11 +7,17 @@ use std::{
     marker::PhantomData,
 };
 
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Serialize, Deserialize)]
 pub struct TypedUuid<T>(Uuid, PhantomData<T>);
 
 impl<T> TypedUuid<T> {
+    pub fn new() -> Self {
+        Self(Uuid::now_v7(), PhantomData)
+    }
+
     pub const fn from_uuid(uuid: Uuid) -> Self {
         Self(uuid, PhantomData)
     }

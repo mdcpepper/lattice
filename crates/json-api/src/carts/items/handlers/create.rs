@@ -24,8 +24,8 @@ pub(crate) struct CreateCartItemRequest {
 impl From<CreateCartItemRequest> for NewCartItem {
     fn from(request: CreateCartItemRequest) -> Self {
         NewCartItem {
-            uuid: request.uuid,
-            product_uuid: request.product_uuid,
+            uuid: request.uuid.into(),
+            product_uuid: request.product_uuid.into(),
         }
     }
 }
@@ -64,7 +64,7 @@ pub(crate) async fn handler(
     let item = state
         .app
         .carts
-        .add_item(tenant, cart, json.into_inner().into())
+        .add_item(tenant, cart.into(), json.into_inner().into())
         .await
         .map_err(into_status_error)?
         .uuid;
@@ -73,5 +73,5 @@ pub(crate) async fn handler(
         .or_500("failed to set location header")?
         .status_code(StatusCode::CREATED);
 
-    Ok(Json(CartItemCreatedResponse { uuid: item }))
+    Ok(Json(CartItemCreatedResponse { uuid: item.into() }))
 }
