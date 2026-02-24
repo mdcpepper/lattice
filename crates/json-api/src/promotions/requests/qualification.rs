@@ -1,9 +1,15 @@
 //! Promotion Qualification Requests
 
+use salvo::oapi::ToSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Default, Debug, Clone, Serialize, Deserialize, PartialEq)]
+use lattice_app::domain::promotions::data::qualification::{
+    NewQualification, NewQualificationRule, QualificationContext, QualificationOp,
+};
+
+/// Qualification Context Request
+#[derive(Default, Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum QualificationContextRequest {
     #[default]
@@ -11,17 +17,35 @@ pub enum QualificationContextRequest {
     Group,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+impl From<QualificationContextRequest> for QualificationContext {
+    fn from(request: QualificationContextRequest) -> Self {
+        match request {
+            QualificationContextRequest::Primary => QualificationContext::Primary,
+            QualificationContextRequest::Group => QualificationContext::Group,
+        }
+    }
+}
+
+/// Qualification Operation Request
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum QualificationOpRequest {
     And,
     Or,
 }
 
-/// A boolean expression node. Nesting is expressed by having `Group` rules contain
-/// another `Qualification`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct QualificationRequest {
+impl From<QualificationOpRequest> for QualificationOp {
+    fn from(request: QualificationOpRequest) -> Self {
+        match request {
+            QualificationOpRequest::And => QualificationOp::And,
+            QualificationOpRequest::Or => QualificationOp::Or,
+        }
+    }
+}
+
+/// Create Qualification Request
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+pub struct CreateQualificationRequest {
     pub uuid: Uuid,
 
     #[serde(default)]
@@ -29,14 +53,24 @@ pub struct QualificationRequest {
 
     pub op: QualificationOpRequest,
 
-    /// Ordered rules. Array order is your `sort_order`.
     #[serde(default)]
-    pub rules: Vec<QualificationRuleRequest>,
+    pub rules: Vec<CreateQualificationRuleRequest>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+impl From<CreateQualificationRequest> for NewQualification {
+    fn from(request: CreateQualificationRequest) -> Self {
+        NewQualification {
+            uuid: request.uuid.into(),
+            context: request.context.into(),
+            rules: request.rules.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// Create Qualification Rule Request
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum QualificationRuleRequest {
+pub enum CreateQualificationRuleRequest {
     HasAll {
         uuid: Uuid,
         tags: Vec<String>,
@@ -51,9 +85,36 @@ pub enum QualificationRuleRequest {
         tags: Vec<String>,
     },
 
-    /// Nested node
     Group {
         uuid: Uuid,
-        qualification: QualificationRequest,
+        qualification: CreateQualificationRequest,
     },
+}
+
+impl From<CreateQualificationRuleRequest> for NewQualificationRule {
+    fn from(request: CreateQualificationRuleRequest) -> Self {
+        match request {
+            CreateQualificationRuleRequest::HasAll { uuid, tags } => NewQualificationRule::HasAll {
+                uuid: uuid.into(),
+                tags,
+            },
+            CreateQualificationRuleRequest::HasAny { uuid, tags } => NewQualificationRule::HasAny {
+                uuid: uuid.into(),
+                tags,
+            },
+            CreateQualificationRuleRequest::HasNone { uuid, tags } => {
+                NewQualificationRule::HasNone {
+                    uuid: uuid.into(),
+                    tags,
+                }
+            }
+            CreateQualificationRuleRequest::Group {
+                uuid,
+                qualification,
+            } => NewQualificationRule::Group {
+                uuid: uuid.into(),
+                qualification: qualification.into(),
+            },
+        }
+    }
 }

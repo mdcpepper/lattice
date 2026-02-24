@@ -10,6 +10,7 @@ use crate::{
     domain::{
         carts::{CartsService, PgCartsService},
         products::{PgProductsService, ProductsService},
+        promotions::service::{PgPromotionsService, PromotionsService},
     },
 };
 
@@ -23,6 +24,7 @@ pub enum AppInitError {
 pub struct AppContext {
     pub carts: Arc<dyn CartsService>,
     pub products: Arc<dyn ProductsService>,
+    pub promotions: Arc<dyn PromotionsService>,
     pub auth: Arc<dyn AuthService>,
 }
 
@@ -48,7 +50,8 @@ impl AppContext {
 
         Ok(Self {
             carts: Arc::new(PgCartsService::new(db.clone())),
-            products: Arc::new(PgProductsService::new(db)),
+            products: Arc::new(PgProductsService::new(db.clone())),
+            promotions: Arc::new(PgPromotionsService::new(db)),
             auth: Arc::new(PgAuthService::new(pool, openbao)),
         })
     }

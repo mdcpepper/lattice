@@ -1,10 +1,10 @@
 //! Products
 
 pub mod data;
-pub mod errors;
+mod errors;
 pub mod records;
 mod repository;
-pub mod service;
+mod service;
 
 pub use errors::ProductsServiceError;
 pub use service::*;

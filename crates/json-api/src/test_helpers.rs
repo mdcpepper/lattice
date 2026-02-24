@@ -18,6 +18,7 @@ use lattice_app::{
             MockProductsService,
             records::{ProductRecord, ProductUuid},
         },
+        promotions::service::MockPromotionsService,
         tenants::records::TenantUuid,
     },
 };
@@ -68,10 +69,19 @@ fn strict_products_mock() -> MockProductsService {
     products
 }
 
+fn strict_promotions_mock() -> MockPromotionsService {
+    let mut promotions = MockPromotionsService::new();
+
+    promotions.expect_create_promotion().never();
+
+    promotions
+}
+
 pub(crate) fn state_with_auth(auth: MockAuthService) -> Arc<State> {
     Arc::new(State::new(AppContext {
         carts: Arc::new(strict_carts_mock()),
         products: Arc::new(strict_products_mock()),
+        promotions: Arc::new(strict_promotions_mock()),
         auth: Arc::new(auth),
     }))
 }
@@ -80,6 +90,7 @@ pub(crate) fn state_with_carts(carts: MockCartsService) -> Arc<State> {
     Arc::new(State::new(AppContext {
         carts: Arc::new(carts),
         products: Arc::new(strict_products_mock()),
+        promotions: Arc::new(strict_promotions_mock()),
         auth: Arc::new(strict_auth_mock()),
     }))
 }
@@ -88,6 +99,16 @@ pub(crate) fn state_with_products(products: MockProductsService) -> Arc<State> {
     Arc::new(State::new(AppContext {
         carts: Arc::new(strict_carts_mock()),
         products: Arc::new(products),
+        promotions: Arc::new(strict_promotions_mock()),
+        auth: Arc::new(strict_auth_mock()),
+    }))
+}
+
+pub(crate) fn state_with_promotions(promotions: MockPromotionsService) -> Arc<State> {
+    Arc::new(State::new(AppContext {
+        carts: Arc::new(strict_carts_mock()),
+        products: Arc::new(strict_products_mock()),
+        promotions: Arc::new(promotions),
         auth: Arc::new(strict_auth_mock()),
     }))
 }
@@ -96,6 +117,15 @@ pub(crate) fn products_service(products: MockProductsService, route: Router) -> 
     Service::new(
         Router::new()
             .hoop(inject(state_with_products(products)))
+            .hoop(inject_tenant)
+            .push(route),
+    )
+}
+
+pub(crate) fn promotions_service(promotions: MockPromotionsService, route: Router) -> Service {
+    Service::new(
+        Router::new()
+            .hoop(inject(state_with_promotions(promotions)))
             .hoop(inject_tenant)
             .push(route),
     )

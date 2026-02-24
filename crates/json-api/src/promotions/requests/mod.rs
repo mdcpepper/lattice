@@ -1,23 +1,47 @@
 //! Promotions Requests
 
+use lattice_app::domain::promotions::{data::NewPromotion, records::PromotionUuid};
+use salvo::oapi::ToSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::promotions::requests::{
-    budgets::BudgetsRequest, discounts::SimpleDiscountRequest, qualification::QualificationRequest,
+    budgets::BudgetsRequest, discounts::SimpleDiscountRequest,
+    qualification::CreateQualificationRequest,
 };
 
 pub(crate) mod budgets;
 pub(crate) mod discounts;
 pub(crate) mod qualification;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Create Promotion Request
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum PromotionRequest {
+pub enum CreatePromotionRequest {
     DirectDiscount {
+        uuid: Uuid,
         budgets: BudgetsRequest,
         discount: SimpleDiscountRequest,
-        qualification: Option<QualificationRequest>,
+        qualification: Option<CreateQualificationRequest>,
     },
+}
+
+impl From<CreatePromotionRequest> for NewPromotion {
+    fn from(request: CreatePromotionRequest) -> Self {
+        match request {
+            CreatePromotionRequest::DirectDiscount {
+                uuid,
+                budgets,
+                discount,
+                qualification,
+            } => NewPromotion::DirectDiscount {
+                uuid: PromotionUuid::from_uuid(uuid),
+                budgets: budgets.into(),
+                discount: discount.into(),
+                qualification: qualification.map(Into::into),
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -28,7 +52,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::promotions::requests::qualification::{
-        QualificationContextRequest, QualificationOpRequest, QualificationRuleRequest,
+        CreateQualificationRuleRequest, QualificationContextRequest, QualificationOpRequest,
     };
 
     use super::*;
@@ -38,9 +62,10 @@ mod tests {
         let json = r#"
             {
                 "type": "direct_discount",
+                "uuid": "019c8e08-0000-7000-8000-000000000001",
                 "budgets": {
-                    "application_budget": 1000,
-                    "monetary_budget": 5000
+                    "redemptions": 1000,
+                    "monetary": 5000
                 },
                 "discount": {
                     "type": "percentage_off",
@@ -66,26 +91,27 @@ mod tests {
             }
         "#;
 
-        let promotion_request: PromotionRequest = serde_json::from_str(json)?;
+        let promotion_request: CreatePromotionRequest = serde_json::from_str(json)?;
 
         assert_eq!(
             promotion_request,
-            PromotionRequest::DirectDiscount {
+            CreatePromotionRequest::DirectDiscount {
+                uuid: Uuid::from_str("019c8e08-0000-7000-8000-000000000001")?,
                 budgets: BudgetsRequest {
-                    application_budget: Some(1000),
-                    monetary_budget: Some(5000),
+                    redemptions: Some(1000),
+                    monetary: Some(5000),
                 },
                 discount: SimpleDiscountRequest::PercentageOff { percentage: 50 },
-                qualification: Some(QualificationRequest {
+                qualification: Some(CreateQualificationRequest {
                     uuid: Uuid::from_str("019c8e09-321a-7b0e-8ad1-27a98a4e4dc5")?,
                     context: QualificationContextRequest::Primary,
                     op: QualificationOpRequest::And,
                     rules: vec![
-                        QualificationRuleRequest::HasAny {
+                        CreateQualificationRuleRequest::HasAny {
                             uuid: Uuid::from_str("019c8e0b-485e-7a3e-80dc-a500783fc2e1")?,
                             tags: vec!["include".to_string()]
                         },
-                        QualificationRuleRequest::HasNone {
+                        CreateQualificationRuleRequest::HasNone {
                             uuid: Uuid::from_str("019c8e0b-5916-71bc-997b-3bd2e613af45")?,
                             tags: vec!["except".to_string()]
                         }

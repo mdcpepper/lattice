@@ -1,25 +1,36 @@
-SET LOCAL lock_timeout = '5s';
+SET
+  LOCAL lock_timeout = '5s';
 
 CREATE TABLE api_tokens (
-    uuid uuid PRIMARY KEY,
+  uuid UUID PRIMARY KEY,
 
-    tenant_uuid  uuid NOT NULL,
-    version      smallint NOT NULL DEFAULT 1 CHECK (version > 0),
-    token_hash   text NOT NULL,
+  tenant_uuid UUID NOT NULL DEFAULT NULLIF(
+    current_setting('app.current_tenant_uuid', TRUE),
+    ''
+  )::uuid,
 
-    created_at   timestamptz NOT NULL DEFAULT now(),
-    last_used_at timestamptz,
-    expires_at   timestamptz,
-    revoked_at   timestamptz,
+  version SMALLINT NOT NULL DEFAULT 1 CHECK (version > 0),
+  token_hash TEXT NOT NULL,
 
-    CHECK (expires_at IS NULL OR expires_at > created_at),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
 
-    CONSTRAINT api_tokens_tenant_fk
-        FOREIGN KEY (tenant_uuid)
-        REFERENCES tenants (uuid)
-        ON DELETE CASCADE
+  CHECK (
+    expires_at IS NULL
+    OR expires_at > created_at
+  ),
+
+  CONSTRAINT api_tokens_tenant_fk FOREIGN KEY (tenant_uuid) REFERENCES tenants (uuid) ON DELETE CASCADE
 );
 
 CREATE INDEX api_tokens_tenant_uuid_idx ON api_tokens (tenant_uuid);
-CREATE INDEX api_tokens_expires_at_idx ON api_tokens (expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX api_tokens_active_tenant_idx ON api_tokens (tenant_uuid) WHERE revoked_at IS NULL;
+
+CREATE INDEX api_tokens_expires_at_idx ON api_tokens (expires_at)
+WHERE
+  expires_at IS NOT NULL;
+
+CREATE INDEX api_tokens_active_tenant_idx ON api_tokens (tenant_uuid)
+WHERE
+  revoked_at IS NULL;

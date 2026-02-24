@@ -2,4 +2,5 @@
 
 pub mod carts;
 pub mod products;
+pub mod promotions;
 pub mod tenants;
