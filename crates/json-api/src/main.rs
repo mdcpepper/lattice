@@ -35,6 +35,7 @@ mod config;
 mod extensions;
 mod healthcheck;
 mod products;
+mod promotions;
 mod router;
 mod shutdown;
 mod state;
