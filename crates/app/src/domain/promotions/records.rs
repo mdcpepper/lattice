@@ -21,15 +21,11 @@ pub type QualificationUuid = TypedUuid<QualificationRecord>;
 
 /// Qualification Record
 #[derive(Debug, Clone)]
-pub struct QualificationRecord {
-    pub uuid: QualificationUuid,
-}
+pub struct QualificationRecord {}
 
 /// Qualification Rule UUID
 pub type QualificationRuleUuid = TypedUuid<QualificationRuleRecord>;
 
 /// Qualification Rule Record
 #[derive(Debug, Clone)]
-pub struct QualificationRuleRecord {
-    pub uuid: QualificationRuleUuid,
-}
+pub struct QualificationRuleRecord {}

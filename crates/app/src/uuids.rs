@@ -18,6 +18,10 @@ impl<T> TypedUuid<T> {
         Self(Uuid::now_v7(), PhantomData)
     }
 
+    pub fn from_str(str: &str) -> Result<Self, uuid::Error> {
+        Ok(Self(Uuid::parse_str(str)?, PhantomData))
+    }
+
     pub const fn from_uuid(uuid: Uuid) -> Self {
         Self(uuid, PhantomData)
     }

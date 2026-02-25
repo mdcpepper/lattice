@@ -59,11 +59,19 @@ mod tests {
     use jiff::Timestamp;
     use salvo::test::{ResponseExt, TestClient};
     use serde_json::json;
+    use smallvec::smallvec;
     use testresult::TestResult;
 
     use lattice_app::domain::promotions::{
         PromotionsServiceError,
-        data::{NewPromotion, budgets::Budgets, discounts::SimpleDiscount},
+        data::{
+            Promotion,
+            budgets::Budgets,
+            discounts::SimpleDiscount,
+            qualification::{
+                Qualification, QualificationContext, QualificationOp, QualificationRule,
+            },
+        },
         records::{PromotionRecord, PromotionUuid},
         service::MockPromotionsService,
     };
@@ -87,8 +95,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_promotion_success() -> TestResult {
-        let uuid = PromotionUuid::new();
-        let promotion = make_promotion(uuid);
+        let promotion_uuid = PromotionUuid::new();
+        let promotion = make_promotion(promotion_uuid);
 
         let mut mock = MockPromotionsService::new();
 
@@ -97,14 +105,25 @@ mod tests {
             .withf(move |tenant, new| {
                 *tenant == TEST_TENANT_UUID
                     && *new
-                        == NewPromotion::DirectDiscount {
-                            uuid,
+                        == Promotion::DirectDiscount {
+                            uuid: promotion_uuid,
                             budgets: Budgets {
                                 redemptions: Some(100),
                                 monetary: None,
                             },
                             discount: SimpleDiscount::PercentageOff { percentage: 10 },
-                            qualification: None,
+                            qualification: Some(Qualification {
+                                context: QualificationContext::Primary,
+                                op: QualificationOp::And,
+                                rules: vec![
+                                    QualificationRule::HasAny {
+                                        tags: smallvec!["included".to_string()],
+                                    },
+                                    QualificationRule::HasNone {
+                                        tags: smallvec!["excluded".to_string()],
+                                    },
+                                ],
+                            }),
                         }
             })
             .return_once(move |_, _| Ok(promotion));
@@ -112,9 +131,23 @@ mod tests {
         let mut res = TestClient::post("http://example.com/promotions")
             .json(&json!({
                 "type": "direct_discount",
-                "uuid": uuid.into_uuid(),
+                "uuid": promotion_uuid.into_uuid(),
                 "budgets": { "redemptions": 100 },
-                "discount": { "type": "percentage_off", "percentage": 10 }
+                "discount": { "type": "percentage_off", "percentage": 10 },
+                "qualification": {
+                    "uuid": promotion_uuid.into_uuid(),
+                    "op": "and",
+                    "rules": [
+                        {
+                            "type": "has_any",
+                            "tags": ["included"]
+                        },
+                        {
+                            "type": "has_none",
+                            "tags": ["excluded"]
+                        }
+                    ]
+                }
             }))
             .send(&make_service(mock))
             .await;
@@ -123,8 +156,11 @@ mod tests {
         let location = res.headers().get("location").and_then(|v| v.to_str().ok());
 
         assert_eq!(res.status_code, Some(StatusCode::CREATED));
-        assert_eq!(location, Some(format!("/promotions/{uuid}").as_str()));
-        assert_eq!(body.uuid, uuid.into_uuid());
+        assert_eq!(
+            location,
+            Some(format!("/promotions/{promotion_uuid}").as_str())
+        );
+        assert_eq!(body.uuid, promotion_uuid.into_uuid());
 
         Ok(())
     }

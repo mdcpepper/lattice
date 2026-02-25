@@ -4,8 +4,12 @@ use crate::{
     database::Db,
     domain::{
         promotions::{
-            PromotionsServiceError, data::NewPromotion, records::PromotionRecord,
-            repositories::promotions::PgPromotionsRepository,
+            PromotionsServiceError,
+            data::Promotion,
+            records::PromotionRecord,
+            repositories::{
+                promotions::PgPromotionsRepository, qualifications::PgQualificationsRepository,
+            },
         },
         tenants::records::TenantUuid,
     },
@@ -16,7 +20,8 @@ use mockall::automock;
 #[derive(Debug, Clone)]
 pub struct PgPromotionsService {
     db: Db,
-    repository: PgPromotionsRepository,
+    promotions_repository: PgPromotionsRepository,
+    qualifications_repository: PgQualificationsRepository,
 }
 
 impl PgPromotionsService {
@@ -24,7 +29,8 @@ impl PgPromotionsService {
     pub fn new(db: Db) -> Self {
         Self {
             db,
-            repository: PgPromotionsRepository::new(),
+            promotions_repository: PgPromotionsRepository::new(),
+            qualifications_repository: PgQualificationsRepository::new(),
         }
     }
 }
@@ -34,11 +40,29 @@ impl PromotionsService for PgPromotionsService {
     async fn create_promotion(
         &self,
         tenant: TenantUuid,
-        promotion: NewPromotion,
+        promotion: Promotion,
     ) -> Result<PromotionRecord, PromotionsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
+        let mut promotion = promotion;
 
-        let record = self.repository.create_promotion(&mut tx, promotion).await?;
+        let (promotion_uuid, qualification) = match &mut promotion {
+            Promotion::DirectDiscount {
+                uuid,
+                qualification,
+                ..
+            } => (*uuid, qualification.take()),
+        };
+
+        let record = self
+            .promotions_repository
+            .create_promotion(&mut tx, promotion)
+            .await?;
+
+        if let Some(qual) = qualification {
+            self.qualifications_repository
+                .create_qualifications(&mut tx, promotion_uuid, &qual)
+                .await?;
+        }
 
         tx.commit().await?;
 
@@ -52,18 +76,26 @@ pub trait PromotionsService: Send + Sync {
     async fn create_promotion(
         &self,
         tenant: TenantUuid,
-        promotion: NewPromotion,
+        promotion: Promotion,
     ) -> Result<PromotionRecord, PromotionsServiceError>;
 }
 
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
+    use smallvec::smallvec;
     use testresult::TestResult;
 
     use crate::{
         domain::promotions::{
-            data::{NewPromotion, budgets::Budgets, discounts::SimpleDiscount},
+            data::{
+                Promotion,
+                budgets::Budgets,
+                discounts::SimpleDiscount,
+                qualification::{
+                    Qualification, QualificationContext, QualificationOp, QualificationRule,
+                },
+            },
             records::PromotionUuid,
         },
         test::TestContext,
@@ -80,7 +112,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                NewPromotion::DirectDiscount {
+                Promotion::DirectDiscount {
                     uuid,
                     budgets: Budgets {
                         redemptions: Some(100),
@@ -108,7 +140,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                NewPromotion::DirectDiscount {
+                Promotion::DirectDiscount {
                     uuid: PromotionUuid::new(),
                     budgets: Budgets {
                         redemptions: None,
@@ -136,7 +168,7 @@ mod tests {
         ctx.promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                NewPromotion::DirectDiscount {
+                Promotion::DirectDiscount {
                     uuid,
                     budgets: Budgets {
                         redemptions: Some(10),
@@ -152,7 +184,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                NewPromotion::DirectDiscount {
+                Promotion::DirectDiscount {
                     uuid,
                     budgets: Budgets {
                         redemptions: Some(20),
@@ -180,7 +212,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                NewPromotion::DirectDiscount {
+                Promotion::DirectDiscount {
                     uuid: PromotionUuid::new(),
                     budgets: Budgets {
                         redemptions: None,
@@ -206,7 +238,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                NewPromotion::DirectDiscount {
+                Promotion::DirectDiscount {
                     uuid: PromotionUuid::new(),
                     budgets: Budgets {
                         redemptions: None,
@@ -222,5 +254,83 @@ mod tests {
             matches!(result, Err(PromotionsServiceError::InvalidData)),
             "expected InvalidData, got {result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn create_promotion_with_qualification_succeeds() -> TestResult {
+        let ctx = TestContext::new().await;
+
+        let result = ctx
+            .promotions
+            .create_promotion(
+                ctx.tenant_uuid,
+                Promotion::DirectDiscount {
+                    uuid: PromotionUuid::new(),
+                    budgets: Budgets {
+                        redemptions: None,
+                        monetary: None,
+                    },
+                    discount: SimpleDiscount::PercentageOff { percentage: 10 },
+                    qualification: Some(Qualification {
+                        context: QualificationContext::Primary,
+                        op: QualificationOp::And,
+                        rules: vec![QualificationRule::HasAny {
+                            tags: smallvec!["sale".to_string()],
+                        }],
+                    }),
+                },
+            )
+            .await;
+
+        assert!(result.is_ok());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn create_promotion_with_nested_qualification_succeeds() -> TestResult {
+        let ctx = TestContext::new().await;
+
+        let result = ctx
+            .promotions
+            .create_promotion(
+                ctx.tenant_uuid,
+                Promotion::DirectDiscount {
+                    uuid: PromotionUuid::new(),
+                    budgets: Budgets {
+                        redemptions: None,
+                        monetary: None,
+                    },
+                    discount: SimpleDiscount::PercentageOff { percentage: 10 },
+                    qualification: Some(Qualification {
+                        context: QualificationContext::Primary,
+                        op: QualificationOp::Or,
+                        rules: vec![
+                            QualificationRule::HasAll {
+                                tags: smallvec!["clothing".to_string(), "sale".to_string()],
+                            },
+                            QualificationRule::Group {
+                                qualification: Qualification {
+                                    context: QualificationContext::Group,
+                                    op: QualificationOp::And,
+                                    rules: vec![
+                                        QualificationRule::HasAny {
+                                            tags: smallvec!["footwear".to_string()],
+                                        },
+                                        QualificationRule::HasNone {
+                                            tags: smallvec!["excluded".to_string()],
+                                        },
+                                    ],
+                                },
+                            },
+                        ],
+                    }),
+                },
+            )
+            .await;
+
+        assert!(result.is_ok());
+
+        Ok(())
     }
 }

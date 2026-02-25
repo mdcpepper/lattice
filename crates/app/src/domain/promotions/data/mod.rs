@@ -1,7 +1,7 @@
 //! Promotions Data
 
 use crate::domain::promotions::{
-    data::{budgets::Budgets, discounts::SimpleDiscount, qualification::NewQualification},
+    data::{budgets::Budgets, discounts::SimpleDiscount, qualification::Qualification},
     records::PromotionUuid,
 };
 
@@ -9,20 +9,20 @@ pub mod budgets;
 pub mod discounts;
 pub mod qualification;
 
-/// New Promotion Data
+/// Promotion Data
 #[derive(Debug, Clone, PartialEq)]
-pub enum NewPromotion {
+pub enum Promotion {
     DirectDiscount {
         uuid: PromotionUuid,
         budgets: Budgets,
         discount: SimpleDiscount,
-        qualification: Option<NewQualification>,
+        qualification: Option<Qualification>,
     },
 }
 
-impl NewPromotion {
+impl Promotion {
     #[must_use]
-    pub const fn kind_to_str(&self) -> &'static str {
+    pub const fn type_as_str(&self) -> &'static str {
         match self {
             Self::DirectDiscount { .. } => "direct",
         }

@@ -2,10 +2,10 @@
 
 use salvo::oapi::ToSchema;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use smallvec::SmallVec;
 
 use lattice_app::domain::promotions::data::qualification::{
-    NewQualification, NewQualificationRule, QualificationContext, QualificationOp,
+    Qualification, QualificationContext, QualificationOp, QualificationRule,
 };
 
 /// Qualification Context Request
@@ -46,8 +46,6 @@ impl From<QualificationOpRequest> for QualificationOp {
 /// Create Qualification Request
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
 pub struct CreateQualificationRequest {
-    pub uuid: Uuid,
-
     #[serde(default)]
     pub context: QualificationContextRequest,
 
@@ -57,11 +55,11 @@ pub struct CreateQualificationRequest {
     pub rules: Vec<CreateQualificationRuleRequest>,
 }
 
-impl From<CreateQualificationRequest> for NewQualification {
+impl From<CreateQualificationRequest> for Qualification {
     fn from(request: CreateQualificationRequest) -> Self {
-        NewQualification {
-            uuid: request.uuid.into(),
+        Qualification {
             context: request.context.into(),
+            op: request.op.into(),
             rules: request.rules.into_iter().map(Into::into).collect(),
         }
     }
@@ -69,50 +67,31 @@ impl From<CreateQualificationRequest> for NewQualification {
 
 /// Create Qualification Rule Request
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum CreateQualificationRuleRequest {
     HasAll {
-        uuid: Uuid,
-        tags: Vec<String>,
+        tags: SmallVec<[String; 3]>,
     },
     HasAny {
-        uuid: Uuid,
-        tags: Vec<String>,
+        tags: SmallVec<[String; 3]>,
     },
 
     HasNone {
-        uuid: Uuid,
-        tags: Vec<String>,
+        tags: SmallVec<[String; 3]>,
     },
 
     Group {
-        uuid: Uuid,
         qualification: CreateQualificationRequest,
     },
 }
 
-impl From<CreateQualificationRuleRequest> for NewQualificationRule {
+impl From<CreateQualificationRuleRequest> for QualificationRule {
     fn from(request: CreateQualificationRuleRequest) -> Self {
         match request {
-            CreateQualificationRuleRequest::HasAll { uuid, tags } => NewQualificationRule::HasAll {
-                uuid: uuid.into(),
-                tags,
-            },
-            CreateQualificationRuleRequest::HasAny { uuid, tags } => NewQualificationRule::HasAny {
-                uuid: uuid.into(),
-                tags,
-            },
-            CreateQualificationRuleRequest::HasNone { uuid, tags } => {
-                NewQualificationRule::HasNone {
-                    uuid: uuid.into(),
-                    tags,
-                }
-            }
-            CreateQualificationRuleRequest::Group {
-                uuid,
-                qualification,
-            } => NewQualificationRule::Group {
-                uuid: uuid.into(),
+            CreateQualificationRuleRequest::HasAll { tags } => QualificationRule::HasAll { tags },
+            CreateQualificationRuleRequest::HasAny { tags } => QualificationRule::HasAny { tags },
+            CreateQualificationRuleRequest::HasNone { tags } => QualificationRule::HasNone { tags },
+            CreateQualificationRuleRequest::Group { qualification } => QualificationRule::Group {
                 qualification: qualification.into(),
             },
         }

@@ -1,6 +1,6 @@
 //! Promotions Requests
 
-use lattice_app::domain::promotions::{data::NewPromotion, records::PromotionUuid};
+use lattice_app::domain::promotions::{data::Promotion, records::PromotionUuid};
 use salvo::oapi::ToSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -26,7 +26,7 @@ pub enum CreatePromotionRequest {
     },
 }
 
-impl From<CreatePromotionRequest> for NewPromotion {
+impl From<CreatePromotionRequest> for Promotion {
     fn from(request: CreatePromotionRequest) -> Self {
         match request {
             CreatePromotionRequest::DirectDiscount {
@@ -34,7 +34,7 @@ impl From<CreatePromotionRequest> for NewPromotion {
                 budgets,
                 discount,
                 qualification,
-            } => NewPromotion::DirectDiscount {
+            } => Promotion::DirectDiscount {
                 uuid: PromotionUuid::from_uuid(uuid),
                 budgets: budgets.into(),
                 discount: discount.into(),
@@ -48,6 +48,7 @@ impl From<CreatePromotionRequest> for NewPromotion {
 mod tests {
     use std::str::FromStr;
 
+    use smallvec::smallvec;
     use testresult::TestResult;
     use uuid::Uuid;
 
@@ -77,12 +78,12 @@ mod tests {
                     "op": "and",
                     "rules": [
                         {
-                            "kind": "has_any",
+                            "type": "has_any",
                             "uuid": "019c8e0b-485e-7a3e-80dc-a500783fc2e1",
                             "tags": ["include"]
                         },
                         {
-                            "kind": "has_none",
+                            "type": "has_none",
                             "uuid": "019c8e0b-5916-71bc-997b-3bd2e613af45",
                             "tags": ["except"]
                         }
@@ -103,17 +104,14 @@ mod tests {
                 },
                 discount: SimpleDiscountRequest::PercentageOff { percentage: 50 },
                 qualification: Some(CreateQualificationRequest {
-                    uuid: Uuid::from_str("019c8e09-321a-7b0e-8ad1-27a98a4e4dc5")?,
                     context: QualificationContextRequest::Primary,
                     op: QualificationOpRequest::And,
                     rules: vec![
                         CreateQualificationRuleRequest::HasAny {
-                            uuid: Uuid::from_str("019c8e0b-485e-7a3e-80dc-a500783fc2e1")?,
-                            tags: vec!["include".to_string()]
+                            tags: smallvec!["include".to_string()]
                         },
                         CreateQualificationRuleRequest::HasNone {
-                            uuid: Uuid::from_str("019c8e0b-5916-71bc-997b-3bd2e613af45")?,
-                            tags: vec!["except".to_string()]
+                            tags: smallvec!["except".to_string()]
                         }
                     ],
                 })

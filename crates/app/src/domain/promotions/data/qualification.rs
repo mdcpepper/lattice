@@ -1,6 +1,6 @@
 //! Promotion Qualification Data
 
-use crate::domain::promotions::records::{QualificationRuleUuid, QualificationUuid};
+use smallvec::SmallVec;
 
 /// Qualification Context Data
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -10,6 +10,15 @@ pub enum QualificationContext {
     Group,
 }
 
+impl QualificationContext {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QualificationContext::Primary => "primary",
+            QualificationContext::Group => "group",
+        }
+    }
+}
+
 /// Qualification Operator Data
 #[derive(Debug, Clone, PartialEq)]
 pub enum QualificationOp {
@@ -17,31 +26,39 @@ pub enum QualificationOp {
     Or,
 }
 
+impl QualificationOp {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            QualificationOp::And => "and",
+            QualificationOp::Or => "or",
+        }
+    }
+}
+
 /// New Qualification Rule Data
 #[derive(Debug, Clone, PartialEq)]
-pub enum NewQualificationRule {
-    HasAll {
-        uuid: QualificationRuleUuid,
-        tags: Vec<String>,
-    },
-    HasAny {
-        uuid: QualificationRuleUuid,
-        tags: Vec<String>,
-    },
-    HasNone {
-        uuid: QualificationRuleUuid,
-        tags: Vec<String>,
-    },
-    Group {
-        uuid: QualificationRuleUuid,
-        qualification: NewQualification,
-    },
+pub enum QualificationRule {
+    HasAll { tags: SmallVec<[String; 3]> },
+    HasAny { tags: SmallVec<[String; 3]> },
+    HasNone { tags: SmallVec<[String; 3]> },
+    Group { qualification: Qualification },
+}
+
+impl QualificationRule {
+    pub fn type_as_str(&self) -> &'static str {
+        match self {
+            QualificationRule::HasAll { .. } => "has_all",
+            QualificationRule::HasAny { .. } => "has_any",
+            QualificationRule::HasNone { .. } => "has_none",
+            QualificationRule::Group { .. } => "group",
+        }
+    }
 }
 
 /// New Qualification Data
 #[derive(Debug, Clone, PartialEq)]
-pub struct NewQualification {
-    pub uuid: QualificationUuid,
+pub struct Qualification {
     pub context: QualificationContext,
-    pub rules: Vec<NewQualificationRule>,
+    pub op: QualificationOp,
+    pub rules: Vec<QualificationRule>,
 }
