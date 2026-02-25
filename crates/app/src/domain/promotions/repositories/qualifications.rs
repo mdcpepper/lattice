@@ -1,5 +1,6 @@
 //! Qualifications Repository
 
+use smallvec::SmallVec;
 use sqlx::{Postgres, Transaction, query};
 
 use crate::domain::promotions::{
@@ -22,67 +23,73 @@ impl PgQualificationsRepository {
     pub(crate) async fn create_qualifications(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-        promotion_uuid: PromotionUuid,
+        promotion: PromotionUuid,
         qualification: &Qualification,
-    ) -> Result<(), sqlx::Error> {
-        Box::pin(insert_qualification(
-            tx,
-            promotion_uuid,
-            qualification,
-            None,
-        ))
-        .await
+    ) -> Result<SmallVec<[(QualificationRuleUuid, SmallVec<[String; 3]>); 5]>, sqlx::Error> {
+        Box::pin(insert_qualification(tx, promotion, qualification, None)).await
     }
 }
 
 async fn insert_qualification(
     tx: &mut Transaction<'_, Postgres>,
-    promotion_uuid: PromotionUuid,
+    promotion: PromotionUuid,
     qualification: &Qualification,
-    parent_qualification_uuid: Option<QualificationUuid>,
-) -> Result<(), sqlx::Error> {
-    let qual_uuid = QualificationUuid::new();
+    parent_uuid: Option<QualificationUuid>,
+) -> Result<SmallVec<[(QualificationRuleUuid, SmallVec<[String; 3]>); 5]>, sqlx::Error> {
+    let uuid = QualificationUuid::new();
 
     query(CREATE_QUALIFICATION_SQL)
-        .bind(qual_uuid.into_uuid())
-        .bind(promotion_uuid.into_uuid())
+        .bind(uuid.into_uuid())
+        .bind(promotion.into_uuid())
         .bind(qualification.context.as_str())
         .bind(qualification.op.as_str())
-        .bind(parent_qualification_uuid.map(QualificationUuid::into_uuid))
+        .bind(parent_uuid.map(QualificationUuid::into_uuid))
         .execute(&mut **tx)
         .await?;
+
+    let mut rule_tags = SmallVec::new();
 
     for rule in &qualification.rules {
         match rule {
             QualificationRule::Group {
                 qualification: nested,
             } => {
-                Box::pin(insert_qualification(
-                    tx,
-                    promotion_uuid,
-                    nested,
-                    Some(qual_uuid),
-                ))
-                .await?;
+                let nested_tag_pairs =
+                    Box::pin(insert_qualification(tx, promotion, nested, Some(uuid))).await?;
+
+                rule_tags.extend(nested_tag_pairs);
             }
             _ => {
-                insert_qualification_rule(tx, qual_uuid, rule.type_as_str()).await?;
+                let rule_uuid = QualificationRuleUuid::new();
+
+                insert_qualification_rule(tx, uuid, rule_uuid, rule).await?;
+
+                rule_tags.push((
+                    rule_uuid,
+                    match rule {
+                        QualificationRule::HasAll { tags }
+                        | QualificationRule::HasAny { tags }
+                        | QualificationRule::HasNone { tags } => tags.clone(),
+                        QualificationRule::Group { .. } => SmallVec::new(),
+                    },
+                ));
             }
         }
     }
 
-    Ok(())
+    Ok(rule_tags)
 }
 
 async fn insert_qualification_rule(
     tx: &mut Transaction<'_, Postgres>,
     qualification_uuid: QualificationUuid,
-    kind: &'static str,
+    rule_uuid: QualificationRuleUuid,
+    rule: &QualificationRule,
 ) -> Result<(), sqlx::Error> {
     query(CREATE_QUALIFICATION_RULE_SQL)
-        .bind(QualificationRuleUuid::new().into_uuid())
+        .bind(rule_uuid.into_uuid())
         .bind(qualification_uuid.into_uuid())
-        .bind(kind)
+        .bind(rule.type_as_str())
         .execute(&mut **tx)
         .await?;
 

@@ -82,7 +82,6 @@ WITH
           current_setting('app.current_tenant_uuid', TRUE),
           ''
         )::uuid
-        AND t.deleted_at IS NULL
     )
     AND (
       (

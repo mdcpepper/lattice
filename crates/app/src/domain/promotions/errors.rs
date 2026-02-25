@@ -38,7 +38,7 @@ impl From<Error> for PromotionsServiceError {
             Some(ErrorKind::ForeignKeyViolation) => Self::InvalidReference,
             Some(ErrorKind::NotNullViolation) => Self::MissingRequiredData,
             Some(ErrorKind::CheckViolation) => Self::InvalidData,
-            Some(ErrorKind::Other | _) | None => Self::Sql(error),
+            _ => Self::Sql(error),
         }
     }
 }

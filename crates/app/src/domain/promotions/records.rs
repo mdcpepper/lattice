@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 
-use crate::uuids::TypedUuid;
+use crate::{domain::tags::Taggable, uuids::TypedUuid};
 
 /// Promotion UUID
 pub type PromotionUuid = TypedUuid<PromotionRecord>;
@@ -29,3 +29,9 @@ pub type QualificationRuleUuid = TypedUuid<QualificationRuleRecord>;
 /// Qualification Rule Record
 #[derive(Debug, Clone)]
 pub struct QualificationRuleRecord {}
+
+impl Taggable for QualificationRuleRecord {
+    fn type_as_str() -> &'static str {
+        "qualification_rule"
+    }
+}

@@ -12,7 +12,6 @@ CREATE TABLE tags (
   name TEXT NOT NULL CHECK (btrim(name) <> ''),
 
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  deleted_at TIMESTAMPTZ,
 
   CONSTRAINT tags_tenant_uuid_uuid_uniq UNIQUE (tenant_uuid, uuid),
   CONSTRAINT tags_tenant_name_uniq UNIQUE (tenant_uuid, name),

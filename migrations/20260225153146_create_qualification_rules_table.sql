@@ -1,3 +1,5 @@
+SET LOCAL lock_timeout = '5s';
+
 CREATE TYPE QUALIFICATION_RULE_KIND AS ENUM('has_all', 'has_any', 'has_none');
 
 CREATE TABLE qualification_rules (

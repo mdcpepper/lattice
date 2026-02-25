@@ -1,27 +1,31 @@
 //! Promotions Service
 
+use async_trait::async_trait;
+use mockall::automock;
+use smallvec::SmallVec;
+
 use crate::{
     database::Db,
     domain::{
         promotions::{
             PromotionsServiceError,
             data::Promotion,
-            records::PromotionRecord,
+            records::{PromotionRecord, QualificationRuleUuid},
             repositories::{
                 promotions::PgPromotionsRepository, qualifications::PgQualificationsRepository,
             },
         },
+        tags::{PgTagsRepository, records::TagUuid},
         tenants::records::TenantUuid,
     },
 };
-use async_trait::async_trait;
-use mockall::automock;
 
 #[derive(Debug, Clone)]
 pub struct PgPromotionsService {
     db: Db,
     promotions_repository: PgPromotionsRepository,
     qualifications_repository: PgQualificationsRepository,
+    tags_repository: PgTagsRepository,
 }
 
 impl PgPromotionsService {
@@ -31,6 +35,7 @@ impl PgPromotionsService {
             db,
             promotions_repository: PgPromotionsRepository::new(),
             qualifications_repository: PgQualificationsRepository::new(),
+            tags_repository: PgTagsRepository::new(),
         }
     }
 }
@@ -43,6 +48,7 @@ impl PromotionsService for PgPromotionsService {
         promotion: Promotion,
     ) -> Result<PromotionRecord, PromotionsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
+
         let mut promotion = promotion;
 
         let (promotion_uuid, qualification) = match &mut promotion {
@@ -59,8 +65,30 @@ impl PromotionsService for PgPromotionsService {
             .await?;
 
         if let Some(qual) = qualification {
-            self.qualifications_repository
+            let rule_tags = self
+                .qualifications_repository
                 .create_qualifications(&mut tx, promotion_uuid, &qual)
+                .await?;
+
+            let all_names: SmallVec<[&str; 10]> = rule_tags
+                .iter()
+                .flat_map(|(_, tags)| tags.iter().map(String::as_str))
+                .collect();
+
+            let tag_map = self.tags_repository.sync_tags(&mut tx, &all_names).await?;
+
+            let mut taggables: SmallVec<[(TagUuid, QualificationRuleUuid); 10]> = SmallVec::new();
+
+            for (rule_uuid, tag_names) in &rule_tags {
+                for name in tag_names {
+                    if let Some(&tag_uuid) = tag_map.get(name.as_str()) {
+                        taggables.push((tag_uuid, *rule_uuid));
+                    }
+                }
+            }
+
+            self.tags_repository
+                .create_taggables(&mut tx, &taggables)
                 .await?;
         }
 
@@ -84,6 +112,7 @@ pub trait PromotionsService: Send + Sync {
 mod tests {
     use jiff::Timestamp;
     use smallvec::smallvec;
+    use sqlx::{Row, postgres::PgRow};
     use testresult::TestResult;
 
     use crate::{
@@ -102,6 +131,27 @@ mod tests {
     };
 
     use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct ExpectedDetail {
+        redemption_budget: Option<i64>,
+        monetary_budget: Option<i64>,
+        kind: String,
+        discount_percentage: Option<i64>,
+        discount_amount: Option<i64>,
+    }
+
+    impl<'r> sqlx::FromRow<'r, PgRow> for ExpectedDetail {
+        fn from_row(row: &'r PgRow) -> Result<Self, sqlx::Error> {
+            Ok(Self {
+                redemption_budget: row.try_get("redemption_budget")?,
+                monetary_budget: row.try_get("monetary_budget")?,
+                kind: row.try_get("kind")?,
+                discount_percentage: row.try_get("discount_percentage")?,
+                discount_amount: row.try_get("discount_amount")?,
+            })
+        }
+    }
 
     #[tokio::test]
     async fn create_promotion_returns_correct_uuid() -> TestResult {
@@ -257,51 +307,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_promotion_with_qualification_succeeds() -> TestResult {
+    async fn create_promotion_inserts_rows_as_expected() -> TestResult {
         let ctx = TestContext::new().await;
 
-        let result = ctx
+        let promotion = ctx
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
                 Promotion::DirectDiscount {
                     uuid: PromotionUuid::new(),
                     budgets: Budgets {
-                        redemptions: None,
-                        monetary: None,
+                        redemptions: Some(7),
+                        monetary: Some(9_000),
                     },
-                    discount: SimpleDiscount::PercentageOff { percentage: 10 },
-                    qualification: Some(Qualification {
-                        context: QualificationContext::Primary,
-                        op: QualificationOp::And,
-                        rules: vec![QualificationRule::HasAny {
-                            tags: smallvec!["sale".to_string()],
-                        }],
-                    }),
-                },
-            )
-            .await;
-
-        assert!(result.is_ok());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn create_promotion_with_nested_qualification_succeeds() -> TestResult {
-        let ctx = TestContext::new().await;
-
-        let result = ctx
-            .promotions
-            .create_promotion(
-                ctx.tenant_uuid,
-                Promotion::DirectDiscount {
-                    uuid: PromotionUuid::new(),
-                    budgets: Budgets {
-                        redemptions: None,
-                        monetary: None,
-                    },
-                    discount: SimpleDiscount::PercentageOff { percentage: 10 },
+                    discount: SimpleDiscount::FixedAmountOff { amount: 350 },
                     qualification: Some(Qualification {
                         context: QualificationContext::Primary,
                         op: QualificationOp::Or,
@@ -327,9 +346,79 @@ mod tests {
                     }),
                 },
             )
-            .await;
+            .await?;
 
-        assert!(result.is_ok());
+        let detail: ExpectedDetail = sqlx::query_as(
+            "SELECT
+               redemption_budget,
+               monetary_budget,
+               discount_kind::text AS kind,
+               discount_percentage,
+               discount_amount
+             FROM direct_discount_promotion_details
+             WHERE promotion_uuid = $1
+               AND upper_inf(valid_period)",
+        )
+        .bind(promotion.uuid.into_uuid())
+        .fetch_one(ctx.db.pool())
+        .await?;
+
+        assert_eq!(
+            detail,
+            ExpectedDetail {
+                redemption_budget: Some(7),
+                monetary_budget: Some(9_000),
+                kind: "amount_off".to_string(),
+                discount_percentage: None,
+                discount_amount: Some(350),
+            }
+        );
+
+        let qualifications: Vec<(String, String, bool)> = sqlx::query_as(
+            "SELECT
+               context::text,
+               op::text,
+               parent_qualification_uuid IS NOT NULL AS has_parent
+             FROM qualifications
+             WHERE promotion_uuid = $1
+             ORDER BY parent_qualification_uuid IS NOT NULL, context::text",
+        )
+        .bind(promotion.uuid.into_uuid())
+        .fetch_all(ctx.db.pool())
+        .await?;
+
+        assert_eq!(
+            qualifications,
+            vec![
+                ("primary".to_string(), "or".to_string(), false),
+                ("group".to_string(), "and".to_string(), true),
+            ]
+        );
+
+        let rule_tags: Vec<(String, String)> = sqlx::query_as(
+            "SELECT qr.kind::text, t.name
+             FROM qualification_rules qr
+             JOIN qualifications q ON q.uuid = qr.qualification_uuid
+             JOIN taggables tg
+               ON tg.taggable_uuid = qr.uuid
+              AND tg.taggable_type = 'qualification_rule'
+             JOIN tags t ON t.uuid = tg.tag_uuid
+             WHERE q.promotion_uuid = $1
+             ORDER BY qr.kind::text, t.name",
+        )
+        .bind(promotion.uuid.into_uuid())
+        .fetch_all(ctx.db.pool())
+        .await?;
+
+        assert_eq!(
+            rule_tags,
+            vec![
+                ("has_all".to_string(), "clothing".to_string()),
+                ("has_all".to_string(), "sale".to_string()),
+                ("has_any".to_string(), "footwear".to_string()),
+                ("has_none".to_string(), "excluded".to_string()),
+            ]
+        );
 
         Ok(())
     }
