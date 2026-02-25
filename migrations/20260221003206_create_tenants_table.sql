@@ -1,8 +1,11 @@
-SET LOCAL lock_timeout = '5s';
+SET
+  LOCAL lock_timeout = '5s';
 
 CREATE TABLE tenants (
-    uuid uuid PRIMARY KEY,
-    name text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    deleted_at timestamptz
+  uuid UUID PRIMARY KEY,
+
+  name TEXT NOT NULL,
+
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at TIMESTAMPTZ
 );

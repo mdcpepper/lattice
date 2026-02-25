@@ -1,4 +1,4 @@
-//! Errors
+//! Product Errors
 
 use salvo::http::StatusError;
 use tracing::error;

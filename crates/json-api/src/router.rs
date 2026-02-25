@@ -2,7 +2,7 @@
 
 use salvo::Router;
 
-use crate::{carts, products};
+use crate::{carts, products, promotions};
 
 pub fn app_router() -> Router {
     Router::new()
@@ -34,6 +34,7 @@ pub fn app_router() -> Router {
                         .delete(products::delete::handler),
                 ),
         )
+        .push(Router::with_path("promotions").post(promotions::create::handler))
 }
 
 #[cfg(test)]
@@ -49,6 +50,7 @@ mod tests {
         domain::{
             carts::{CartsServiceError, MockCartsService},
             products::{MockProductsService, ProductsServiceError},
+            promotions::service::MockPromotionsService,
         },
     };
 
@@ -56,12 +58,18 @@ mod tests {
 
     use super::app_router;
 
-    fn router_service(carts: MockCartsService, products: MockProductsService) -> Service {
+    fn router_service(
+        carts: MockCartsService,
+        products: MockProductsService,
+        promotions: MockPromotionsService,
+    ) -> Service {
         let state = Arc::new(State::new(AppContext {
             carts: Arc::new(carts),
             products: Arc::new(products),
+            promotions: Arc::new(promotions),
             auth: Arc::new(MockAuthService::new()),
         }));
+
         Service::new(
             Router::new()
                 .hoop(inject(state))
@@ -72,7 +80,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_post_carts_is_registered() {
-        let service = router_service(MockCartsService::new(), MockProductsService::new());
+        let service = router_service(
+            MockCartsService::new(),
+            MockProductsService::new(),
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::post("http://example.com/carts")
             .send(&service)
@@ -88,11 +100,16 @@ mod tests {
     #[tokio::test]
     async fn test_get_cart_is_registered() {
         let mut carts = MockCartsService::new();
+
         carts
             .expect_get_cart()
             .return_once(|_, _, _| Err(CartsServiceError::AlreadyExists));
 
-        let service = router_service(carts, MockProductsService::new());
+        let service = router_service(
+            carts,
+            MockProductsService::new(),
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::get(format!("http://example.com/carts/{}", Uuid::nil()))
             .send(&service)
@@ -112,7 +129,11 @@ mod tests {
             .expect_delete_cart()
             .return_once(|_, _| Err(CartsServiceError::AlreadyExists));
 
-        let service = router_service(carts, MockProductsService::new());
+        let service = router_service(
+            carts,
+            MockProductsService::new(),
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::delete(format!("http://example.com/carts/{}", Uuid::nil()))
             .send(&service)
@@ -127,7 +148,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_post_cart_items_is_registered() {
-        let service = router_service(MockCartsService::new(), MockProductsService::new());
+        let service = router_service(
+            MockCartsService::new(),
+            MockProductsService::new(),
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::post(format!("http://example.com/carts/{}/items", Uuid::nil()))
             .send(&service)
@@ -147,7 +172,11 @@ mod tests {
             .expect_remove_item()
             .return_once(|_, _, _| Err(CartsServiceError::AlreadyExists));
 
-        let service = router_service(carts, MockProductsService::new());
+        let service = router_service(
+            carts,
+            MockProductsService::new(),
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::delete(format!(
             "http://example.com/carts/{}/items/{}",
@@ -171,7 +200,11 @@ mod tests {
             .expect_list_products()
             .return_once(|_, _| Ok(vec![]));
 
-        let service = router_service(MockCartsService::new(), products);
+        let service = router_service(
+            MockCartsService::new(),
+            products,
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::get("http://example.com/products")
             .send(&service)
@@ -186,7 +219,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_post_products_is_registered() {
-        let service = router_service(MockCartsService::new(), MockProductsService::new());
+        let service = router_service(
+            MockCartsService::new(),
+            MockProductsService::new(),
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::post("http://example.com/products")
             .send(&service)
@@ -200,13 +237,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_post_promotions_is_registered() {
+        let service = router_service(
+            MockCartsService::new(),
+            MockProductsService::new(),
+            MockPromotionsService::new(),
+        );
+
+        let res = TestClient::post("http://example.com/promotions")
+            .send(&service)
+            .await;
+
+        assert_ne!(
+            res.status_code,
+            Some(StatusCode::NOT_FOUND),
+            "POST /promotions should be registered"
+        );
+    }
+
+    #[tokio::test]
     async fn test_get_product_is_registered() {
         let mut products = MockProductsService::new();
         products
             .expect_get_product()
             .return_once(|_, _, _| Err(ProductsServiceError::AlreadyExists));
 
-        let service = router_service(MockCartsService::new(), products);
+        let service = router_service(
+            MockCartsService::new(),
+            products,
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::get(format!("http://example.com/products/{}", Uuid::nil()))
             .send(&service)
@@ -221,7 +281,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_put_product_is_registered() {
-        let service = router_service(MockCartsService::new(), MockProductsService::new());
+        let service = router_service(
+            MockCartsService::new(),
+            MockProductsService::new(),
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::put(format!("http://example.com/products/{}", Uuid::nil()))
             .send(&service)
@@ -241,7 +305,11 @@ mod tests {
             .expect_delete_product()
             .return_once(|_, _| Err(ProductsServiceError::AlreadyExists));
 
-        let service = router_service(MockCartsService::new(), products);
+        let service = router_service(
+            MockCartsService::new(),
+            products,
+            MockPromotionsService::new(),
+        );
 
         let res = TestClient::delete(format!("http://example.com/products/{}", Uuid::nil()))
             .send(&service)

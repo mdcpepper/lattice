@@ -7,6 +7,7 @@ use crate::{
     domain::{
         carts::PgCartsService,
         products::PgProductsService,
+        promotions::service::PgPromotionsService,
         tenants::{PgTenantsService, TenantsService, data::NewTenant, records::TenantUuid},
     },
 };
@@ -21,6 +22,7 @@ pub struct TestContext {
     pub db: TestDb,
     pub tenant_uuid: TenantUuid,
     pub products: PgProductsService,
+    pub promotions: PgPromotionsService,
     pub carts: PgCartsService,
 }
 
@@ -45,6 +47,7 @@ impl TestContext {
 
         Self {
             products: PgProductsService::new(db.clone()),
+            promotions: PgPromotionsService::new(db.clone()),
             carts: PgCartsService::new(db),
             tenant_uuid,
             db: test_db,

@@ -35,6 +35,7 @@ mod config;
 mod extensions;
 mod healthcheck;
 mod products;
+mod promotions;
 mod router;
 mod shutdown;
 mod state;
@@ -91,13 +92,16 @@ pub async fn main() {
         }
     };
 
+    let api_router = Router::new()
+        .hoop(auth::middleware::handler)
+        .push(router::app_router());
+
     let router = Router::new()
         .hoop(CatchPanic::new())
         .hoop(remove_slash())
         .hoop(inject(State::from_app_context(app)))
-        .hoop(auth::middleware::handler)
         .push(Router::with_path("healthcheck").get(healthcheck::handler))
-        .push(router::app_router());
+        .push(api_router);
 
     let doc = OpenApi::new("Lattice API", "0.3.0")
         .add_security_scheme(
