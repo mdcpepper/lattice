@@ -1,5 +1,7 @@
 //! Products Data
 
+use smallvec::SmallVec;
+
 use crate::domain::products::records::{ProductDetailsUuid, ProductUuid};
 
 /// New Product Data
@@ -7,6 +9,7 @@ use crate::domain::products::records::{ProductDetailsUuid, ProductUuid};
 pub struct NewProduct {
     pub uuid: ProductUuid,
     pub price: u64,
+    pub tags: SmallVec<[String; 3]>,
 }
 
 /// Product Update Data
@@ -14,4 +17,5 @@ pub struct NewProduct {
 pub struct ProductUpdate {
     pub uuid: Option<ProductDetailsUuid>,
     pub price: u64,
+    pub tags: SmallVec<[String; 3]>,
 }

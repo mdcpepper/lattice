@@ -8,6 +8,7 @@ use salvo::{
     prelude::*,
 };
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use uuid::Uuid;
 
 use lattice_app::domain::products::data::NewProduct;
@@ -19,6 +20,8 @@ use crate::{extensions::*, products::errors::into_status_error, state::State};
 pub(crate) struct CreateProductRequest {
     pub uuid: Uuid,
     pub price: u64,
+    #[serde(default)]
+    pub tags: SmallVec<[String; 3]>,
 }
 
 impl From<CreateProductRequest> for NewProduct {
@@ -26,6 +29,7 @@ impl From<CreateProductRequest> for NewProduct {
         NewProduct {
             uuid: request.uuid.into(),
             price: request.price,
+            tags: request.tags,
         }
     }
 }
@@ -76,6 +80,7 @@ pub(crate) async fn handler(
 mod tests {
     use salvo::test::{ResponseExt, TestClient};
     use serde_json::json;
+    use smallvec::smallvec;
     use testresult::TestResult;
 
     use lattice_app::domain::products::{
@@ -100,7 +105,13 @@ mod tests {
         repo.expect_create_product()
             .once()
             .withf(move |tenant, new| {
-                *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
+                *tenant == TEST_TENANT_UUID
+                    && *new
+                        == NewProduct {
+                            uuid,
+                            price: 100,
+                            tags: smallvec![],
+                        }
             })
             .return_once(move |_, _| Ok(product));
 
@@ -133,7 +144,13 @@ mod tests {
         repo.expect_create_product()
             .once()
             .withf(move |tenant, new| {
-                *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
+                *tenant == TEST_TENANT_UUID
+                    && *new
+                        == NewProduct {
+                            uuid,
+                            price: 100,
+                            tags: smallvec![],
+                        }
             })
             .return_once(|_, _| Err(ProductsServiceError::AlreadyExists));
 
@@ -161,7 +178,13 @@ mod tests {
         repo.expect_create_product()
             .once()
             .withf(move |tenant, new| {
-                *tenant == TEST_TENANT_UUID && *new == NewProduct { uuid, price: 100 }
+                *tenant == TEST_TENANT_UUID
+                    && *new
+                        == NewProduct {
+                            uuid,
+                            price: 100,
+                            tags: smallvec![],
+                        }
             })
             .return_once(|_, _| Err(ProductsServiceError::InvalidData));
 

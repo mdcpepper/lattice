@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use mockall::automock;
-use smallvec::SmallVec;
 
 use crate::{
     database::Db,
@@ -10,12 +9,12 @@ use crate::{
         promotions::{
             PromotionsServiceError,
             data::Promotion,
-            records::{PromotionRecord, QualificationRuleUuid},
+            records::PromotionRecord,
             repositories::{
                 promotions::PgPromotionsRepository, qualifications::PgQualificationsRepository,
             },
         },
-        tags::{PgTagsRepository, records::TagUuid},
+        tags::PgTagsRepository,
         tenants::records::TenantUuid,
     },
 };
@@ -23,9 +22,9 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct PgPromotionsService {
     db: Db,
-    promotions_repository: PgPromotionsRepository,
-    qualifications_repository: PgQualificationsRepository,
-    tags_repository: PgTagsRepository,
+    promotions: PgPromotionsRepository,
+    qualifications: PgQualificationsRepository,
+    tags: PgTagsRepository,
 }
 
 impl PgPromotionsService {
@@ -33,9 +32,9 @@ impl PgPromotionsService {
     pub fn new(db: Db) -> Self {
         Self {
             db,
-            promotions_repository: PgPromotionsRepository::new(),
-            qualifications_repository: PgQualificationsRepository::new(),
-            tags_repository: PgTagsRepository::new(),
+            promotions: PgPromotionsRepository::new(),
+            qualifications: PgQualificationsRepository::new(),
+            tags: PgTagsRepository::new(),
         }
     }
 }
@@ -59,37 +58,17 @@ impl PromotionsService for PgPromotionsService {
             } => (*uuid, qualification.take()),
         };
 
-        let record = self
-            .promotions_repository
-            .create_promotion(&mut tx, promotion)
-            .await?;
+        let record = self.promotions.create_promotion(&mut tx, promotion).await?;
 
         if let Some(qual) = qualification {
             let rule_tags = self
-                .qualifications_repository
+                .qualifications
                 .create_qualifications(&mut tx, promotion_uuid, &qual)
                 .await?;
 
-            let all_names: SmallVec<[&str; 10]> = rule_tags
-                .iter()
-                .flat_map(|(_, tags)| tags.iter().map(String::as_str))
-                .collect();
+            let taggables = self.tags.resolve_taggable_tags(&mut tx, &rule_tags).await?;
 
-            let tag_map = self.tags_repository.sync_tags(&mut tx, &all_names).await?;
-
-            let mut taggables: SmallVec<[(TagUuid, QualificationRuleUuid); 10]> = SmallVec::new();
-
-            for (rule_uuid, tag_names) in &rule_tags {
-                for name in tag_names {
-                    if let Some(&tag_uuid) = tag_map.get(name.as_str()) {
-                        taggables.push((tag_uuid, *rule_uuid));
-                    }
-                }
-            }
-
-            self.tags_repository
-                .create_taggables(&mut tx, &taggables)
-                .await?;
+            self.tags.create_taggables(&mut tx, &taggables).await?;
         }
 
         tx.commit().await?;

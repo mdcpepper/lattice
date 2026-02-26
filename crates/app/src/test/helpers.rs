@@ -1,6 +1,7 @@
 //! Test Helpers
 
 use jiff::Timestamp;
+use smallvec::SmallVec;
 
 use crate::{
     domain::{
@@ -69,6 +70,7 @@ pub(crate) async fn create_product(
     tenant: TenantUuid,
     product: ProductUuid,
     price: u64,
+    tags: SmallVec<[String; 3]>,
 ) -> Result<ProductRecord, ProductsServiceError> {
     ctx.products
         .create_product(
@@ -76,6 +78,7 @@ pub(crate) async fn create_product(
             NewProduct {
                 uuid: product,
                 price,
+                tags,
             },
         )
         .await

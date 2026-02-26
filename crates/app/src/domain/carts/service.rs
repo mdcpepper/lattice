@@ -20,8 +20,8 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct PgCartsService {
     db: Db,
-    carts_repository: PgCartsRepository,
-    items_repository: PgCartItemsRepository,
+    carts: PgCartsRepository,
+    items: PgCartItemsRepository,
 }
 
 impl PgCartsService {
@@ -29,8 +29,8 @@ impl PgCartsService {
     pub fn new(db: Db) -> Self {
         Self {
             db,
-            carts_repository: PgCartsRepository::new(),
-            items_repository: PgCartItemsRepository::new(),
+            carts: PgCartsRepository::new(),
+            items: PgCartItemsRepository::new(),
         }
     }
 }
@@ -46,14 +46,11 @@ impl CartsService for PgCartsService {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let items = self
-            .items_repository
+            .items
             .get_cart_items(&mut tx, cart, point_in_time)
             .await?;
 
-        let mut cart = self
-            .carts_repository
-            .get_cart(&mut tx, cart, point_in_time)
-            .await?;
+        let mut cart = self.carts.get_cart(&mut tx, cart, point_in_time).await?;
 
         tx.commit().await?;
 
@@ -69,10 +66,7 @@ impl CartsService for PgCartsService {
     ) -> Result<CartRecord, CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let created = self
-            .carts_repository
-            .create_cart(&mut tx, cart.uuid)
-            .await?;
+        let created = self.carts.create_cart(&mut tx, cart.uuid).await?;
 
         tx.commit().await?;
 
@@ -86,7 +80,7 @@ impl CartsService for PgCartsService {
     ) -> Result<(), CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let rows_affected = self.carts_repository.delete_cart(&mut tx, cart).await?;
+        let rows_affected = self.carts.delete_cart(&mut tx, cart).await?;
 
         if rows_affected == 0 {
             return Err(CartsServiceError::NotFound);
@@ -105,10 +99,7 @@ impl CartsService for PgCartsService {
     ) -> Result<CartItemRecord, CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let item = self
-            .items_repository
-            .create_cart_item(&mut tx, cart, item)
-            .await?;
+        let item = self.items.create_cart_item(&mut tx, cart, item).await?;
 
         tx.commit().await?;
 
@@ -123,10 +114,7 @@ impl CartsService for PgCartsService {
     ) -> Result<(), CartsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let rows_affected = self
-            .items_repository
-            .delete_cart_item(&mut tx, cart, item)
-            .await?;
+        let rows_affected = self.items.delete_cart_item(&mut tx, cart, item).await?;
 
         if rows_affected == 0 {
             return Err(CartsServiceError::NotFound);
@@ -183,10 +171,11 @@ pub trait CartsService: Send + Sync {
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
+    use smallvec::smallvec;
     use testresult::TestResult;
 
     use crate::{
-        domain::carts::data::NewCart,
+        domain::{carts::data::NewCart, products::records::ProductUuid},
         test::{
             TestContext,
             helpers::{add_item, create_cart, create_product, get_cart, remove_item},
@@ -261,8 +250,6 @@ mod tests {
     }
 
     mod get {
-        use crate::domain::products::records::ProductUuid;
-
         use super::*;
 
         #[tokio::test]
@@ -289,7 +276,14 @@ mod tests {
             let ctx = TestContext::new().await;
             let cart_uuid = CartUuid::new();
 
-            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
+            let product = create_product(
+                &ctx,
+                ctx.tenant_uuid,
+                ProductUuid::new(),
+                10_00,
+                smallvec![],
+            )
+            .await?;
 
             create_cart(&ctx, ctx.tenant_uuid, cart_uuid).await?;
 
@@ -374,15 +368,20 @@ mod tests {
     }
 
     mod add_item {
-        use crate::domain::products::records::ProductUuid;
-
         use super::*;
 
         #[tokio::test]
         async fn adding_item_to_cart() -> TestResult {
             let ctx = TestContext::new().await;
 
-            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
+            let product = create_product(
+                &ctx,
+                ctx.tenant_uuid,
+                ProductUuid::new(),
+                10_00,
+                smallvec![],
+            )
+            .await?;
             let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
 
             let uuid = CartItemUuid::new();
@@ -399,7 +398,16 @@ mod tests {
         #[tokio::test]
         async fn adding_same_product_twice_creates_two_distinct_items() -> TestResult {
             let ctx = TestContext::new().await;
-            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
+
+            let product = create_product(
+                &ctx,
+                ctx.tenant_uuid,
+                ProductUuid::new(),
+                10_00,
+                smallvec![],
+            )
+            .await?;
+
             let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
 
             let uuid = CartItemUuid::new();
@@ -423,6 +431,7 @@ mod tests {
         #[tokio::test]
         async fn adding_item_with_unknown_product_returns_not_found() -> TestResult {
             let ctx = TestContext::new().await;
+
             let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
 
             let result = add_item(
@@ -445,8 +454,17 @@ mod tests {
         #[tokio::test]
         async fn item_not_added_to_other_tenants_cart() -> TestResult {
             let ctx = TestContext::new().await;
+
             let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
-            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
+
+            let product = create_product(
+                &ctx,
+                ctx.tenant_uuid,
+                ProductUuid::new(),
+                10_00,
+                smallvec![],
+            )
+            .await?;
 
             let tenant_b = ctx.create_tenant("Tenant B").await;
 
@@ -463,15 +481,22 @@ mod tests {
     }
 
     mod remove_item {
-        use crate::domain::products::records::ProductUuid;
-
         use super::*;
 
         #[tokio::test]
         async fn remove_item_success() -> TestResult {
             let ctx = TestContext::new().await;
+
             let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
-            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
+
+            let product = create_product(
+                &ctx,
+                ctx.tenant_uuid,
+                ProductUuid::new(),
+                10_00,
+                smallvec![],
+            )
+            .await?;
 
             let item = add_item(
                 &ctx,
@@ -494,8 +519,17 @@ mod tests {
         #[tokio::test]
         async fn remove_item_not_exist_errors() -> TestResult {
             let ctx = TestContext::new().await;
+
             let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
-            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
+
+            let product = create_product(
+                &ctx,
+                ctx.tenant_uuid,
+                ProductUuid::new(),
+                10_00,
+                smallvec![],
+            )
+            .await?;
 
             add_item(
                 &ctx,
@@ -519,8 +553,17 @@ mod tests {
         #[tokio::test]
         async fn item_not_removed_from_other_tenants_cart() -> TestResult {
             let ctx = TestContext::new().await;
+
             let cart = create_cart(&ctx, ctx.tenant_uuid, CartUuid::new()).await?;
-            let product = create_product(&ctx, ctx.tenant_uuid, ProductUuid::new(), 10_00).await?;
+
+            let product = create_product(
+                &ctx,
+                ctx.tenant_uuid,
+                ProductUuid::new(),
+                10_00,
+                smallvec![],
+            )
+            .await?;
 
             let item = add_item(
                 &ctx,

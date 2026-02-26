@@ -2,7 +2,7 @@
 
 use jiff::Timestamp;
 
-use crate::uuids::TypedUuid;
+use crate::{domain::tags::Taggable, uuids::TypedUuid};
 
 /// Product UUID
 pub type ProductUuid = TypedUuid<ProductRecord>;
@@ -22,3 +22,9 @@ pub struct ProductDetailsRecord;
 
 /// Product Detail UUID
 pub type ProductDetailsUuid = TypedUuid<ProductDetailsRecord>;
+
+impl Taggable for ProductRecord {
+    fn type_as_str() -> &'static str {
+        "product"
+    }
+}

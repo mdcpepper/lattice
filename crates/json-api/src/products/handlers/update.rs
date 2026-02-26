@@ -11,6 +11,7 @@ use salvo::{
     prelude::*,
 };
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use uuid::Uuid;
 
 use lattice_app::domain::products::data::ProductUpdate;
@@ -21,6 +22,8 @@ use crate::{extensions::*, products::errors::into_status_error, state::State};
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub(crate) struct UpdateProductRequest {
     pub price: u64,
+    #[serde(default)]
+    pub tags: SmallVec<[String; 3]>,
 }
 
 impl From<UpdateProductRequest> for ProductUpdate {
@@ -28,6 +31,7 @@ impl From<UpdateProductRequest> for ProductUpdate {
         ProductUpdate {
             uuid: None,
             price: request.price,
+            tags: request.tags,
         }
     }
 }
@@ -80,6 +84,7 @@ pub(crate) async fn handler(
 mod tests {
     use salvo::test::{ResponseExt, TestClient};
     use serde_json::json;
+    use smallvec::smallvec;
     use testresult::TestResult;
 
     use lattice_app::domain::products::{
@@ -113,6 +118,7 @@ mod tests {
                         == ProductUpdate {
                             uuid: None,
                             price: 200,
+                            tags: smallvec![],
                         }
             })
             .return_once(move |_, _, _| Ok(product));
@@ -171,6 +177,7 @@ mod tests {
                         == ProductUpdate {
                             uuid: None,
                             price: 200,
+                            tags: smallvec![],
                         }
             })
             .return_once(|_, _, _| Err(ProductsServiceError::InvalidData));
