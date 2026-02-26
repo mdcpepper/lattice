@@ -13,6 +13,7 @@ use crate::{
             records::{ProductRecord, ProductUuid},
             repository::PgProductsRepository,
         },
+        tags::PgTagsRepository,
         tenants::records::TenantUuid,
     },
 };
@@ -20,7 +21,8 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct PgProductsService {
     db: Db,
-    repository: PgProductsRepository,
+    products: PgProductsRepository,
+    tags: PgTagsRepository,
 }
 
 impl PgProductsService {
@@ -28,8 +30,24 @@ impl PgProductsService {
     pub fn new(db: Db) -> Self {
         Self {
             db,
-            repository: PgProductsRepository::new(),
+            products: PgProductsRepository::new(),
+            tags: PgTagsRepository::new(),
         }
+    }
+
+    #[cfg(test)]
+    async fn list_product_tags(
+        &self,
+        tenant: TenantUuid,
+        product: ProductUuid,
+    ) -> Result<Vec<String>, ProductsServiceError> {
+        let mut tx = self.db.begin_tenant_transaction(tenant).await?;
+
+        let names = self.tags.list_taggable_tag_names(&mut tx, product).await?;
+
+        tx.commit().await?;
+
+        Ok(names)
     }
 }
 
@@ -42,10 +60,7 @@ impl ProductsService for PgProductsService {
     ) -> Result<Vec<ProductRecord>, ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let products = self
-            .repository
-            .list_products(&mut tx, point_in_time)
-            .await?;
+        let products = self.products.list_products(&mut tx, point_in_time).await?;
 
         tx.commit().await?;
 
@@ -61,7 +76,7 @@ impl ProductsService for PgProductsService {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let product = self
-            .repository
+            .products
             .get_product(&mut tx, product, point_in_time)
             .await?;
 
@@ -77,10 +92,16 @@ impl ProductsService for PgProductsService {
     ) -> Result<ProductRecord, ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let created = self
-            .repository
-            .create_product(&mut tx, product.uuid, product.price)
+        let NewProduct { uuid, price, tags } = product;
+
+        let created = self.products.create_product(&mut tx, uuid, price).await?;
+
+        let taggables = self
+            .tags
+            .resolve_taggable_tags(&mut tx, &[(uuid, tags)])
             .await?;
+
+        self.tags.create_taggables(&mut tx, &taggables).await?;
 
         tx.commit().await?;
 
@@ -95,10 +116,21 @@ impl ProductsService for PgProductsService {
     ) -> Result<ProductRecord, ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
+        let ProductUpdate { uuid, price, tags } = update;
+
         let updated = self
-            .repository
-            .update_product(&mut tx, product, update.uuid, update.price)
+            .products
+            .update_product(&mut tx, product, uuid, price)
             .await?;
+
+        self.tags.delete_taggables(&mut tx, &[product]).await?;
+
+        let taggables = self
+            .tags
+            .resolve_taggable_tags(&mut tx, &[(product, tags)])
+            .await?;
+
+        self.tags.create_taggables(&mut tx, &taggables).await?;
 
         tx.commit().await?;
 
@@ -112,7 +144,7 @@ impl ProductsService for PgProductsService {
     ) -> Result<(), ProductsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
-        let rows_affected = self.repository.delete_product(&mut tx, product).await?;
+        let rows_affected = self.products.delete_product(&mut tx, product).await?;
 
         if rows_affected == 0 {
             return Err(ProductsServiceError::NotFound);
@@ -168,6 +200,7 @@ pub trait ProductsService: Send + Sync {
 #[cfg(test)]
 mod tests {
     use jiff::Timestamp;
+    use smallvec::smallvec;
     use testresult::TestResult;
 
     use crate::{
@@ -184,7 +217,14 @@ mod tests {
 
         let product = ctx
             .products
-            .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 999 })
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 999,
+                    tags: smallvec![],
+                },
+            )
             .await?;
 
         assert_eq!(product.uuid, uuid);
@@ -195,12 +235,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_product_syncs_tags() -> TestResult {
+        let ctx = TestContext::new().await;
+        let uuid = ProductUuid::new();
+
+        ctx.products
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 999,
+                    tags: smallvec!["apparel".to_string(), "sale".to_string()],
+                },
+            )
+            .await?;
+
+        let names = ctx
+            .products
+            .list_product_tags(ctx.tenant_uuid, uuid)
+            .await?;
+
+        assert_eq!(names, vec!["apparel".to_string(), "sale".to_string()]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn get_product_returns_created_product() -> TestResult {
         let ctx = TestContext::new().await;
         let uuid = ProductUuid::new();
 
         ctx.products
-            .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 1500 })
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 1500,
+                    tags: smallvec![],
+                },
+            )
             .await?;
 
         let product = ctx
@@ -243,6 +316,7 @@ mod tests {
                 NewProduct {
                     uuid: uuid_a,
                     price: 100,
+                    tags: smallvec![],
                 },
             )
             .await?;
@@ -253,6 +327,7 @@ mod tests {
                 NewProduct {
                     uuid: uuid_b,
                     price: 200,
+                    tags: smallvec![],
                 },
             )
             .await?;
@@ -290,7 +365,14 @@ mod tests {
         let uuid = ProductUuid::new();
 
         ctx.products
-            .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 500 })
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 500,
+                    tags: smallvec![],
+                },
+            )
             .await?;
 
         let updated = ctx
@@ -301,12 +383,89 @@ mod tests {
                 ProductUpdate {
                     uuid: None,
                     price: 750,
+                    tags: smallvec![],
                 },
             )
             .await?;
 
         assert_eq!(updated.uuid, uuid);
         assert_eq!(updated.price, 750);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_product_replaces_tags() -> TestResult {
+        let ctx = TestContext::new().await;
+        let uuid = ProductUuid::new();
+
+        ctx.products
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 500,
+                    tags: smallvec!["apparel".to_string(), "sale".to_string()],
+                },
+            )
+            .await?;
+
+        ctx.products
+            .update_product(
+                ctx.tenant_uuid,
+                uuid,
+                ProductUpdate {
+                    uuid: None,
+                    price: 750,
+                    tags: smallvec!["featured".to_string(), "sale".to_string()],
+                },
+            )
+            .await?;
+
+        let names = ctx
+            .products
+            .list_product_tags(ctx.tenant_uuid, uuid)
+            .await?;
+
+        assert_eq!(names, vec!["featured".to_string(), "sale".to_string()]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_product_can_clear_tags() -> TestResult {
+        let ctx = TestContext::new().await;
+        let uuid = ProductUuid::new();
+
+        ctx.products
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 500,
+                    tags: smallvec!["apparel".to_string(), "sale".to_string()],
+                },
+            )
+            .await?;
+
+        ctx.products
+            .update_product(
+                ctx.tenant_uuid,
+                uuid,
+                ProductUpdate {
+                    uuid: None,
+                    price: 750,
+                    tags: smallvec![],
+                },
+            )
+            .await?;
+
+        let names = ctx
+            .products
+            .list_product_tags(ctx.tenant_uuid, uuid)
+            .await?;
+
+        assert!(names.is_empty(), "expected product tags to be cleared");
 
         Ok(())
     }
@@ -323,6 +482,7 @@ mod tests {
                 ProductUpdate {
                     uuid: None,
                     price: 100,
+                    tags: smallvec![],
                 },
             )
             .await;
@@ -339,7 +499,14 @@ mod tests {
         let uuid = ProductUuid::new();
 
         ctx.products
-            .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 300 })
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 300,
+                    tags: smallvec![],
+                },
+            )
             .await?;
 
         ctx.products.delete_product(ctx.tenant_uuid, uuid).await?;
@@ -378,12 +545,26 @@ mod tests {
         let uuid = ProductUuid::new();
 
         ctx.products
-            .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 100 })
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 100,
+                    tags: smallvec![],
+                },
+            )
             .await?;
 
         let result = ctx
             .products
-            .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 200 })
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 200,
+                    tags: smallvec![],
+                },
+            )
             .await;
 
         assert!(
@@ -405,6 +586,7 @@ mod tests {
                 NewProduct {
                     uuid: ProductUuid::new(),
                     price: 100,
+                    tags: smallvec![],
                 },
             )
             .await?;
@@ -431,7 +613,14 @@ mod tests {
         let uuid = ProductUuid::new();
 
         ctx.products
-            .create_product(ctx.tenant_uuid, NewProduct { uuid, price: 100 })
+            .create_product(
+                ctx.tenant_uuid,
+                NewProduct {
+                    uuid,
+                    price: 100,
+                    tags: smallvec![],
+                },
+            )
             .await?;
 
         ctx.products.delete_product(ctx.tenant_uuid, uuid).await?;
