@@ -26,7 +26,7 @@ pub type CartItemUuid = TypedUuid<CartItemRecord>;
 #[derive(Debug, Clone)]
 pub struct CartItemRecord {
     pub uuid: CartItemUuid,
-    pub base_price: u64,
+    pub price: u64,
     pub product_uuid: ProductUuid,
     pub created_at: Timestamp,
     pub updated_at: Timestamp,

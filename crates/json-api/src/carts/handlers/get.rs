@@ -53,8 +53,8 @@ pub(crate) struct CartItemResponse {
     /// The unique identifier of the cart item
     pub uuid: Uuid,
 
-    /// The base price of the cart item
-    pub base_price: u64,
+    /// The price of the cart item
+    pub price: u64,
 
     /// The unique identifier of the product in the cart item
     pub product_uuid: Uuid,
@@ -73,7 +73,7 @@ impl From<CartItemRecord> for CartItemResponse {
     fn from(cart_item: CartItemRecord) -> Self {
         Self {
             uuid: cart_item.uuid.into(),
-            base_price: cart_item.base_price,
+            price: cart_item.price,
             product_uuid: cart_item.product_uuid.into(),
             created_at: cart_item.created_at.to_string(),
             updated_at: cart_item.updated_at.to_string(),
