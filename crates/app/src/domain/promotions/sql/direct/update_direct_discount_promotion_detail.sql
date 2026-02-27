@@ -6,10 +6,11 @@ WITH
       promotions
     WHERE
       uuid = $1
+      AND promotionable_type = 'direct'
       AND deleted_at IS NULL
   ),
-  closed_current_detail AS (
-    UPDATE direct_discount_promotion_details
+  closed_current_version AS (
+    UPDATE direct_discount_promotions
     SET
       valid_period = tstzrange (lower(valid_period), NOW(), '[)')
     WHERE
@@ -25,7 +26,7 @@ WITH
   ),
   inserted_detail AS (
     INSERT INTO
-      direct_discount_promotion_details (
+      direct_discount_promotions (
         uuid,
         promotion_uuid,
         redemption_budget,
@@ -36,14 +37,14 @@ WITH
       )
     SELECT
       $2,
-      closed_current_detail.promotion_uuid,
+      closed_current_version.promotion_uuid,
       $3,
       $4,
       $5::simple_discount_kind,
       $6,
       $7
     FROM
-      closed_current_detail
+      closed_current_version
     RETURNING
       uuid
   )

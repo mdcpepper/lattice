@@ -1,5 +1,5 @@
 INSERT INTO
-  direct_discount_promotion_details (
+  direct_discount_promotions (
     uuid,
     promotion_uuid,
     redemption_budget,

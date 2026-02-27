@@ -39,8 +39,11 @@ impl PgPromotionsRepository {
                 discount,
                 ..
             } => {
+                let record = insert_promotion_record(tx, uuid, &promotion).await?;
+
                 insert_direct_discount_promotion(tx, *uuid, budgets, discount).await?;
-                insert_promotion_record(tx, uuid, &promotion).await
+
+                Ok(record)
             }
         }
     }
