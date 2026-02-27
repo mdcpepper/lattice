@@ -73,11 +73,11 @@ impl PgCartItemsRepository {
 
 impl<'r> FromRow<'r, PgRow> for CartItemRecord {
     fn from_row(row: &'r PgRow) -> sqlx::Result<Self> {
-        let base_price = try_get_amount(row, "base_price")?;
+        let price = try_get_amount(row, "price")?;
 
         Ok(Self {
             uuid: CartItemUuid::from_uuid(row.try_get("uuid")?),
-            base_price,
+            price,
             product_uuid: ProductUuid::from_uuid(row.try_get("product_uuid")?),
             created_at: row.try_get::<SqlxTimestamp, _>("created_at")?.to_jiff(),
             updated_at: row.try_get::<SqlxTimestamp, _>("updated_at")?.to_jiff(),

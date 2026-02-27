@@ -388,7 +388,7 @@ mod tests {
             let item = add_item(&ctx, ctx.tenant_uuid, cart.uuid, product.uuid, uuid).await?;
 
             assert_eq!(item.uuid, uuid);
-            assert_eq!(item.base_price, product.price);
+            assert_eq!(item.price, product.price);
             assert_eq!(item.product_uuid, product.uuid);
             assert!(item.deleted_at.is_none());
 

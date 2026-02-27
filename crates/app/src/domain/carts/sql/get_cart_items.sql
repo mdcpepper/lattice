@@ -1,6 +1,6 @@
 SELECT
     cart_items.uuid,
-    cart_items.base_price,
+    cart_items.price,
     cart_items.product_uuid,
     cart_items.created_at,
     cart_items.updated_at,

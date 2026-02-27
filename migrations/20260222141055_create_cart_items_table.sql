@@ -4,7 +4,7 @@ SET
 CREATE TABLE cart_items (
   uuid UUID PRIMARY KEY,
 
-  base_price BIGINT NOT NULL,
+  price BIGINT NOT NULL,
 
   cart_uuid    UUID NOT NULL,
   product_uuid UUID NOT NULL,

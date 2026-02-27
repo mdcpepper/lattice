@@ -1,7 +1,7 @@
 INSERT INTO cart_items
     (
         uuid,
-        base_price,
+        price,
         cart_uuid,
         product_uuid
     )
@@ -15,7 +15,7 @@ WHERE pd.product_uuid = $3
   AND pd.valid_period @> now()
 RETURNING
     uuid,
-    base_price,
+    price,
     cart_uuid,
     product_uuid,
     created_at,
