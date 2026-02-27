@@ -73,6 +73,7 @@ fn strict_promotions_mock() -> MockPromotionsService {
     let mut promotions = MockPromotionsService::new();
 
     promotions.expect_create_promotion().never();
+    promotions.expect_update_promotion().never();
 
     promotions
 }

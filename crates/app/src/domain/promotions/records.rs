@@ -16,6 +16,13 @@ pub struct PromotionRecord {
     pub deleted_at: Option<Timestamp>,
 }
 
+/// Direct Discount Promotion Detail Record
+#[derive(Debug, Clone)]
+pub struct DirectDiscountPromotionDetailRecord {}
+
+/// Direct Discount Promotion Detail UUID
+pub type DirectDiscountDetailUuid = TypedUuid<DirectDiscountPromotionDetailRecord>;
+
 /// Qualification UUID
 pub type QualificationUuid = TypedUuid<QualificationRecord>;
 

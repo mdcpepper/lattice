@@ -4,7 +4,10 @@ CREATE TYPE QUALIFICATION_OP AS ENUM('and', 'or');
 
 CREATE TABLE qualifications (
   uuid UUID PRIMARY KEY,
+
   promotion_uuid UUID NOT NULL,
+  promotionable_uuid UUID NOT NULL,
+  promotionable_type PROMOTIONABLE_TYPE NOT NULL,
 
   context QUALIFICATION_CONTEXT NOT NULL DEFAULT 'primary',
   op QUALIFICATION_OP NOT NULL DEFAULT 'and',
@@ -18,6 +21,7 @@ CREATE TABLE qualifications (
 );
 
 CREATE INDEX qualifications_promotion_uuid_idx ON qualifications (promotion_uuid);
+CREATE INDEX qualifications_promotionable_lookup_idx ON qualifications (promotionable_type, promotionable_uuid);
 
 CREATE INDEX qualifications_parent_qualification_uuid_idx ON qualifications (parent_qualification_uuid)
 WHERE
@@ -38,6 +42,7 @@ SELECT
         promotions p
       WHERE
         p.uuid = qualifications.promotion_uuid
+        AND p.promotionable_type = qualifications.promotionable_type
         AND p.tenant_uuid = NULLIF(
           current_setting('app.current_tenant_uuid', TRUE),
           ''
@@ -55,6 +60,7 @@ WITH
         promotions p
       WHERE
         p.uuid = qualifications.promotion_uuid
+        AND p.promotionable_type = qualifications.promotionable_type
         AND p.tenant_uuid = NULLIF(
           current_setting('app.current_tenant_uuid', TRUE),
           ''
@@ -71,6 +77,7 @@ CREATE POLICY qualifications_tenant_delete_policy ON qualifications FOR DELETE U
       promotions p
     WHERE
       p.uuid = qualifications.promotion_uuid
+      AND p.promotionable_type = qualifications.promotionable_type
       AND p.tenant_uuid = NULLIF(
         current_setting('app.current_tenant_uuid', TRUE),
         ''

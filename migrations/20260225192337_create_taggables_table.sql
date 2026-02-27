@@ -59,6 +59,7 @@ SELECT
             JOIN promotions p ON p.uuid = q.promotion_uuid
           WHERE
             qr.uuid = taggables.taggable_uuid
+            AND p.promotionable_type = q.promotionable_type
             AND p.tenant_uuid = NULLIF(
               current_setting('app.current_tenant_uuid', TRUE),
               ''
@@ -111,6 +112,7 @@ WITH
             JOIN promotions p ON p.uuid = q.promotion_uuid
           WHERE
             qr.uuid = taggables.taggable_uuid
+            AND p.promotionable_type = q.promotionable_type
             AND p.tenant_uuid = NULLIF(
               current_setting('app.current_tenant_uuid', TRUE),
               ''
@@ -161,6 +163,7 @@ CREATE POLICY taggables_tenant_delete_policy ON taggables FOR DELETE USING (
           JOIN promotions p ON p.uuid = q.promotion_uuid
         WHERE
           qr.uuid = taggables.taggable_uuid
+          AND p.promotionable_type = q.promotionable_type
           AND p.tenant_uuid = NULLIF(
             current_setting('app.current_tenant_uuid', TRUE),
             ''

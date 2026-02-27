@@ -16,7 +16,7 @@ pub(crate) fn into_status_error(error: PromotionsServiceError) -> StatusError {
             StatusError::bad_request().brief("Invalid promotion payload")
         }
         PromotionsServiceError::Sql(source) => {
-            error!("failed to create promotion: {source}");
+            error!("failed to process promotion: {source}");
 
             StatusError::internal_server_error()
         }

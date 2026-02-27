@@ -8,8 +8,8 @@ use crate::{
     domain::{
         promotions::{
             PromotionsServiceError,
-            data::Promotion,
-            records::PromotionRecord,
+            data::{NewPromotion, PromotionUpdate},
+            records::{DirectDiscountDetailUuid, PromotionRecord, PromotionUuid},
             repositories::{
                 promotions::PgPromotionsRepository, qualifications::PgQualificationsRepository,
             },
@@ -44,26 +44,29 @@ impl PromotionsService for PgPromotionsService {
     async fn create_promotion(
         &self,
         tenant: TenantUuid,
-        promotion: Promotion,
+        promotion: NewPromotion,
     ) -> Result<PromotionRecord, PromotionsServiceError> {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let mut promotion = promotion;
+        let promotion_uuid = promotion.uuid();
+        let promotionable_type = promotion.type_as_str();
+        let qualification = promotion.take_qualification();
 
-        let (promotion_uuid, qualification) = match &mut promotion {
-            Promotion::DirectDiscount {
-                uuid,
-                qualification,
-                ..
-            } => (*uuid, qualification.take()),
-        };
+        let detail_uuid = DirectDiscountDetailUuid::from_uuid(promotion_uuid.into_uuid());
 
         let record = self.promotions.create_promotion(&mut tx, promotion).await?;
 
         if let Some(qual) = qualification {
             let rule_tags = self
                 .qualifications
-                .create_qualifications(&mut tx, promotion_uuid, &qual)
+                .create_qualifications(
+                    &mut tx,
+                    promotion_uuid,
+                    detail_uuid,
+                    promotionable_type,
+                    &qual,
+                )
                 .await?;
 
             let taggables = self.tags.resolve_taggable_tags(&mut tx, &rule_tags).await?;
@@ -75,6 +78,39 @@ impl PromotionsService for PgPromotionsService {
 
         Ok(record)
     }
+
+    async fn update_promotion(
+        &self,
+        tenant: TenantUuid,
+        uuid: PromotionUuid,
+        update: PromotionUpdate,
+    ) -> Result<(), PromotionsServiceError> {
+        let mut tx = self.db.begin_tenant_transaction(tenant).await?;
+
+        let mut update = update;
+        let promotionable_type = update.type_as_str();
+        let qualification = update.take_qualification();
+
+        let detail_uuid = self
+            .promotions
+            .update_promotion(&mut tx, uuid, update)
+            .await?;
+
+        if let Some(qual) = qualification {
+            let rule_tags = self
+                .qualifications
+                .create_qualifications(&mut tx, uuid, detail_uuid, promotionable_type, &qual)
+                .await?;
+
+            let taggables = self.tags.resolve_taggable_tags(&mut tx, &rule_tags).await?;
+
+            self.tags.create_taggables(&mut tx, &taggables).await?;
+        }
+
+        tx.commit().await?;
+
+        Ok(())
+    }
 }
 
 #[automock]
@@ -83,8 +119,15 @@ pub trait PromotionsService: Send + Sync {
     async fn create_promotion(
         &self,
         tenant: TenantUuid,
-        promotion: Promotion,
+        promotion: NewPromotion,
     ) -> Result<PromotionRecord, PromotionsServiceError>;
+
+    async fn update_promotion(
+        &self,
+        tenant: TenantUuid,
+        uuid: PromotionUuid,
+        update: PromotionUpdate,
+    ) -> Result<(), PromotionsServiceError>;
 }
 
 #[cfg(test)]
@@ -93,11 +136,12 @@ mod tests {
     use smallvec::smallvec;
     use sqlx::{Row, postgres::PgRow};
     use testresult::TestResult;
+    use uuid::Uuid;
 
     use crate::{
         domain::promotions::{
             data::{
-                Promotion,
+                NewPromotion, PromotionUpdate,
                 budgets::Budgets,
                 discounts::SimpleDiscount,
                 qualification::{
@@ -141,7 +185,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                Promotion::DirectDiscount {
+                NewPromotion::DirectDiscount {
                     uuid,
                     budgets: Budgets {
                         redemptions: Some(100),
@@ -169,7 +213,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                Promotion::DirectDiscount {
+                NewPromotion::DirectDiscount {
                     uuid: PromotionUuid::new(),
                     budgets: Budgets {
                         redemptions: None,
@@ -197,7 +241,7 @@ mod tests {
         ctx.promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                Promotion::DirectDiscount {
+                NewPromotion::DirectDiscount {
                     uuid,
                     budgets: Budgets {
                         redemptions: Some(10),
@@ -213,7 +257,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                Promotion::DirectDiscount {
+                NewPromotion::DirectDiscount {
                     uuid,
                     budgets: Budgets {
                         redemptions: Some(20),
@@ -241,7 +285,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                Promotion::DirectDiscount {
+                NewPromotion::DirectDiscount {
                     uuid: PromotionUuid::new(),
                     budgets: Budgets {
                         redemptions: None,
@@ -267,7 +311,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                Promotion::DirectDiscount {
+                NewPromotion::DirectDiscount {
                     uuid: PromotionUuid::new(),
                     budgets: Budgets {
                         redemptions: None,
@@ -293,7 +337,7 @@ mod tests {
             .promotions
             .create_promotion(
                 ctx.tenant_uuid,
-                Promotion::DirectDiscount {
+                NewPromotion::DirectDiscount {
                     uuid: PromotionUuid::new(),
                     budgets: Budgets {
                         redemptions: Some(7),
@@ -395,6 +439,254 @@ mod tests {
                 ("has_all".to_string(), "clothing".to_string()),
                 ("has_all".to_string(), "sale".to_string()),
                 ("has_any".to_string(), "footwear".to_string()),
+                ("has_none".to_string(), "excluded".to_string()),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_promotion_succeeds() -> TestResult {
+        let ctx = TestContext::new().await;
+        let uuid = PromotionUuid::new();
+
+        ctx.promotions
+            .create_promotion(
+                ctx.tenant_uuid,
+                NewPromotion::DirectDiscount {
+                    uuid,
+                    budgets: Budgets {
+                        redemptions: Some(100),
+                        monetary: Some(10_000),
+                    },
+                    discount: SimpleDiscount::PercentageOff { percentage: 20 },
+                    qualification: None,
+                },
+            )
+            .await?;
+
+        ctx.promotions
+            .update_promotion(
+                ctx.tenant_uuid,
+                uuid,
+                PromotionUpdate::DirectDiscount {
+                    budgets: Budgets {
+                        redemptions: Some(50),
+                        monetary: Some(5_000),
+                    },
+                    discount: SimpleDiscount::PercentageOff { percentage: 10 },
+                    qualification: None,
+                },
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_promotion_not_found_returns_not_found() -> TestResult {
+        let ctx = TestContext::new().await;
+
+        let result = ctx
+            .promotions
+            .update_promotion(
+                ctx.tenant_uuid,
+                PromotionUuid::new(),
+                PromotionUpdate::DirectDiscount {
+                    budgets: Budgets {
+                        redemptions: None,
+                        monetary: None,
+                    },
+                    discount: SimpleDiscount::PercentageOff { percentage: 10 },
+                    qualification: None,
+                },
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(PromotionsServiceError::NotFound)),
+            "expected NotFound, got {result:?}"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_promotion_creates_new_detail_row() -> TestResult {
+        let ctx = TestContext::new().await;
+        let uuid = PromotionUuid::new();
+
+        ctx.promotions
+            .create_promotion(
+                ctx.tenant_uuid,
+                NewPromotion::DirectDiscount {
+                    uuid,
+                    budgets: Budgets {
+                        redemptions: Some(100),
+                        monetary: None,
+                    },
+                    discount: SimpleDiscount::PercentageOff { percentage: 20 },
+                    qualification: None,
+                },
+            )
+            .await?;
+
+        ctx.promotions
+            .update_promotion(
+                ctx.tenant_uuid,
+                uuid,
+                PromotionUpdate::DirectDiscount {
+                    budgets: Budgets {
+                        redemptions: Some(50),
+                        monetary: None,
+                    },
+                    discount: SimpleDiscount::FixedAmountOff { amount: 200 },
+                    qualification: None,
+                },
+            )
+            .await?;
+
+        let rows: Vec<(bool,)> = sqlx::query_as(
+            "SELECT upper_inf(valid_period)
+             FROM direct_discount_promotion_details
+             WHERE promotion_uuid = $1
+             ORDER BY created_at",
+        )
+        .bind(uuid.into_uuid())
+        .fetch_all(ctx.db.pool())
+        .await?;
+
+        assert_eq!(rows.len(), 2, "expected two detail rows after update");
+        assert!(!rows[0].0, "first row should be closed");
+        assert!(rows[1].0, "second row should be open");
+
+        let current: ExpectedDetail = sqlx::query_as(
+            "SELECT
+               redemption_budget,
+               monetary_budget,
+               discount_kind::text AS kind,
+               discount_percentage,
+               discount_amount
+             FROM direct_discount_promotion_details
+             WHERE promotion_uuid = $1
+               AND upper_inf(valid_period)",
+        )
+        .bind(uuid.into_uuid())
+        .fetch_one(ctx.db.pool())
+        .await?;
+
+        assert_eq!(
+            current,
+            ExpectedDetail {
+                redemption_budget: Some(50),
+                monetary_budget: None,
+                kind: "amount_off".to_string(),
+                discount_percentage: None,
+                discount_amount: Some(200),
+            }
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn update_promotion_creates_versioned_qualification_and_tags() -> TestResult {
+        let ctx = TestContext::new().await;
+        let uuid = PromotionUuid::new();
+
+        ctx.promotions
+            .create_promotion(
+                ctx.tenant_uuid,
+                NewPromotion::DirectDiscount {
+                    uuid,
+                    budgets: Budgets {
+                        redemptions: Some(100),
+                        monetary: None,
+                    },
+                    discount: SimpleDiscount::PercentageOff { percentage: 20 },
+                    qualification: None,
+                },
+            )
+            .await?;
+
+        ctx.promotions
+            .update_promotion(
+                ctx.tenant_uuid,
+                uuid,
+                PromotionUpdate::DirectDiscount {
+                    budgets: Budgets {
+                        redemptions: Some(50),
+                        monetary: None,
+                    },
+                    discount: SimpleDiscount::FixedAmountOff { amount: 200 },
+                    qualification: Some(Qualification {
+                        context: QualificationContext::Primary,
+                        op: QualificationOp::And,
+                        rules: vec![
+                            QualificationRule::HasAny {
+                                tags: smallvec!["included".to_string()],
+                            },
+                            QualificationRule::HasNone {
+                                tags: smallvec!["excluded".to_string()],
+                            },
+                        ],
+                    }),
+                },
+            )
+            .await?;
+
+        let current_detail_uuid: Uuid = sqlx::query_scalar(
+            "SELECT uuid
+             FROM direct_discount_promotion_details
+             WHERE promotion_uuid = $1
+               AND upper_inf(valid_period)",
+        )
+        .bind(uuid.into_uuid())
+        .fetch_one(ctx.db.pool())
+        .await?;
+
+        let qualification_rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT promotionable_type::text
+             FROM qualifications
+             WHERE promotionable_uuid = $1",
+        )
+        .bind(current_detail_uuid)
+        .fetch_all(ctx.db.pool())
+        .await?;
+
+        assert_eq!(qualification_rows, vec![("direct".to_string(),)]);
+
+        let old_detail_qualification_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*)
+             FROM qualifications
+             WHERE promotionable_uuid = $1",
+        )
+        .bind(uuid.into_uuid())
+        .fetch_one(ctx.db.pool())
+        .await?;
+
+        assert_eq!(old_detail_qualification_count, 0);
+
+        let rule_tags: Vec<(String, String)> = sqlx::query_as(
+            "SELECT qr.kind::text, t.name
+             FROM qualification_rules qr
+             JOIN qualifications q ON q.uuid = qr.qualification_uuid
+             JOIN taggables tg
+               ON tg.taggable_uuid = qr.uuid
+              AND tg.taggable_type = 'qualification_rule'
+             JOIN tags t ON t.uuid = tg.tag_uuid
+             WHERE q.promotionable_uuid = $1
+             ORDER BY qr.kind::text, t.name",
+        )
+        .bind(current_detail_uuid)
+        .fetch_all(ctx.db.pool())
+        .await?;
+
+        assert_eq!(
+            rule_tags,
+            vec![
+                ("has_any".to_string(), "included".to_string()),
                 ("has_none".to_string(), "excluded".to_string()),
             ]
         );
