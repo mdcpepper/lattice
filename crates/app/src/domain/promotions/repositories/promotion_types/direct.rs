@@ -9,9 +9,6 @@ use crate::domain::promotions::{
     repositories::promotions::{budget_numeric_sql_values, discount_numeric_sql_values},
 };
 
-const CREATE_DIRECT_DISCOUNT_PROMOTION_SQL: &str =
-    include_str!("../../sql/direct/create_direct_discount_promotion.sql");
-
 const CREATE_DIRECT_DISCOUNT_PROMOTION_DETAIL_SQL: &str =
     include_str!("../../sql/direct/create_direct_discount_promotion_detail.sql");
 
@@ -28,11 +25,6 @@ pub(crate) async fn insert_direct_discount_promotion(
 
     let (redemption_budget, monetary_budget) = budget_numeric_sql_values(budgets)?;
     let (discount_percentage, discount_amount) = discount_numeric_sql_values(discount)?;
-
-    query(CREATE_DIRECT_DISCOUNT_PROMOTION_SQL)
-        .bind(db_uuid)
-        .execute(&mut **tx)
-        .await?;
 
     query(CREATE_DIRECT_DISCOUNT_PROMOTION_DETAIL_SQL)
         .bind(db_uuid)

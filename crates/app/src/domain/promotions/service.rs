@@ -378,7 +378,7 @@ mod tests {
                discount_kind::text AS kind,
                discount_percentage,
                discount_amount
-             FROM direct_discount_promotion_details
+             FROM direct_discount_promotions
              WHERE promotion_uuid = $1
                AND upper_inf(valid_period)",
         )
@@ -549,7 +549,7 @@ mod tests {
 
         let rows: Vec<(bool,)> = sqlx::query_as(
             "SELECT upper_inf(valid_period)
-             FROM direct_discount_promotion_details
+             FROM direct_discount_promotions
              WHERE promotion_uuid = $1
              ORDER BY created_at",
         )
@@ -568,7 +568,7 @@ mod tests {
                discount_kind::text AS kind,
                discount_percentage,
                discount_amount
-             FROM direct_discount_promotion_details
+             FROM direct_discount_promotions
              WHERE promotion_uuid = $1
                AND upper_inf(valid_period)",
         )
@@ -638,7 +638,7 @@ mod tests {
 
         let current_detail_uuid: Uuid = sqlx::query_scalar(
             "SELECT uuid
-             FROM direct_discount_promotion_details
+             FROM direct_discount_promotions
              WHERE promotion_uuid = $1
                AND upper_inf(valid_period)",
         )
