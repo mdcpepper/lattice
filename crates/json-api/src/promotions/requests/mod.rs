@@ -1,6 +1,9 @@
 //! Promotions Requests
 
-use lattice_app::domain::promotions::{data::Promotion, records::PromotionUuid};
+use lattice_app::domain::promotions::{
+    data::{NewPromotion, PromotionUpdate},
+    records::PromotionUuid,
+};
 use salvo::oapi::ToSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -26,7 +29,7 @@ pub enum CreatePromotionRequest {
     },
 }
 
-impl From<CreatePromotionRequest> for Promotion {
+impl From<CreatePromotionRequest> for NewPromotion {
     fn from(request: CreatePromotionRequest) -> Self {
         match request {
             CreatePromotionRequest::DirectDiscount {
@@ -34,8 +37,35 @@ impl From<CreatePromotionRequest> for Promotion {
                 budgets,
                 discount,
                 qualification,
-            } => Promotion::DirectDiscount {
+            } => NewPromotion::DirectDiscount {
                 uuid: PromotionUuid::from_uuid(uuid),
+                budgets: budgets.into(),
+                discount: discount.into(),
+                qualification: qualification.map(Into::into),
+            },
+        }
+    }
+}
+
+/// Update Promotion Request
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum UpdatePromotionRequest {
+    DirectDiscount {
+        budgets: BudgetsRequest,
+        discount: SimpleDiscountRequest,
+        qualification: Option<CreateQualificationRequest>,
+    },
+}
+
+impl From<UpdatePromotionRequest> for PromotionUpdate {
+    fn from(request: UpdatePromotionRequest) -> Self {
+        match request {
+            UpdatePromotionRequest::DirectDiscount {
+                budgets,
+                discount,
+                qualification,
+            } => PromotionUpdate::DirectDiscount {
                 budgets: budgets.into(),
                 discount: discount.into(),
                 qualification: qualification.map(Into::into),
@@ -59,7 +89,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn direct_discount_promotion_request_parse() -> TestResult {
+    fn create_direct_discount_promotion_request_parse() -> TestResult {
         let json = r#"
             {
                 "type": "direct_discount",
@@ -73,18 +103,15 @@ mod tests {
                     "percentage": 50
                 },
                 "qualification": {
-                    "uuid": "019c8e09-321a-7b0e-8ad1-27a98a4e4dc5",
                     "context": "primary",
                     "op": "and",
                     "rules": [
                         {
                             "type": "has_any",
-                            "uuid": "019c8e0b-485e-7a3e-80dc-a500783fc2e1",
                             "tags": ["include"]
                         },
                         {
                             "type": "has_none",
-                            "uuid": "019c8e0b-5916-71bc-997b-3bd2e613af45",
                             "tags": ["except"]
                         }
                     ]
@@ -115,6 +142,63 @@ mod tests {
                         }
                     ],
                 })
+            }
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_direct_discount_promotion_request_parse() -> TestResult {
+        let json = r#"
+            {
+                "type": "direct_discount",
+                "budgets": {
+                    "redemptions": 500
+                },
+                "discount": {
+                    "type": "percentage_off",
+                    "percentage": 25
+                },
+                "qualification": {
+                    "context": "primary",
+                    "op": "and",
+                    "rules": [
+                        {
+                            "type": "has_any",
+                            "tags": ["include"]
+                        },
+                        {
+                            "type": "has_none",
+                            "tags": ["except"]
+                        }
+                    ]
+                }
+            }
+        "#;
+
+        let request: UpdatePromotionRequest = serde_json::from_str(json)?;
+
+        assert_eq!(
+            request,
+            UpdatePromotionRequest::DirectDiscount {
+                budgets: BudgetsRequest {
+                    redemptions: Some(500),
+                    monetary: None,
+                },
+                discount: SimpleDiscountRequest::PercentageOff { percentage: 25 },
+                qualification: Some(CreateQualificationRequest {
+                    context: QualificationContextRequest::Primary,
+                    op: QualificationOpRequest::And,
+                    rules: vec![
+                        CreateQualificationRuleRequest::HasAny {
+                            tags: smallvec!["include".to_string()]
+                        },
+                        CreateQualificationRuleRequest::HasNone {
+                            tags: smallvec!["except".to_string()]
+                        }
+                    ],
+                }),
             }
         );
 

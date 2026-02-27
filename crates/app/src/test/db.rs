@@ -219,6 +219,7 @@ impl TestDb {
 
         // Run migrations on this database
         println!("Running migrations on database: {db_name}");
+
         sqlx::migrate!("../../migrations")
             .run(&instance.pool)
             .await

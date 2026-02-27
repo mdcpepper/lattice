@@ -65,7 +65,7 @@ mod tests {
     use lattice_app::domain::promotions::{
         PromotionsServiceError,
         data::{
-            Promotion,
+            NewPromotion,
             budgets::Budgets,
             discounts::SimpleDiscount,
             qualification::{
@@ -105,7 +105,7 @@ mod tests {
             .withf(move |tenant, new| {
                 *tenant == TEST_TENANT_UUID
                     && *new
-                        == Promotion::DirectDiscount {
+                        == NewPromotion::DirectDiscount {
                             uuid: promotion_uuid,
                             budgets: Budgets {
                                 redemptions: Some(100),

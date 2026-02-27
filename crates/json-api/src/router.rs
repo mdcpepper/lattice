@@ -34,7 +34,11 @@ pub fn app_router() -> Router {
                         .delete(products::delete::handler),
                 ),
         )
-        .push(Router::with_path("promotions").post(promotions::create::handler))
+        .push(
+            Router::with_path("promotions")
+                .post(promotions::create::handler)
+                .push(Router::with_path("{uuid}").put(promotions::update::handler)),
+        )
 }
 
 #[cfg(test)]
@@ -50,7 +54,7 @@ mod tests {
         domain::{
             carts::{CartsServiceError, MockCartsService},
             products::{MockProductsService, ProductsServiceError},
-            promotions::service::MockPromotionsService,
+            promotions::{PromotionsServiceError, service::MockPromotionsService},
         },
     };
 
@@ -256,8 +260,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_put_promotion_is_registered() {
+        let mut promotions = MockPromotionsService::new();
+
+        promotions
+            .expect_update_promotion()
+            .return_once(|_, _, _| Err(PromotionsServiceError::NotFound));
+
+        let service = router_service(
+            MockCartsService::new(),
+            MockProductsService::new(),
+            promotions,
+        );
+
+        let res = TestClient::put(format!("http://example.com/promotions/{}", Uuid::nil()))
+            .send(&service)
+            .await;
+
+        assert_ne!(
+            res.status_code,
+            Some(StatusCode::NOT_FOUND),
+            "PUT /promotions/{{uuid}} should be registered"
+        );
+    }
+
+    #[tokio::test]
     async fn test_get_product_is_registered() {
         let mut products = MockProductsService::new();
+
         products
             .expect_get_product()
             .return_once(|_, _, _| Err(ProductsServiceError::AlreadyExists));

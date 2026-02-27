@@ -4,9 +4,13 @@ CREATE TYPE QUALIFICATION_RULE_KIND AS ENUM('has_all', 'has_any', 'has_none');
 
 CREATE TABLE qualification_rules (
   uuid UUID PRIMARY KEY,
+
   qualification_uuid UUID NOT NULL,
+
   kind QUALIFICATION_RULE_KIND NOT NULL,
+
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
   CONSTRAINT qualification_rules_qualification_fk FOREIGN KEY (qualification_uuid) REFERENCES qualifications (uuid) ON DELETE CASCADE
 );
 
@@ -23,13 +27,8 @@ SELECT
         1
       FROM
         qualifications q
-        JOIN promotions p ON p.uuid = q.promotion_uuid
       WHERE
         q.uuid = qualification_rules.qualification_uuid
-        AND p.tenant_uuid = NULLIF(
-          current_setting('app.current_tenant_uuid', TRUE),
-          ''
-        )::uuid
     )
   );
 
@@ -44,6 +43,7 @@ WITH
         JOIN promotions p ON p.uuid = q.promotion_uuid
       WHERE
         q.uuid = qualification_rules.qualification_uuid
+        AND p.promotionable_type = q.promotionable_type
         AND p.tenant_uuid = NULLIF(
           current_setting('app.current_tenant_uuid', TRUE),
           ''
@@ -58,12 +58,7 @@ CREATE POLICY qualification_rules_tenant_delete_policy ON qualification_rules FO
       1
     FROM
       qualifications q
-      JOIN promotions p ON p.uuid = q.promotion_uuid
     WHERE
       q.uuid = qualification_rules.qualification_uuid
-      AND p.tenant_uuid = NULLIF(
-        current_setting('app.current_tenant_uuid', TRUE),
-        ''
-      )::uuid
   )
 );
