@@ -2,6 +2,7 @@
 
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{Postgres, Transaction, query_as};
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::domain::promotions::{
@@ -27,11 +28,26 @@ impl PgPromotionsRepository {
         Self
     }
 
+    #[tracing::instrument(
+        name = "promotions.repository.create_promotion",
+        skip(self, tx, promotion),
+        fields(
+            promotion_uuid = tracing::field::Empty,
+            promotion_type = tracing::field::Empty
+        ),
+        err
+    )]
     pub(crate) async fn create_promotion(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         promotion: NewPromotion,
     ) -> Result<PromotionRecord, sqlx::Error> {
+        let promotion_uuid = promotion.uuid();
+        let promotion_type = promotion.type_as_str();
+
+        tracing::Span::current().record("promotion_uuid", tracing::field::display(promotion_uuid));
+        tracing::Span::current().record("promotion_type", tracing::field::display(promotion_type));
+
         match &promotion {
             NewPromotion::DirectDiscount {
                 uuid,
@@ -43,30 +59,68 @@ impl PgPromotionsRepository {
 
                 insert_direct_discount_promotion(tx, *uuid, budgets, discount).await?;
 
+                debug!(promotion_uuid = %record.uuid, promotion_type, "created promotion");
+
                 Ok(record)
             }
         }
     }
 
+    #[tracing::instrument(
+        name = "promotions.repository.update_promotion",
+        skip(self, tx, promotion),
+        fields(
+            promotion_uuid = %uuid,
+            promotion_type = tracing::field::Empty
+        ),
+        err
+    )]
     pub(crate) async fn update_promotion(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         uuid: PromotionUuid,
         promotion: PromotionUpdate,
     ) -> Result<DirectDiscountDetailUuid, sqlx::Error> {
+        let promotion_type = promotion.type_as_str();
+
+        tracing::Span::current().record("promotion_type", tracing::field::display(promotion_type));
+
         match &promotion {
             PromotionUpdate::DirectDiscount {
                 budgets, discount, ..
-            } => update_direct_discount_promotion(tx, uuid, budgets, discount).await,
+            } => {
+                let detail_uuid =
+                    update_direct_discount_promotion(tx, uuid, budgets, discount).await?;
+
+                debug!(
+                    promotion_uuid = %uuid,
+                    detail_uuid = %detail_uuid,
+                    promotion_type,
+                    "updated promotion"
+                );
+
+                Ok(detail_uuid)
+            }
         }
     }
 }
 
+#[tracing::instrument(
+    name = "promotions.repository.insert_promotion_record",
+    skip(tx, promotion),
+    fields(promotion_uuid = %uuid, promotion_type = tracing::field::Empty),
+    err
+)]
 async fn insert_promotion_record(
     tx: &mut Transaction<'_, Postgres>,
     uuid: &PromotionUuid,
     promotion: &NewPromotion,
 ) -> Result<PromotionRecord, sqlx::Error> {
+    tracing::Span::current().record(
+        "promotion_type",
+        tracing::field::display(promotion.type_as_str()),
+    );
+
     let (db_uuid, created_at, updated_at, deleted_at): (
         Uuid,
         SqlxTimestamp,
@@ -77,6 +131,8 @@ async fn insert_promotion_record(
         .bind(promotion.type_as_str())
         .fetch_one(&mut **tx)
         .await?;
+
+    debug!(promotion_uuid = %uuid, "inserted promotion record");
 
     Ok(PromotionRecord {
         uuid: PromotionUuid::from_uuid(db_uuid),

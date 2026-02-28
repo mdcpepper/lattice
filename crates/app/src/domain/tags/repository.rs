@@ -3,6 +3,7 @@
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use sqlx::{Postgres, Transaction, query, query_as};
+use tracing::debug;
 use uuid::Uuid;
 
 use super::{Taggable, records::TagUuid};
@@ -23,11 +24,22 @@ impl PgTagsRepository {
         Self
     }
 
+    #[tracing::instrument(
+        name = "tags.repository.sync_tags",
+        skip(self, tx),
+        fields(
+            names_count = tracing::field::Empty,
+            synced_tag_count = tracing::field::Empty
+        ),
+        err
+    )]
     pub(crate) async fn sync_tags(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         names: &[&str],
     ) -> Result<FxHashMap<String, TagUuid>, sqlx::Error> {
+        tracing::Span::current().record("names_count", names.len());
+
         if names.is_empty() {
             return Ok(FxHashMap::default());
         }
@@ -41,12 +53,29 @@ impl PgTagsRepository {
             .fetch_all(&mut **tx)
             .await?;
 
-        Ok(rows
+        let tag_map: FxHashMap<String, TagUuid> = rows
             .into_iter()
             .map(|(uuid, name)| (name, TagUuid::from_uuid(uuid)))
-            .collect())
+            .collect();
+
+        let synced_tag_count = tag_map.len();
+
+        tracing::Span::current().record("synced_tag_count", synced_tag_count);
+
+        debug!(synced_tag_count, "synchronized tags");
+
+        Ok(tag_map)
     }
 
+    #[tracing::instrument(
+        name = "tags.repository.create_taggables",
+        skip(self, tx, pairs),
+        fields(
+            taggable_type = tracing::field::Empty,
+            pair_count = tracing::field::Empty
+        ),
+        err
+    )]
     pub(crate) async fn create_taggables<T>(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -55,6 +84,11 @@ impl PgTagsRepository {
     where
         T: Taggable + Copy + Into<Uuid>,
     {
+        let pair_count = pairs.len();
+
+        tracing::Span::current().record("taggable_type", T::type_as_str());
+        tracing::Span::current().record("pair_count", pair_count);
+
         if pairs.is_empty() {
             return Ok(());
         }
@@ -77,9 +111,24 @@ impl PgTagsRepository {
             .execute(&mut **tx)
             .await?;
 
+        debug!(
+            pair_count,
+            taggable_type = T::type_as_str(),
+            "created taggables"
+        );
+
         Ok(())
     }
 
+    #[tracing::instrument(
+        name = "tags.repository.delete_taggables",
+        skip(self, tx, taggable_uuids),
+        fields(
+            taggable_type = tracing::field::Empty,
+            taggable_count = tracing::field::Empty
+        ),
+        err
+    )]
     pub(crate) async fn delete_taggables<T>(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -88,6 +137,11 @@ impl PgTagsRepository {
     where
         T: Taggable + Copy + Into<Uuid>,
     {
+        let taggable_count = taggable_uuids.len();
+
+        tracing::Span::current().record("taggable_type", T::type_as_str());
+        tracing::Span::current().record("taggable_count", taggable_count);
+
         if taggable_uuids.is_empty() {
             return Ok(());
         }
@@ -100,9 +154,25 @@ impl PgTagsRepository {
             .execute(&mut **tx)
             .await?;
 
+        debug!(
+            taggable_type = T::type_as_str(),
+            taggable_count, "deleted taggables"
+        );
+
         Ok(())
     }
 
+    #[tracing::instrument(
+        name = "tags.repository.resolve_taggable_tags",
+        skip(self, tx, tags_by_taggable),
+        fields(
+            taggable_type = tracing::field::Empty,
+            taggable_count = tracing::field::Empty,
+            tag_name_count = tracing::field::Empty,
+            resolved_pair_count = tracing::field::Empty
+        ),
+        err
+    )]
     pub(crate) async fn resolve_taggable_tags<T>(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -111,14 +181,20 @@ impl PgTagsRepository {
     where
         T: Taggable + Copy,
     {
+        tracing::Span::current().record("taggable_type", T::type_as_str());
+        tracing::Span::current().record("taggable_count", tags_by_taggable.len());
+
         let all_names: SmallVec<[&str; 5]> = tags_by_taggable
             .iter()
             .flat_map(|(_, tags)| tags.iter().map(String::as_str))
             .collect();
+        let tag_name_count = all_names.len();
+
+        tracing::Span::current().record("tag_name_count", tag_name_count);
 
         let tag_map = self.sync_tags(tx, &all_names).await?;
 
-        Ok(tags_by_taggable
+        let resolved: SmallVec<[(TagUuid, T); 3]> = tags_by_taggable
             .iter()
             .flat_map(|(taggable_uuid, tag_names)| {
                 tag_names.iter().filter_map(|name| {
@@ -128,7 +204,21 @@ impl PgTagsRepository {
                         .map(|tag_uuid| (tag_uuid, *taggable_uuid))
                 })
             })
-            .collect())
+            .collect();
+
+        let resolved_pair_count = resolved.len();
+
+        tracing::Span::current().record("resolved_pair_count", resolved_pair_count);
+
+        debug!(
+            taggable_type = T::type_as_str(),
+            taggable_count = tags_by_taggable.len(),
+            tag_name_count,
+            resolved_pair_count,
+            "resolved taggable tags"
+        );
+
+        Ok(resolved)
     }
 
     #[cfg(test)]

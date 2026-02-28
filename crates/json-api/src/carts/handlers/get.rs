@@ -90,6 +90,16 @@ impl From<CartItemRecord> for CartItemResponse {
     summary = "Get Cart",
     security(("bearer_auth" = []))
 )]
+#[tracing::instrument(
+    name = "carts.get",
+    skip(cart, at, depot),
+    fields(
+        tenant_uuid = tracing::field::Empty,
+        cart_uuid = tracing::field::Empty,
+        point_in_time = tracing::field::Empty
+    ),
+    err
+)]
 pub(crate) async fn handler(
     cart: PathParam<Uuid>,
     at: QueryParam<String, false>,
@@ -99,12 +109,22 @@ pub(crate) async fn handler(
     let tenant = depot.tenant_uuid_or_401()?;
     let point_in_time = at.into_point_in_time()?;
 
+    let cart = cart.into_inner();
+
+    let span = tracing::Span::current();
+
+    span.record("tenant_uuid", tracing::field::display(tenant));
+    span.record("cart_uuid", tracing::field::display(cart));
+    span.record("point_in_time", tracing::field::display(point_in_time));
+
     let cart = state
         .app
         .carts
-        .get_cart(tenant, cart.into_inner().into(), point_in_time)
+        .get_cart(tenant, cart.into(), point_in_time)
         .await
         .map_err(into_status_error)?;
+
+    tracing::info!(cart_uuid = %cart.uuid, item_count = cart.items.len(), "fetched cart");
 
     Ok(Json(cart.into()))
 }

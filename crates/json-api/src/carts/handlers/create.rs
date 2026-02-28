@@ -47,6 +47,15 @@ pub(crate) struct CartCreatedResponse {
         (status_code = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error"),
     ),
 )]
+#[tracing::instrument(
+    name = "carts.create",
+    skip(json, depot, res),
+    fields(
+        tenant_uuid = tracing::field::Empty,
+        cart_uuid = tracing::field::Empty
+    ),
+    err
+)]
 pub(crate) async fn handler(
     json: JsonBody<CreateCartRequest>,
     depot: &mut Depot,
@@ -54,11 +63,17 @@ pub(crate) async fn handler(
 ) -> Result<Json<CartCreatedResponse>, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
     let tenant = depot.tenant_uuid_or_401()?;
+    let request = json.into_inner();
+
+    let span = tracing::Span::current();
+
+    span.record("tenant_uuid", tracing::field::display(tenant));
+    span.record("cart_uuid", tracing::field::display(request.uuid));
 
     let uuid = state
         .app
         .carts
-        .create_cart(tenant, json.into_inner().into())
+        .create_cart(tenant, request.into())
         .await
         .map_err(into_status_error)?
         .uuid;
@@ -66,6 +81,8 @@ pub(crate) async fn handler(
     res.add_header(LOCATION, format!("/carts/{uuid}"), true)
         .or_500("failed to set location header")?
         .status_code(StatusCode::CREATED);
+
+    tracing::info!(cart_uuid = %uuid, "created cart");
 
     Ok(Json(CartCreatedResponse { uuid: uuid.into() }))
 }

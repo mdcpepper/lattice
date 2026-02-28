@@ -19,19 +19,36 @@ use crate::{extensions::*, products::errors::into_status_error, state::State};
         (status_code = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error"),
     ),
 )]
+#[tracing::instrument(
+    name = "products.delete",
+    skip(product, depot),
+    fields(
+        tenant_uuid = tracing::field::Empty,
+        product_uuid = tracing::field::Empty
+    ),
+    err
+)]
 pub(crate) async fn handler(
     product: PathParam<Uuid>,
     depot: &mut Depot,
 ) -> Result<StatusCode, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
     let tenant = depot.tenant_uuid_or_401()?;
+    let product = product.into_inner();
+
+    let span = tracing::Span::current();
+
+    span.record("tenant_uuid", tracing::field::display(tenant));
+    span.record("product_uuid", tracing::field::display(product));
 
     state
         .app
         .products
-        .delete_product(tenant, product.into_inner().into())
+        .delete_product(tenant, product.into())
         .await
         .map_err(into_status_error)?;
+
+    tracing::info!(product_uuid = %product, "deleted product");
 
     Ok(StatusCode::OK)
 }

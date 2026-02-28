@@ -19,6 +19,16 @@ use crate::{carts::errors::into_status_error, extensions::*, state::State};
         (status_code = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error"),
     )
 )]
+#[tracing::instrument(
+    name = "carts.items.delete",
+    skip(cart, item, depot),
+    fields(
+        tenant_uuid = tracing::field::Empty,
+        cart_uuid = tracing::field::Empty,
+        item_uuid = tracing::field::Empty
+    ),
+    err
+)]
 pub(crate) async fn handler(
     cart: PathParam<Uuid>,
     item: PathParam<Uuid>,
@@ -26,13 +36,23 @@ pub(crate) async fn handler(
 ) -> Result<StatusCode, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
     let tenant = depot.tenant_uuid_or_401()?;
+    let cart = cart.into_inner();
+    let item = item.into_inner();
+
+    let span = tracing::Span::current();
+
+    span.record("tenant_uuid", tracing::field::display(tenant));
+    span.record("cart_uuid", tracing::field::display(cart));
+    span.record("item_uuid", tracing::field::display(item));
 
     state
         .app
         .carts
-        .remove_item(tenant, cart.into_inner().into(), item.into_inner().into())
+        .remove_item(tenant, cart.into(), item.into())
         .await
         .map_err(into_status_error)?;
+
+    tracing::info!(cart_uuid = %cart, item_uuid = %item, "deleted cart item");
 
     Ok(StatusCode::OK)
 }

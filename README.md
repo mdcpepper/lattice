@@ -1050,7 +1050,7 @@ or
 docker compose --profile dev up --build --force-recreate json-api-dev demo
 ```
 
-This starts PostgreSQL, a dev OpenBao instance, the JSON API, and the browser demo, then auto-runs:
+This starts PostgreSQL, a dev OpenBao instance, Jaeger, the JSON API, and the browser demo, then auto-runs:
 
 - database migrations
 - app role provisioning for RLS
@@ -1059,9 +1059,10 @@ This starts PostgreSQL, a dev OpenBao instance, the JSON API, and the browser de
 
 Local URLs:
 
-- Swagger UI: `http://localhost:8698/docs`
-- OpenAPI JSON: `http://localhost:8698/api-doc/openapi.json`
-- OpenBao UI (dev): `http://localhost:8200/ui`
+- Swagger UI: http://localhost:8698/docs
+- OpenAPI JSON: http://localhost:8698/api-doc/openapi.json
+- OpenBao UI (dev): http://localhost:8200/ui
+- Jaeger UI (dev traces): http://localhost:16686
 
 The dev bootstrap prints the generated API token once, and caches it at
 `.dev-api-token` for reuse in later runs.

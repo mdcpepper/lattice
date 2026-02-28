@@ -54,6 +54,16 @@ impl From<ProductRecord> for ProductResponse {
     summary = "Get Product",
     security(("bearer_auth" = []))
 )]
+#[tracing::instrument(
+    name = "products.get",
+    skip(product, at, depot),
+    fields(
+        tenant_uuid = tracing::field::Empty,
+        product_uuid = tracing::field::Empty,
+        point_in_time = tracing::field::Empty
+    ),
+    err
+)]
 pub(crate) async fn handler(
     product: PathParam<Uuid>,
     at: QueryParam<String, false>,
@@ -62,13 +72,22 @@ pub(crate) async fn handler(
     let state = depot.obtain_or_500::<Arc<State>>()?;
     let tenant = depot.tenant_uuid_or_401()?;
     let point_in_time = at.into_point_in_time()?;
+    let product = product.into_inner();
+
+    let span = tracing::Span::current();
+
+    span.record("tenant_uuid", tracing::field::display(tenant));
+    span.record("product_uuid", tracing::field::display(product));
+    span.record("point_in_time", tracing::field::display(point_in_time));
 
     let product = state
         .app
         .products
-        .get_product(tenant, product.into_inner().into(), point_in_time)
+        .get_product(tenant, product.into(), point_in_time)
         .await
         .map_err(into_status_error)?;
+
+    tracing::info!(product_uuid = %product.uuid, "fetched product");
 
     Ok(Json(product.into()))
 }

@@ -3,6 +3,7 @@
 use jiff::Timestamp;
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
+use tracing::debug;
 
 use crate::domain::carts::records::{CartRecord, CartUuid};
 
@@ -19,30 +20,56 @@ impl PgCartsRepository {
         Self
     }
 
+    #[tracing::instrument(
+        name = "carts.repository.get_cart",
+        skip(self, tx),
+        fields(cart_uuid = %cart, point_in_time = %point_in_time),
+        err
+    )]
     pub(crate) async fn get_cart(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         cart: CartUuid,
         point_in_time: Timestamp,
     ) -> Result<CartRecord, sqlx::Error> {
-        query_as::<Postgres, CartRecord>(GET_CART_SQL)
+        let cart = query_as::<Postgres, CartRecord>(GET_CART_SQL)
             .bind(cart.into_uuid())
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_one(&mut **tx)
-            .await
+            .await?;
+
+        debug!(cart_uuid = %cart.uuid, "queried cart");
+
+        Ok(cart)
     }
 
+    #[tracing::instrument(
+        name = "carts.repository.create_cart",
+        skip(self, tx),
+        fields(cart_uuid = %cart),
+        err
+    )]
     pub(crate) async fn create_cart(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         cart: CartUuid,
     ) -> Result<CartRecord, sqlx::Error> {
-        query_as::<Postgres, CartRecord>(CREATE_CART_SQL)
+        let created = query_as::<Postgres, CartRecord>(CREATE_CART_SQL)
             .bind(cart.into_uuid())
             .fetch_one(&mut **tx)
-            .await
+            .await?;
+
+        debug!(cart_uuid = %created.uuid, "created cart");
+
+        Ok(created)
     }
 
+    #[tracing::instrument(
+        name = "carts.repository.delete_cart",
+        skip(self, tx),
+        fields(cart_uuid = %cart),
+        err
+    )]
     pub(crate) async fn delete_cart(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -53,6 +80,8 @@ impl PgCartsRepository {
             .execute(&mut **tx)
             .await?
             .rows_affected();
+
+        debug!(cart_uuid = %cart, rows_affected, "deleted cart rows");
 
         Ok(rows_affected)
     }

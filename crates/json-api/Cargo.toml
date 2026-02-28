@@ -13,7 +13,11 @@ serde_json = "1.0.149"
 smallvec.workspace = true
 tokio = { version = "1.49.0", features = ["macros", "signal"] }
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
+tracing-opentelemetry = { version = "0.32.1", default-features = false }
+opentelemetry = "0.31.0"
+opentelemetry_sdk = { version = "0.31.0", default-features = false, features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.31.0", default-features = false, features = ["trace", "grpc-tonic"] }
 thiserror.workspace = true
 uuid.workspace = true
 jiff = { version = "0.2.20", features = ["serde"] }

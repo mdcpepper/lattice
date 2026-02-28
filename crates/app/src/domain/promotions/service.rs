@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use mockall::automock;
+use tracing::{Span, info};
 
 use crate::{
     database::Db,
@@ -41,6 +42,18 @@ impl PgPromotionsService {
 
 #[async_trait]
 impl PromotionsService for PgPromotionsService {
+    #[tracing::instrument(
+        name = "promotions.service.create_promotion",
+        skip(self, promotion),
+        fields(
+            tenant_uuid = %tenant,
+            promotion_uuid = tracing::field::Empty,
+            promotion_type = tracing::field::Empty,
+            has_qualification = tracing::field::Empty,
+            rule_tag_count = tracing::field::Empty
+        ),
+        err
+    )]
     async fn create_promotion(
         &self,
         tenant: TenantUuid,
@@ -49,9 +62,24 @@ impl PromotionsService for PgPromotionsService {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let mut promotion = promotion;
+
         let promotion_uuid = promotion.uuid();
         let promotionable_type = promotion.type_as_str();
         let qualification = promotion.take_qualification();
+
+        let span = Span::current();
+
+        span.record("promotion_uuid", tracing::field::display(promotion_uuid));
+
+        span.record(
+            "promotion_type",
+            tracing::field::display(promotionable_type),
+        );
+
+        span.record(
+            "has_qualification",
+            tracing::field::display(qualification.is_some()),
+        );
 
         let detail_uuid = DirectDiscountDetailUuid::from_uuid(promotion_uuid.into_uuid());
 
@@ -69,6 +97,10 @@ impl PromotionsService for PgPromotionsService {
                 )
                 .await?;
 
+            let rule_tag_count = rule_tags.len();
+
+            span.record("rule_tag_count", tracing::field::display(rule_tag_count));
+
             let taggables = self.tags.resolve_taggable_tags(&mut tx, &rule_tags).await?;
 
             self.tags.create_taggables(&mut tx, &taggables).await?;
@@ -76,9 +108,24 @@ impl PromotionsService for PgPromotionsService {
 
         tx.commit().await?;
 
+        info!(promotion_uuid = %record.uuid, "created promotion");
+
         Ok(record)
     }
 
+    #[tracing::instrument(
+        name = "promotions.service.update_promotion",
+        skip(self, update),
+        fields(
+            tenant_uuid = %tenant,
+            promotion_uuid = %uuid,
+            promotion_type = tracing::field::Empty,
+            has_qualification = tracing::field::Empty,
+            detail_uuid = tracing::field::Empty,
+            rule_tag_count = tracing::field::Empty
+        ),
+        err
+    )]
     async fn update_promotion(
         &self,
         tenant: TenantUuid,
@@ -88,13 +135,28 @@ impl PromotionsService for PgPromotionsService {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let mut update = update;
+
         let promotionable_type = update.type_as_str();
         let qualification = update.take_qualification();
+
+        let span = Span::current();
+
+        span.record(
+            "promotion_type",
+            tracing::field::display(promotionable_type),
+        );
+
+        span.record(
+            "has_qualification",
+            tracing::field::display(qualification.is_some()),
+        );
 
         let detail_uuid = self
             .promotions
             .update_promotion(&mut tx, uuid, update)
             .await?;
+
+        span.record("detail_uuid", tracing::field::display(detail_uuid));
 
         if let Some(qual) = qualification {
             let rule_tags = self
@@ -102,12 +164,18 @@ impl PromotionsService for PgPromotionsService {
                 .create_qualifications(&mut tx, uuid, detail_uuid, promotionable_type, &qual)
                 .await?;
 
+            let rule_tag_count = rule_tags.len();
+
+            span.record("rule_tag_count", tracing::field::display(rule_tag_count));
+
             let taggables = self.tags.resolve_taggable_tags(&mut tx, &rule_tags).await?;
 
             self.tags.create_taggables(&mut tx, &taggables).await?;
         }
 
         tx.commit().await?;
+
+        info!(promotion_uuid = %uuid, detail_uuid = %detail_uuid, "updated promotion");
 
         Ok(())
     }

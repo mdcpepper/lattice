@@ -12,6 +12,7 @@ pub struct NewCart {
 }
 
 /// New Cart Item Data
+#[derive(Debug, Clone, PartialEq)]
 pub struct NewCartItem {
     pub uuid: CartItemUuid,
     pub product_uuid: ProductUuid,

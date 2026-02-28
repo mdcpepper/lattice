@@ -3,6 +3,7 @@
 use jiff::Timestamp;
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::domain::products::records::{ProductDetailsUuid, ProductRecord, ProductUuid};
@@ -23,30 +24,59 @@ impl PgProductsRepository {
         Self
     }
 
+    #[tracing::instrument(
+        name = "products.repository.list_products",
+        level = "debug",
+        skip(self, tx),
+        fields(point_in_time = %point_in_time),
+        err
+    )]
     pub(crate) async fn list_products(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         point_in_time: Timestamp,
     ) -> Result<Vec<ProductRecord>, sqlx::Error> {
-        query_as::<Postgres, ProductRecord>(LIST_PRODUCTS_SQL)
+        let products = query_as::<Postgres, ProductRecord>(LIST_PRODUCTS_SQL)
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_all(&mut **tx)
-            .await
+            .await?;
+
+        debug!(product_count = products.len(), "queried products list");
+
+        Ok(products)
     }
 
+    #[tracing::instrument(
+        name = "products.repository.get_product",
+        level = "debug",
+        skip(self, tx),
+        fields(product_uuid = %product, point_in_time = %point_in_time),
+        err
+    )]
     pub(crate) async fn get_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         product: ProductUuid,
         point_in_time: Timestamp,
     ) -> Result<ProductRecord, sqlx::Error> {
-        query_as::<Postgres, ProductRecord>(GET_PRODUCT_SQL)
+        let product = query_as::<Postgres, ProductRecord>(GET_PRODUCT_SQL)
             .bind(product.into_uuid())
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_one(&mut **tx)
-            .await
+            .await?;
+
+        debug!(product_uuid = %product.uuid, "queried product");
+
+        Ok(product)
     }
 
+    #[tracing::instrument(
+        name = "products.repository.create_product",
+        level = "debug",
+        skip(self, tx),
+        fields(product_uuid = %product, price),
+        err
+    )]
     pub(crate) async fn create_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -75,15 +105,30 @@ impl PgProductsRepository {
             .execute(&mut **tx)
             .await?;
 
-        Ok(ProductRecord {
+        let created = ProductRecord {
             uuid: product,
             price,
             created_at: created_at.to_jiff(),
             updated_at: updated_at.to_jiff(),
             deleted_at: deleted_at.map(SqlxTimestamp::to_jiff),
-        })
+        };
+
+        debug!(product_uuid = %created.uuid, price = created.price, "inserted product");
+
+        Ok(created)
     }
 
+    #[tracing::instrument(
+        name = "products.repository.update_product",
+        level = "debug",
+        skip(self, tx),
+        fields(
+            product_uuid = %product,
+            product_details_uuid = ?product_details,
+            price
+        ),
+        err
+    )]
     pub(crate) async fn update_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -98,14 +143,29 @@ impl PgProductsRepository {
             source: Box::new(e),
         })?;
 
-        query_as::<Postgres, ProductRecord>(UPDATE_PRODUCT_SQL)
+        let updated = query_as::<Postgres, ProductRecord>(UPDATE_PRODUCT_SQL)
             .bind(product.into_uuid())
             .bind(product_details.into_uuid())
             .bind(price_i64)
             .fetch_one(&mut **tx)
-            .await
+            .await?;
+
+        debug!(
+            product_uuid = %updated.uuid,
+            price = updated.price,
+            "updated product record"
+        );
+
+        Ok(updated)
     }
 
+    #[tracing::instrument(
+        name = "products.repository.delete_product",
+        level = "debug",
+        skip(self, tx),
+        fields(product_uuid = %product),
+        err
+    )]
     pub(crate) async fn delete_product(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -116,6 +176,8 @@ impl PgProductsRepository {
             .execute(&mut **tx)
             .await?
             .rows_affected();
+
+        debug!(rows_affected, "deleted product rows");
 
         Ok(rows_affected)
     }

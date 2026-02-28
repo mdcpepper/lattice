@@ -13,14 +13,13 @@ use salvo::{
     trailing_slash::remove_slash,
 };
 use tracing::{error, info};
-use tracing_subscriber::EnvFilter;
 
 use lattice_app::{
     auth::{OpenBaoClient, OpenBaoConfig},
     context::AppContext,
 };
 
-use crate::{config::ServerConfig, state::State};
+use crate::{config::ServerConfig, observability::Observability, state::State};
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
@@ -34,6 +33,7 @@ mod carts;
 mod config;
 mod extensions;
 mod healthcheck;
+mod observability;
 mod products;
 mod promotions;
 mod router;
@@ -63,12 +63,17 @@ pub async fn main() {
         process::exit(1);
     });
 
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level)),
-        )
-        .init();
+    let observability = Observability::init(&config).unwrap_or_else(|source| {
+        #[expect(
+            clippy::print_stderr,
+            reason = "logging may be unavailable if subscriber initialization fails"
+        )]
+        {
+            eprintln!("Observability initialization error: {source}");
+        }
+
+        process::exit(1);
+    });
 
     let addr = config.socket_addr();
 
@@ -97,6 +102,7 @@ pub async fn main() {
         .push(router::app_router());
 
     let router = Router::new()
+        .hoop(observability::request_logging)
         .hoop(CatchPanic::new())
         .hoop(remove_slash())
         .hoop(inject(State::from_app_context(app)))
@@ -125,4 +131,6 @@ pub async fn main() {
     });
 
     server.serve(router).await;
+
+    observability.shutdown();
 }

@@ -31,6 +31,16 @@ pub(crate) struct PromotionCreatedResponse {
         (status_code = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error"),
     ),
 )]
+#[tracing::instrument(
+    name = "promotions.create",
+    skip(json, depot, res),
+    fields(
+        tenant_uuid = tracing::field::Empty,
+        promotion_uuid = tracing::field::Empty,
+        promotion_type = tracing::field::Empty
+    ),
+    err
+)]
 pub(crate) async fn handler(
     json: JsonBody<CreatePromotionRequest>,
     depot: &mut Depot,
@@ -38,11 +48,23 @@ pub(crate) async fn handler(
 ) -> Result<Json<PromotionCreatedResponse>, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
     let tenant = depot.tenant_uuid_or_401()?;
+    let request = json.into_inner();
+
+    let span = tracing::Span::current();
+
+    span.record("tenant_uuid", tracing::field::display(tenant));
+
+    match &request {
+        CreatePromotionRequest::DirectDiscount { uuid, .. } => {
+            span.record("promotion_uuid", tracing::field::display(uuid));
+            span.record("promotion_type", tracing::field::display("direct_discount"));
+        }
+    }
 
     let uuid = state
         .app
         .promotions
-        .create_promotion(tenant, json.into_inner().into())
+        .create_promotion(tenant, request.into())
         .await
         .map_err(into_status_error)?
         .uuid;
@@ -50,6 +72,8 @@ pub(crate) async fn handler(
     res.add_header(LOCATION, format!("/promotions/{uuid}"), true)
         .or_500("failed to set location header")?
         .status_code(StatusCode::CREATED);
+
+    tracing::info!(promotion_uuid = %uuid, "created promotion");
 
     Ok(Json(PromotionCreatedResponse { uuid: uuid.into() }))
 }

@@ -57,7 +57,15 @@ services:
       - SERVER_HOST=${SERVER_HOST:-0.0.0.0}
       - SERVER_PORT=${SERVER_PORT:-8698}
       - RUST_LOG=${RUST_LOG:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
       - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${APP_DB_USER:-lattice_app}:${APP_DB_PASSWORD:-lattice_app_password}@postgres:5432/${POSTGRES_DB:-lattice_db}}
+      - OTEL_ENABLED=${OTEL_ENABLED:-true}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT_DOCKER:-http://jaeger:4317}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-lattice-json}
+      - OTEL_SERVICE_VERSION=${OTEL_SERVICE_VERSION:-0.3.0}
+      - OTEL_DEPLOYMENT_ENVIRONMENT=${OTEL_DEPLOYMENT_ENVIRONMENT:-docker}
+      - OTEL_TRACE_SAMPLE_RATIO=${OTEL_TRACE_SAMPLE_RATIO:-1.0}
+      - SLOW_REQUEST_THRESHOLD_MS=${SLOW_REQUEST_THRESHOLD_MS:-1000}
     networks:
       - lattice-network
     depends_on:
@@ -77,7 +85,15 @@ services:
       - SERVER_HOST=${SERVER_HOST:-0.0.0.0}
       - SERVER_PORT=${SERVER_PORT:-8698}
       - RUST_LOG=${RUST_LOG:-info}
+      - LOG_FORMAT=${LOG_FORMAT:-compact}
       - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${APP_DB_USER:-lattice_app}:${APP_DB_PASSWORD:-lattice_app_password}@postgres:5432/${POSTGRES_DB:-lattice_db}}
+      - OTEL_ENABLED=${OTEL_ENABLED:-true}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT_DOCKER:-http://jaeger:4317}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-lattice-json}
+      - OTEL_SERVICE_VERSION=${OTEL_SERVICE_VERSION:-0.3.0}
+      - OTEL_DEPLOYMENT_ENVIRONMENT=${OTEL_DEPLOYMENT_ENVIRONMENT:-development}
+      - OTEL_TRACE_SAMPLE_RATIO=${OTEL_TRACE_SAMPLE_RATIO:-1.0}
+      - SLOW_REQUEST_THRESHOLD_MS=${SLOW_REQUEST_THRESHOLD_MS:-1000}
       - OPENBAO_POSTGRES_SECRET_PATH=${OPENBAO_POSTGRES_SECRET_PATH:-secret/data/lattice/postgres}
       - OPENBAO_ADDR=${OPENBAO_ADDR_DOCKER:-http://openbao-dev:8200}
       - OPENBAO_TOKEN=${OPENBAO_DEV_ROOT_TOKEN:-lattice-dev-root-token}
@@ -100,6 +116,8 @@ services:
         condition: service_healthy
       openbao-dev:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     profiles:
       - dev
 
@@ -124,6 +142,21 @@ services:
       - lattice-network
     profiles:
       - dev
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    container_name: lattice-jaeger
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - lattice-network
+    profiles:
+      - dev
+    restart: unless-stopped
 
   demo:
     build:
