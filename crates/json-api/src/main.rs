@@ -54,7 +54,7 @@ pub async fn main() {
     let config = ServerConfig::load().unwrap_or_else(|e| {
         #[expect(
             clippy::print_stderr,
-            reason = "logging not initialized yet, must use eprintln for config errors"
+            reason = "logging not initialised yet, must use eprintln for config errors"
         )]
         {
             eprintln!("Configuration error: {e}");
@@ -66,10 +66,10 @@ pub async fn main() {
     let observability = Observability::init(&config).unwrap_or_else(|source| {
         #[expect(
             clippy::print_stderr,
-            reason = "logging may be unavailable if subscriber initialization fails"
+            reason = "logging may be unavailable if subscriber initialisation fails"
         )]
         {
-            eprintln!("Observability initialization error: {source}");
+            eprintln!("Observability initialisation error: {source}");
         }
 
         process::exit(1);
@@ -83,15 +83,15 @@ pub async fn main() {
     let listener = TcpListener::new(addr).bind().await;
 
     let openbao = OpenBaoClient::new(OpenBaoConfig {
-        addr: config.openbao_addr,
-        token: config.openbao_token,
-        transit_key: config.openbao_transit_key,
+        addr: config.auth.addr,
+        token: config.auth.token,
+        transit_key: config.auth.transit_key,
     });
 
-    let app = match AppContext::from_database_url(&config.database_url, openbao).await {
+    let app = match AppContext::from_database_url(&config.database.database_url, openbao).await {
         Ok(app) => app,
         Err(init_error) => {
-            error!("failed to initialize app context: {init_error}");
+            error!("failed to initialise app context: {init_error}");
 
             process::exit(1);
         }
@@ -106,6 +106,7 @@ pub async fn main() {
         .hoop(CatchPanic::new())
         .hoop(remove_slash())
         .hoop(inject(State::from_app_context(app)))
+        .push(Router::with_path("metrics").get(observability::metrics_handler))
         .push(Router::with_path("healthcheck").get(healthcheck::handler))
         .push(api_router);
 

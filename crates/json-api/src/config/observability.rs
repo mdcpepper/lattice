@@ -1,6 +1,6 @@
-//! Server configuration module
+//! Observability & Logging Config
 
-use clap::Parser;
+use clap::Args;
 
 /// Log output format.
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
@@ -12,18 +12,9 @@ pub enum LogFormat {
     Json,
 }
 
-/// Lattice JSON API Server configuration
-#[derive(Debug, Parser)]
-#[command(name = "lattice-json", about = "Lattice JSON API Server", long_about = None)]
-pub struct ServerConfig {
-    /// Server host address
-    #[arg(short = 'H', long, env = "SERVER_HOST", default_value = "0.0.0.0")]
-    pub host: String,
-
-    /// Server port
-    #[arg(short, long, env = "SERVER_PORT", default_value = "8698")]
-    pub port: u16,
-
+/// Logging settings.
+#[derive(Debug, Args)]
+pub struct LoggingConfig {
     /// Log level (trace, debug, info, warn, error)
     #[arg(short, long, env = "RUST_LOG", default_value = "info")]
     pub log_level: String,
@@ -31,10 +22,22 @@ pub struct ServerConfig {
     /// Log format (compact, json)
     #[arg(long, env = "LOG_FORMAT", value_enum, default_value_t = LogFormat::Compact)]
     pub log_format: LogFormat,
+}
 
+/// Observability settings.
+#[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent boolean feature toggles from CLI/env."
+)]
+pub struct ObservabilityConfig {
     /// Enable OpenTelemetry tracing export.
     #[arg(long, env = "OTEL_ENABLED", default_value_t = true)]
     pub otel_enabled: bool,
+
+    /// Enable traceparent extraction from incoming request headers.
+    #[arg(long, env = "OTEL_PARENT_PROPAGATION_ENABLED", default_value_t = false)]
+    pub otel_parent_propagation_enabled: bool,
 
     /// OTLP gRPC endpoint for trace export.
     #[arg(
@@ -76,43 +79,27 @@ pub struct ServerConfig {
     #[arg(long, env = "OTEL_TRACE_SAMPLE_RATIO", default_value_t = 1.0_f64)]
     pub otel_trace_sample_ratio: f64,
 
+    /// Enable Pyroscope CPU profiling export.
+    #[arg(long, env = "PYROSCOPE_ENABLED", default_value_t = false)]
+    pub pyroscope_enabled: bool,
+
+    /// Pyroscope server address.
+    #[arg(
+        long,
+        env = "PYROSCOPE_SERVER_ADDRESS",
+        default_value = "http://localhost:4040"
+    )]
+    pub pyroscope_server_address: String,
+
+    /// Pyroscope sample rate in Hertz.
+    #[arg(long, env = "PYROSCOPE_SAMPLE_RATE", default_value_t = 100_u32)]
+    pub pyroscope_sample_rate: u32,
+
+    /// Enable per-request Pyroscope tags (http.method/http.route).
+    #[arg(long, env = "PYROSCOPE_REQUEST_TAGS_ENABLED", default_value_t = false)]
+    pub pyroscope_request_tags_enabled: bool,
+
     /// Threshold for slow request warnings.
     #[arg(long, env = "SLOW_REQUEST_THRESHOLD_MS", default_value_t = 1_000_u64)]
     pub slow_request_threshold_ms: u64,
-
-    /// `PostgreSQL` connection string
-    #[arg(long, env = "DATABASE_URL")]
-    pub database_url: String,
-
-    /// `OpenBao` server address
-    #[arg(long, env = "OPENBAO_ADDR")]
-    pub openbao_addr: String,
-
-    /// `OpenBao` authentication token
-    #[arg(long, env = "OPENBAO_TOKEN", hide_env_values = true)]
-    pub openbao_token: String,
-
-    /// `OpenBao` Transit key name
-    #[arg(long, env = "OPENBAO_TRANSIT_KEY")]
-    pub openbao_transit_key: String,
-}
-
-impl ServerConfig {
-    /// Load configuration from environment and CLI arguments
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if configuration cannot be parsed
-    pub fn load() -> Result<Self, clap::Error> {
-        // Load .env file if present (ignore if missing)
-        _ = dotenvy::dotenv();
-
-        Self::try_parse()
-    }
-
-    /// Get the socket address for binding
-    #[must_use]
-    pub fn socket_addr(&self) -> String {
-        format!("{}:{}", self.host, self.port)
-    }
 }

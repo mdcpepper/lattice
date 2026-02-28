@@ -97,11 +97,33 @@ impl PgAuthService {
 
 #[async_trait]
 impl AuthService for PgAuthService {
+    #[tracing::instrument(
+        name = "auth.authenticate_bearer",
+        skip(self, bearer_token),
+        fields(
+            token_uuid = tracing::field::Empty,
+            token_version = tracing::field::Empty,
+            tenant_uuid = tracing::field::Empty,
+            auth.valid = tracing::field::Empty
+        ),
+        err
+    )]
     async fn authenticate_bearer(
         &self,
         bearer_token: &str,
     ) -> Result<TenantUuid, AuthServiceError> {
+        let span = tracing::Span::current();
+
         let parsed_token = parse_api_token(bearer_token).map_err(|_| AuthServiceError::NotFound)?;
+
+        span.record(
+            "token_uuid",
+            tracing::field::display(parsed_token.token_uuid),
+        );
+        span.record(
+            "token_version",
+            tracing::field::display(parsed_token.version.as_i16()),
+        );
 
         let token = self
             .repository
@@ -127,8 +149,13 @@ impl AuthService for PgAuthService {
             .await?;
 
         if !valid {
+            span.record("auth.valid", tracing::field::display(false));
+
             return Err(AuthServiceError::NotFound);
         }
+
+        span.record("auth.valid", tracing::field::display(true));
+        span.record("tenant_uuid", tracing::field::display(token.tenant_uuid));
 
         // Best-effort metadata update; auth success should not depend on this write.
         let _touch_result = self

@@ -9,6 +9,27 @@ openbao_postgres_secret_path="${OPENBAO_POSTGRES_SECRET_PATH:-secret/data/lattic
 dev_tenant_name="${DEV_TENANT_NAME:-Dev Tenant}"
 dev_tenant_uuid="${DEV_TENANT_UUID:-00000000-0000-0000-0000-000000000001}"
 dev_api_token=""
+dev_api_token_file="${DEV_API_TOKEN_FILE:-/app/.dev-api-token}"
+json_api_dev_release="${JSON_API_DEV_RELEASE:-false}"
+cargo_profile_flags=()
+
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+if is_truthy "${json_api_dev_release}"; then
+  cargo_profile_flags+=(--release)
+  echo "JSON API dev mode: building/running with --release"
+else
+  echo "JSON API dev mode: building/running without --release"
+fi
 
 wait_for_openbao() {
   local retries=60
@@ -129,7 +150,7 @@ echo "Running database migrations..."
 DATABASE_URL="${admin_url}" sqlx migrate run --ignore-missing
 
 echo "Ensuring runtime role '${app_role}' exists with RLS-safe privileges..."
-cargo run --quiet --package lattice-app -- \
+cargo run "${cargo_profile_flags[@]}" --quiet --package lattice-app -- \
   db ensure-app-role \
   --database-url "${admin_url}" \
   --role-name "${app_role}" \
@@ -138,7 +159,7 @@ cargo run --quiet --package lattice-app -- \
 echo "Ensuring default dev tenant/token exists..."
 set +e
 tenant_create_output="$(
-  cargo run --quiet --package lattice-app -- \
+  cargo run "${cargo_profile_flags[@]}" --quiet --package lattice-app -- \
     tenant create \
     --database-url "${app_url}" \
     --name "${dev_tenant_name}" \
@@ -158,7 +179,7 @@ fi
 
 set +e
 token_create_output="$(
-  cargo run --quiet --package lattice-app -- \
+  cargo run "${cargo_profile_flags[@]}" --quiet --package lattice-app -- \
     token create \
     --database-url "${app_url}" \
     --tenant-uuid "${dev_tenant_uuid}" \
@@ -177,6 +198,14 @@ fi
 echo "${token_create_output}"
 dev_api_token="$(printf '%s\n' "${token_create_output}" | sed -n 's/^api_token: //p' | tail -n 1)"
 
+if [[ -n "${dev_api_token}" ]]; then
+  printf '%s\n' "${dev_api_token}" > "${dev_api_token_file}"
+  chmod 600 "${dev_api_token_file}" || true
+  echo "Saved dev API token to ${dev_api_token_file}"
+else
+  echo "warning: could not parse api_token from token create output" >&2
+fi
+
 echo "Swagger docs: http://localhost:8698/docs"
 if [[ -n "${dev_api_token}" ]]; then
   echo "Use Authorization header: Bearer ${dev_api_token}"
@@ -191,4 +220,4 @@ exec watchexec \
   --watch Cargo.lock \
   --exts rs,toml,sql \
   --restart -- \
-  cargo run --package lattice-json
+  cargo run "${cargo_profile_flags[@]}" --package lattice-json

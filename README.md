@@ -1047,25 +1047,32 @@ just dev
 ```
 or
 ```bash
-docker compose --profile dev up --build --force-recreate json-api-dev demo
+docker compose --profile dev up --build --force-recreate json-api-dev demo grafana
 ```
 
-This starts PostgreSQL, a dev OpenBao instance, Jaeger, the JSON API, and the browser demo, then auto-runs:
+This starts PostgreSQL, a dev OpenBao instance, Grafana Alloy, Loki, Tempo, Pyroscope, Prometheus, Grafana, the JSON API, and the browser demo, then auto-runs:
 
 - database migrations
 - app role provisioning for RLS
 - loading/provisioning API token pepper from OpenBao
 - creation of a default local dev tenant/token
 
+Set `JSON_API_DEV_RELEASE=true` in `.env` if you want `json-api-dev` to run via `cargo run --release`.
+
 Local URLs:
 
 - Swagger UI: http://localhost:8698/docs
 - OpenAPI JSON: http://localhost:8698/api-doc/openapi.json
+- JSON API Prometheus metrics: http://localhost:8698/metrics
 - OpenBao UI (dev): http://localhost:8200/ui
-- Jaeger UI (dev traces): http://localhost:16686
+- Alloy UI (dev collector): http://localhost:12345
+- Grafana UI (logs + traces + profiles + metrics): http://localhost:3000
+  - default login: `admin` / `admin` (override with `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD`)
+  - auto-provisioned dashboard: `Lattice API Dev Overview` (`/d/lattice-api-dev`)
 
 The dev bootstrap prints the generated API token once, and caches it at
 `.dev-api-token` for reuse in later runs.
+The `scripts/ab-get-load.sh` helper will automatically use this file when present.
 
 Dev OpenBao defaults:
 
