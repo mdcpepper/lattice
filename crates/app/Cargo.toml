@@ -20,6 +20,7 @@ smallvec.workspace = true
 sqlx = { version = "0.8.6", features = ["runtime-tokio-native-tls", "postgres", "uuid"] }
 thiserror.workspace = true
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1.44"
 uuid.workspace = true
 zeroize = "1.8.2"
 
@@ -28,4 +29,3 @@ once_cell.workspace = true
 testcontainers.workspace = true
 testcontainers-modules.workspace = true
 testresult.workspace = true
-

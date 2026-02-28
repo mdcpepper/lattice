@@ -20,10 +20,36 @@ test: test-rust test-extension
 
 dev:
     docker compose up -d --wait postgres
-    docker compose --profile dev up --build --force-recreate json-api-dev demo
+    docker compose --profile dev up --build --force-recreate json-api-dev demo grafana
 
 remove:
     docker compose --profile dev down --volumes --remove-orphans --rmi local
+
+clear-logs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    services=(alloy tempo loki pyroscope prometheus postgres-exporter grafana)
+    volumes=(lattice_alloy_data lattice_tempo_data lattice_loki_data lattice_pyroscope_data lattice_prometheus_data lattice_grafana_data)
+
+    docker compose --profile dev rm -f -s "${services[@]}" >/dev/null 2>&1 || true
+
+    to_remove=()
+    for volume in "${volumes[@]}"; do
+      if docker volume inspect "$volume" >/dev/null 2>&1; then
+        to_remove+=("$volume")
+      fi
+    done
+
+    if [ "${#to_remove[@]}" -gt 0 ]; then
+      docker volume rm "${to_remove[@]}" >/dev/null
+      echo "Cleared observability data: ${to_remove[*]}"
+    else
+      echo "No observability data volumes found."
+    fi
+
+reset-observability: clear-logs
+    docker compose --profile dev up -d --wait tempo loki pyroscope alloy prometheus grafana
+    echo "Observability stack restarted with fresh data."
 
 sqlx *args='':
     #!/usr/bin/env bash

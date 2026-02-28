@@ -1,6 +1,7 @@
 //! Direct Discount Promotions
 
 use sqlx::{Postgres, Transaction, query, query_scalar};
+use tracing::debug;
 use uuid::Uuid;
 
 use crate::domain::promotions::{
@@ -15,6 +16,17 @@ const CREATE_DIRECT_DISCOUNT_PROMOTION_DETAIL_SQL: &str =
 const UPDATE_DIRECT_DISCOUNT_PROMOTION_DETAIL_SQL: &str =
     include_str!("../../sql/direct/update_direct_discount_promotion_detail.sql");
 
+#[tracing::instrument(
+    name = "promotions.direct_repository.insert_direct_discount_promotion",
+    skip(tx, budgets, discount),
+    fields(
+        promotion_uuid = %uuid,
+        discount_type = %discount.to_str(),
+        has_redemption_budget = budgets.redemptions.is_some(),
+        has_monetary_budget = budgets.monetary.is_some()
+    ),
+    err
+)]
 pub(crate) async fn insert_direct_discount_promotion(
     tx: &mut Transaction<'_, Postgres>,
     uuid: PromotionUuid,
@@ -36,9 +48,28 @@ pub(crate) async fn insert_direct_discount_promotion(
         .execute(&mut **tx)
         .await?;
 
+    debug!(
+        promotion_uuid = %uuid,
+        discount_type = %discount.to_str(),
+        has_redemption_budget = budgets.redemptions.is_some(),
+        has_monetary_budget = budgets.monetary.is_some(),
+        "inserted direct discount promotion detail"
+    );
+
     Ok(())
 }
 
+#[tracing::instrument(
+    name = "promotions.direct_repository.update_direct_discount_promotion",
+    skip(tx, budgets, discount),
+    fields(
+        promotion_uuid = %uuid,
+        discount_type = %discount.to_str(),
+        has_redemption_budget = budgets.redemptions.is_some(),
+        has_monetary_budget = budgets.monetary.is_some()
+    ),
+    err
+)]
 pub(crate) async fn update_direct_discount_promotion(
     tx: &mut Transaction<'_, Postgres>,
     uuid: PromotionUuid,
@@ -60,6 +91,12 @@ pub(crate) async fn update_direct_discount_promotion(
         .bind(discount_amount)
         .fetch_one(&mut **tx)
         .await?;
+
+    debug!(
+        promotion_uuid = %uuid,
+        detail_uuid = %returned_uuid,
+        "updated direct discount promotion detail"
+    );
 
     Ok(DirectDiscountDetailUuid::from_uuid(returned_uuid))
 }

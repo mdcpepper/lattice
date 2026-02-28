@@ -53,6 +53,17 @@ pub(crate) struct ProductCreatedResponse {
         (status_code = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error"),
     ),
 )]
+#[tracing::instrument(
+    name = "products.create",
+    skip(json, depot, res),
+    fields(
+        tenant_uuid = tracing::field::Empty,
+        product_uuid = tracing::field::Empty,
+        price = tracing::field::Empty,
+        tags_count = tracing::field::Empty
+    ),
+    err
+)]
 pub(crate) async fn handler(
     json: JsonBody<CreateProductRequest>,
     depot: &mut Depot,
@@ -60,11 +71,19 @@ pub(crate) async fn handler(
 ) -> Result<Json<ProductCreatedResponse>, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
     let tenant = depot.tenant_uuid_or_401()?;
+    let request = json.into_inner();
+
+    let span = tracing::Span::current();
+
+    span.record("tenant_uuid", tracing::field::display(tenant));
+    span.record("product_uuid", tracing::field::display(request.uuid));
+    span.record("price", tracing::field::display(request.price));
+    span.record("tags_count", tracing::field::display(request.tags.len()));
 
     let uuid = state
         .app
         .products
-        .create_product(tenant, json.into_inner().into())
+        .create_product(tenant, request.into())
         .await
         .map_err(into_status_error)?
         .uuid;
@@ -72,6 +91,8 @@ pub(crate) async fn handler(
     res.add_header(LOCATION, format!("/products/{uuid}"), true)
         .or_500("failed to set location header")?
         .status_code(StatusCode::CREATED);
+
+    tracing::info!(product_uuid = %uuid, "created product");
 
     Ok(Json(ProductCreatedResponse { uuid: uuid.into() }))
 }

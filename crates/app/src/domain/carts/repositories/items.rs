@@ -3,6 +3,7 @@
 use jiff::Timestamp;
 use jiff_sqlx::Timestamp as SqlxTimestamp;
 use sqlx::{FromRow, Postgres, Row, Transaction, postgres::PgRow, query, query_as};
+use tracing::debug;
 
 use crate::domain::{
     carts::{
@@ -27,33 +28,69 @@ impl PgCartItemsRepository {
         Self
     }
 
+    #[tracing::instrument(
+        name = "carts.items_repository.get_cart_items",
+        skip(self, tx),
+        fields(cart_uuid = %cart, point_in_time = %point_in_time),
+        err
+    )]
     pub(crate) async fn get_cart_items(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         cart: CartUuid,
         point_in_time: Timestamp,
     ) -> Result<Vec<CartItemRecord>, sqlx::Error> {
-        query_as::<Postgres, CartItemRecord>(GET_CART_ITEMS_SQL)
+        let items = query_as::<Postgres, CartItemRecord>(GET_CART_ITEMS_SQL)
             .bind(cart.into_uuid())
             .bind(SqlxTimestamp::from(point_in_time))
             .fetch_all(&mut **tx)
-            .await
+            .await?;
+        let item_count = items.len();
+
+        debug!(cart_uuid = %cart, item_count, "queried cart items");
+
+        Ok(items)
     }
 
+    #[tracing::instrument(
+        name = "carts.items_repository.create_cart_item",
+        skip(self, tx),
+        fields(
+            cart_uuid = %cart,
+            item_uuid = %item.uuid,
+            product_uuid = %item.product_uuid
+        ),
+        err
+    )]
     pub(crate) async fn create_cart_item(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         cart: CartUuid,
         item: NewCartItem,
     ) -> Result<CartItemRecord, sqlx::Error> {
-        query_as::<Postgres, CartItemRecord>(CREATE_CART_ITEM_SQL)
+        let created = query_as::<Postgres, CartItemRecord>(CREATE_CART_ITEM_SQL)
             .bind(item.uuid.into_uuid())
             .bind(cart.into_uuid())
             .bind(item.product_uuid.into_uuid())
             .fetch_one(&mut **tx)
-            .await
+            .await?;
+
+        debug!(
+            cart_uuid = %cart,
+            item_uuid = %created.uuid,
+            product_uuid = %created.product_uuid,
+            "created cart item"
+        );
+
+        Ok(created)
     }
 
+    #[tracing::instrument(
+        name = "carts.items_repository.delete_cart_item",
+        skip(self, tx),
+        fields(cart_uuid = %cart, item_uuid = %item),
+        err
+    )]
     pub(crate) async fn delete_cart_item(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -66,6 +103,8 @@ impl PgCartItemsRepository {
             .execute(&mut **tx)
             .await?
             .rows_affected();
+
+        debug!(cart_uuid = %cart, item_uuid = %item, rows_affected, "deleted cart item rows");
 
         Ok(rows_affected)
     }

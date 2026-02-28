@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use jiff::Timestamp;
 use mockall::automock;
+use tracing::{info, warn};
 
 use crate::{
     database::Db,
@@ -37,6 +38,16 @@ impl PgCartsService {
 
 #[async_trait]
 impl CartsService for PgCartsService {
+    #[tracing::instrument(
+        name = "carts.service.get_cart",
+        skip(self),
+        fields(
+            tenant_uuid = %tenant,
+            cart_uuid = %cart,
+            point_in_time = %point_in_time
+        ),
+        err
+    )]
     async fn get_cart(
         &self,
         tenant: TenantUuid,
@@ -54,11 +65,19 @@ impl CartsService for PgCartsService {
 
         tx.commit().await?;
 
+        let item_count = items.len();
         cart.items.extend(items);
+        info!(cart_uuid = %cart.uuid, item_count, "fetched cart");
 
         Ok(cart)
     }
 
+    #[tracing::instrument(
+        name = "carts.service.create_cart",
+        skip(self),
+        fields(tenant_uuid = %tenant, cart_uuid = %cart.uuid),
+        err
+    )]
     async fn create_cart(
         &self,
         tenant: TenantUuid,
@@ -70,9 +89,17 @@ impl CartsService for PgCartsService {
 
         tx.commit().await?;
 
+        info!(cart_uuid = %created.uuid, "created cart");
+
         Ok(created)
     }
 
+    #[tracing::instrument(
+        name = "carts.service.delete_cart",
+        skip(self),
+        fields(tenant_uuid = %tenant, cart_uuid = %cart),
+        err
+    )]
     async fn delete_cart(
         &self,
         tenant: TenantUuid,
@@ -83,14 +110,28 @@ impl CartsService for PgCartsService {
         let rows_affected = self.carts.delete_cart(&mut tx, cart).await?;
 
         if rows_affected == 0 {
+            warn!("cart did not exist for deletion");
             return Err(CartsServiceError::NotFound);
         }
 
         tx.commit().await?;
 
+        info!(cart_uuid = %cart, rows_affected, "deleted cart");
+
         Ok(())
     }
 
+    #[tracing::instrument(
+        name = "carts.service.add_item",
+        skip(self),
+        fields(
+            tenant_uuid = %tenant,
+            cart_uuid = %cart,
+            item_uuid = %item.uuid,
+            product_uuid = %item.product_uuid
+        ),
+        err
+    )]
     async fn add_item(
         &self,
         tenant: TenantUuid,
@@ -103,9 +144,26 @@ impl CartsService for PgCartsService {
 
         tx.commit().await?;
 
+        info!(
+            cart_uuid = %cart,
+            item_uuid = %item.uuid,
+            product_uuid = %item.product_uuid,
+            "added cart item"
+        );
+
         Ok(item)
     }
 
+    #[tracing::instrument(
+        name = "carts.service.remove_item",
+        skip(self),
+        fields(
+            tenant_uuid = %tenant,
+            cart_uuid = %cart,
+            item_uuid = %item
+        ),
+        err
+    )]
     async fn remove_item(
         &self,
         tenant: TenantUuid,
@@ -117,10 +175,13 @@ impl CartsService for PgCartsService {
         let rows_affected = self.items.delete_cart_item(&mut tx, cart, item).await?;
 
         if rows_affected == 0 {
+            warn!("cart item did not exist for deletion");
             return Err(CartsServiceError::NotFound);
         }
 
         tx.commit().await?;
+
+        info!(cart_uuid = %cart, item_uuid = %item, rows_affected, "removed cart item");
 
         Ok(())
     }

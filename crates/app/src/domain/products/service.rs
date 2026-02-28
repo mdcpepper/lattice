@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use jiff::Timestamp;
 use mockall::automock;
+use tracing::{info, warn};
 
 use crate::{
     database::Db,
@@ -36,6 +37,12 @@ impl PgProductsService {
     }
 
     #[cfg(test)]
+    #[tracing::instrument(
+        name = "products.service.list_product_tags",
+        skip(self),
+        fields(tenant_uuid = %tenant, product_uuid = %product),
+        err
+    )]
     async fn list_product_tags(
         &self,
         tenant: TenantUuid,
@@ -53,6 +60,12 @@ impl PgProductsService {
 
 #[async_trait]
 impl ProductsService for PgProductsService {
+    #[tracing::instrument(
+        name = "products.service.list_products",
+        skip(self),
+        fields(tenant_uuid = %tenant, point_in_time = %point_in_time),
+        err
+    )]
     async fn list_products(
         &self,
         tenant: TenantUuid,
@@ -61,12 +74,25 @@ impl ProductsService for PgProductsService {
         let mut tx = self.db.begin_tenant_transaction(tenant).await?;
 
         let products = self.products.list_products(&mut tx, point_in_time).await?;
+        let product_count = products.len();
 
         tx.commit().await?;
+
+        info!(product_count, "listed products");
 
         Ok(products)
     }
 
+    #[tracing::instrument(
+        name = "products.service.get_product",
+        skip(self),
+        fields(
+            tenant_uuid = %tenant,
+            product_uuid = %product,
+            point_in_time = %point_in_time
+        ),
+        err
+    )]
     async fn get_product(
         &self,
         tenant: TenantUuid,
@@ -82,9 +108,22 @@ impl ProductsService for PgProductsService {
 
         tx.commit().await?;
 
+        info!(product_uuid = %product.uuid, "fetched product");
+
         Ok(product)
     }
 
+    #[tracing::instrument(
+        name = "products.service.create_product",
+        skip(self),
+        fields(
+            tenant_uuid = %tenant,
+            product_uuid = %product.uuid,
+            price = product.price,
+            tags_count = product.tags.len()
+        ),
+        err
+    )]
     async fn create_product(
         &self,
         tenant: TenantUuid,
@@ -105,9 +144,23 @@ impl ProductsService for PgProductsService {
 
         tx.commit().await?;
 
+        info!(product_uuid = %created.uuid, price = created.price, "created product");
+
         Ok(created)
     }
 
+    #[tracing::instrument(
+        name = "products.service.update_product",
+        skip(self),
+        fields(
+            tenant_uuid = %tenant,
+            product_uuid = %product,
+            product_details_uuid = ?update.uuid,
+            price = update.price,
+            tags_count = update.tags.len()
+        ),
+        err
+    )]
     async fn update_product(
         &self,
         tenant: TenantUuid,
@@ -134,9 +187,17 @@ impl ProductsService for PgProductsService {
 
         tx.commit().await?;
 
+        info!(product_uuid = %updated.uuid, price = updated.price, "updated product");
+
         Ok(updated)
     }
 
+    #[tracing::instrument(
+        name = "products.service.delete_product",
+        skip(self),
+        fields(tenant_uuid = %tenant, product_uuid = %product),
+        err
+    )]
     async fn delete_product(
         &self,
         tenant: TenantUuid,
@@ -147,10 +208,14 @@ impl ProductsService for PgProductsService {
         let rows_affected = self.products.delete_product(&mut tx, product).await?;
 
         if rows_affected == 0 {
+            warn!("product did not exist for deletion");
+
             return Err(ProductsServiceError::NotFound);
         }
 
         tx.commit().await?;
+
+        info!(rows_affected, "deleted product");
 
         Ok(())
     }

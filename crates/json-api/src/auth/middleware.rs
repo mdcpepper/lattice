@@ -10,21 +10,42 @@ use lattice_app::auth::AuthServiceError;
 use crate::{extensions::*, state::State};
 
 #[salvo::handler]
+#[tracing::instrument(
+    name = "auth.middleware",
+    skip(req, depot, res, ctrl),
+    fields(
+        auth.token_present = tracing::field::Empty,
+        auth.result = tracing::field::Empty,
+        tenant_uuid = tracing::field::Empty
+    )
+)]
 pub(crate) async fn handler(
     req: &mut Request,
     depot: &mut Depot,
     res: &mut Response,
     ctrl: &mut FlowCtrl,
 ) {
+    let span = tracing::Span::current();
+
     let Some(token) = extract_bearer_token(req) else {
+        span.record("auth.token_present", tracing::field::display(false));
+        span.record(
+            "auth.result",
+            tracing::field::display("missing_or_invalid_header"),
+        );
+
         res.render(StatusError::unauthorized().brief("Missing or invalid Authorization header"));
 
         return;
     };
 
+    span.record("auth.token_present", tracing::field::display(true));
+
     let state = match depot.obtain::<Arc<State>>() {
         Ok(state) => state,
         Err(_error) => {
+            span.record("auth.result", tracing::field::display("missing_state"));
+
             res.render(StatusError::internal_server_error());
 
             return;
@@ -34,11 +55,14 @@ pub(crate) async fn handler(
     let tenant_uuid = match state.app.auth.authenticate_bearer(token).await {
         Ok(tenant_uuid) => tenant_uuid,
         Err(AuthServiceError::NotFound) => {
+            span.record("auth.result", tracing::field::display("invalid_token"));
+
             res.render(StatusError::unauthorized().brief("Invalid API token"));
 
             return;
         }
         Err(AuthServiceError::Sql(source)) => {
+            span.record("auth.result", tracing::field::display("sql_error"));
             error!("failed to validate api token: {source}");
 
             res.render(StatusError::internal_server_error());
@@ -46,6 +70,7 @@ pub(crate) async fn handler(
             return;
         }
         Err(AuthServiceError::Token(source)) => {
+            span.record("auth.result", tracing::field::display("token_error"));
             error!("failed to process api token: {source}");
 
             res.render(StatusError::internal_server_error());
@@ -53,6 +78,7 @@ pub(crate) async fn handler(
             return;
         }
         Err(AuthServiceError::OpenBao(source)) => {
+            span.record("auth.result", tracing::field::display("openbao_error"));
             error!("OpenBao error during token authentication: {source}");
 
             res.render(StatusError::internal_server_error());
@@ -60,6 +86,9 @@ pub(crate) async fn handler(
             return;
         }
     };
+
+    span.record("tenant_uuid", tracing::field::display(tenant_uuid));
+    span.record("auth.result", tracing::field::display("ok"));
 
     depot.insert_tenant_uuid(tenant_uuid);
 
@@ -117,7 +146,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_missing_authorization_header_returns_401() -> TestResult {
+    async fn test_missing_authorisation_header_returns_401() -> TestResult {
         let mut auth = MockAuthService::new();
 
         auth.expect_authenticate_bearer().never();
@@ -132,7 +161,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_non_bearer_authorization_header_returns_401() -> TestResult {
+    async fn test_non_bearer_authorisation_header_returns_401() -> TestResult {
         let mut auth = MockAuthService::new();
 
         auth.expect_authenticate_bearer().never();

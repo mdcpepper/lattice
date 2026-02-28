@@ -24,6 +24,16 @@ pub(crate) struct ProductsResponse {
     summary = "List Products",
     security(("bearer_auth" = []))
 )]
+#[tracing::instrument(
+    name = "products.list",
+    skip(at, depot),
+    fields(
+        tenant_uuid = tracing::field::Empty,
+        point_in_time = tracing::field::Empty,
+        product_count = tracing::field::Empty
+    ),
+    err
+)]
 pub(crate) async fn handler(
     at: QueryParam<String, false>,
     depot: &mut Depot,
@@ -32,12 +42,23 @@ pub(crate) async fn handler(
     let tenant = depot.tenant_uuid_or_401()?;
     let point_in_time = at.into_point_in_time()?;
 
+    let span = tracing::Span::current();
+
+    span.record("tenant_uuid", tracing::field::display(tenant));
+    span.record("point_in_time", tracing::field::display(point_in_time));
+
     let products = state
         .app
         .products
         .list_products(tenant, point_in_time)
         .await
         .or_500("failed to fetch products")?;
+
+    let product_count = products.len();
+
+    span.record("product_count", tracing::field::display(product_count));
+
+    tracing::info!(product_count, "listed products");
 
     Ok(Json(ProductsResponse {
         products: products.into_iter().map(Into::into).collect(),

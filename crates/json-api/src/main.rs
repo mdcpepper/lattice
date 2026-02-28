@@ -13,14 +13,13 @@ use salvo::{
     trailing_slash::remove_slash,
 };
 use tracing::{error, info};
-use tracing_subscriber::EnvFilter;
 
 use lattice_app::{
     auth::{OpenBaoClient, OpenBaoConfig},
     context::AppContext,
 };
 
-use crate::{config::ServerConfig, state::State};
+use crate::{config::ServerConfig, observability::Observability, state::State};
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
@@ -34,6 +33,7 @@ mod carts;
 mod config;
 mod extensions;
 mod healthcheck;
+mod observability;
 mod products;
 mod promotions;
 mod router;
@@ -54,7 +54,7 @@ pub async fn main() {
     let config = ServerConfig::load().unwrap_or_else(|e| {
         #[expect(
             clippy::print_stderr,
-            reason = "logging not initialized yet, must use eprintln for config errors"
+            reason = "logging not initialised yet, must use eprintln for config errors"
         )]
         {
             eprintln!("Configuration error: {e}");
@@ -63,12 +63,17 @@ pub async fn main() {
         process::exit(1);
     });
 
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level)),
-        )
-        .init();
+    let observability = Observability::init(&config).unwrap_or_else(|source| {
+        #[expect(
+            clippy::print_stderr,
+            reason = "logging may be unavailable if subscriber initialisation fails"
+        )]
+        {
+            eprintln!("Observability initialisation error: {source}");
+        }
+
+        process::exit(1);
+    });
 
     let addr = config.socket_addr();
 
@@ -78,15 +83,15 @@ pub async fn main() {
     let listener = TcpListener::new(addr).bind().await;
 
     let openbao = OpenBaoClient::new(OpenBaoConfig {
-        addr: config.openbao_addr,
-        token: config.openbao_token,
-        transit_key: config.openbao_transit_key,
+        addr: config.auth.addr,
+        token: config.auth.token,
+        transit_key: config.auth.transit_key,
     });
 
-    let app = match AppContext::from_database_url(&config.database_url, openbao).await {
+    let app = match AppContext::from_database_url(&config.database.database_url, openbao).await {
         Ok(app) => app,
         Err(init_error) => {
-            error!("failed to initialize app context: {init_error}");
+            error!("failed to initialise app context: {init_error}");
 
             process::exit(1);
         }
@@ -97,9 +102,11 @@ pub async fn main() {
         .push(router::app_router());
 
     let router = Router::new()
+        .hoop(observability::request_logging)
         .hoop(CatchPanic::new())
         .hoop(remove_slash())
         .hoop(inject(State::from_app_context(app)))
+        .push(Router::with_path("metrics").get(observability::metrics_handler))
         .push(Router::with_path("healthcheck").get(healthcheck::handler))
         .push(api_router);
 
@@ -125,4 +132,6 @@ pub async fn main() {
     });
 
     server.serve(router).await;
+
+    observability.shutdown();
 }

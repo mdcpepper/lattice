@@ -19,19 +19,36 @@ use crate::{carts::errors::into_status_error, extensions::*, state::State};
         (status_code = StatusCode::INTERNAL_SERVER_ERROR, description = "Internal Server Error"),
     ),
 )]
+#[tracing::instrument(
+    name = "carts.delete",
+    skip(cart, depot),
+    fields(
+        tenant_uuid = tracing::field::Empty,
+        cart_uuid = tracing::field::Empty
+    ),
+    err
+)]
 pub(crate) async fn handler(
     cart: PathParam<Uuid>,
     depot: &mut Depot,
 ) -> Result<StatusCode, StatusError> {
     let state = depot.obtain_or_500::<Arc<State>>()?;
     let tenant = depot.tenant_uuid_or_401()?;
+    let cart = cart.into_inner();
+
+    let span = tracing::Span::current();
+
+    span.record("tenant_uuid", tracing::field::display(tenant));
+    span.record("cart_uuid", tracing::field::display(cart));
 
     state
         .app
         .carts
-        .delete_cart(tenant, cart.into_inner().into())
+        .delete_cart(tenant, cart.into())
         .await
         .map_err(into_status_error)?;
+
+    tracing::info!(cart_uuid = %cart, "deleted cart");
 
     Ok(StatusCode::OK)
 }
